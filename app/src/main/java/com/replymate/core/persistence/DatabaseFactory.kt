@@ -13,7 +13,7 @@ object DatabaseFactory {
         SQLiteDatabase.loadLibs(context)
         val passphrase = DatabaseKeyProvider(context).databasePassphrase()
         return Room.databaseBuilder(context, ReplyMateDatabase::class.java, "replymate.db")
-            .openHelperFactory(SupportFactory(passphrase, null, true)).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+            .openHelperFactory(SupportFactory(passphrase, null, true)).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
     private val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
@@ -39,6 +39,22 @@ object DatabaseFactory {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_records_contactId_category_status ON memory_records (contactId, category, status)")
             db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_records_content ON memory_records (content)")
             db.execSQL("CREATE TABLE IF NOT EXISTS running_contexts (conversationId TEXT NOT NULL, context TEXT NOT NULL, updatedAtEpochMs INTEGER NOT NULL, PRIMARY KEY(conversationId))")
+        }
+    }
+
+    private val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE memory_records ADD COLUMN sourceConversationId TEXT")
+            db.execSQL("ALTER TABLE memory_records ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0")
+            db.execSQL("ALTER TABLE memory_records ADD COLUMN explanation TEXT NOT NULL DEFAULT ''")
+            db.execSQL("CREATE TABLE IF NOT EXISTS memory_candidates (id TEXT NOT NULL, contactId TEXT NOT NULL, conversationId TEXT NOT NULL, category TEXT NOT NULL, value TEXT NOT NULL, supportingMessageId TEXT, explanation TEXT NOT NULL, confidence REAL NOT NULL, status TEXT NOT NULL, createdAtEpochMs INTEGER NOT NULL, updatedAtEpochMs INTEGER NOT NULL, PRIMARY KEY(id))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_candidates_contactId_status ON memory_candidates (contactId, status)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_candidates_conversationId ON memory_candidates (conversationId)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS memory_audit_events (id TEXT NOT NULL, contactId TEXT NOT NULL, conversationId TEXT, memoryId TEXT, action TEXT NOT NULL, detail TEXT NOT NULL, occurredAtEpochMs INTEGER NOT NULL, PRIMARY KEY(id))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_audit_events_contactId_occurredAtEpochMs ON memory_audit_events (contactId, occurredAtEpochMs)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_audit_events_memoryId ON memory_audit_events (memoryId)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS summary_versions (id TEXT NOT NULL, conversationId TEXT NOT NULL, summary TEXT NOT NULL, version INTEGER NOT NULL, sourceThroughMessageId TEXT, createdAtEpochMs INTEGER NOT NULL, PRIMARY KEY(id))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_summary_versions_conversationId ON summary_versions (conversationId)")
         }
     }
 

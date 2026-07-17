@@ -18,6 +18,7 @@ import com.replymate.core.settings.AppTheme
             SettingRow("Personalization", "Profile, global writing style, custom prompt", onPersonalization)
             SettingRow("Gemini", if (geminiConfigured) "API key configured on this device" else "API key not configured", onGeminiSettings)
             SettingRow("AI Playground", "Internal prompt, memory, and generation test tool", onPlayground)
+            SettingRow("Memory Inspector", "Developer tool — select a Playground conversation", onPlayground)
             SettingRow("Notification access", "Configure through Android system settings", {})
             SettingRow("Notification behavior", "Available in a later slice", {})
             SettingRow("Memory management", "Available in a later slice", {})

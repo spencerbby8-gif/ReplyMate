@@ -29,8 +29,8 @@ class ConversationRepository(private val dao: ConversationDao) {
         val entity = ConversationMessageEntity(UUID.randomUUID().toString(), conversationId, direction.name, body.trim(), occurredAt)
         dao.insertMessage(entity); return entity.toModel()
     }
-    suspend fun saveMemory(contactId: String, category: MemoryCategory, content: String, priority: Int = 50, status: MemoryStatus = MemoryStatus.ACTIVE, sourceMessageId: String? = null): MemoryRecord {
-        val entity = MemoryRecordEntity(UUID.randomUUID().toString(), contactId, category.name, content.trim(), priority.coerceIn(0, 100), status.name, sourceMessageId)
+    suspend fun saveMemory(contactId: String, category: MemoryCategory, content: String, priority: Int = 50, status: MemoryStatus = MemoryStatus.ACTIVE, sourceMessageId: String? = null, sourceConversationId: String? = null, confidence: Float = 1f, explanation: String = "User-created memory"): MemoryRecord {
+        val entity = MemoryRecordEntity(UUID.randomUUID().toString(), contactId, category.name, content.trim(), priority.coerceIn(0, 100), status.name, sourceMessageId, sourceConversationId, confidence.coerceIn(0f, 1f), explanation)
         dao.saveMemory(entity); return entity.toModel()
     }
     suspend fun loadMemory(contactId: String, conversationId: String, policy: MemoryRetrievalPolicy = MemoryRetrievalPolicy()): MemoryContext {
@@ -44,10 +44,13 @@ class ConversationRepository(private val dao: ConversationDao) {
             dao.runningContext(conversationId)?.context, newest)
     }
     suspend fun saveUpdatePlan(plan: MemoryUpdatePlan) { dao.saveRunningContext(RunningContextEntity(plan.conversationId, plan.updatedRunningContext)); plan.summaryCandidate?.let { dao.saveSummary(ConversationSummaryEntity(plan.conversationId, it)) }; plan.candidates.forEach { dao.saveMemory(it.toEntity()) } }
+    suspend fun editMemory(record: MemoryRecord, newValue: String): MemoryRecord { val updated = record.copy(content = newValue.trim(), updatedAtEpochMs = System.currentTimeMillis()); dao.saveMemory(updated.toEntity()); return updated }
+    suspend fun editSummary(conversationId: String, value: String) = dao.saveSummary(ConversationSummaryEntity(conversationId, value.trim()))
+    suspend fun editRunningContext(conversationId: String, value: String) = dao.saveRunningContext(RunningContextEntity(conversationId, value.trim()))
     suspend fun search(query: String): LocalSearchResult = LocalSearchResult(dao.searchContacts(query).map { it.toModel() }, dao.searchConversations(query).map { it.toModel() }, dao.searchMemory(query).map { it.toModel() })
 }
 private fun ContactEntity.toModel() = Contact(id, MessagingPlatform.valueOf(platform), platformIdentifier, displayName, nickname, relationship, personality, communicationStyle)
 private fun ConversationEntity.toModel() = Conversation(id, contactId, MessagingPlatform.valueOf(platform), platformConversationIdentifier, ConversationLifecycle.valueOf(lifecycle))
 private fun ConversationMessageEntity.toModel() = ConversationMessage(id, conversationId, MessageDirection.valueOf(direction), body, occurredAtEpochMs)
-private fun MemoryRecordEntity.toModel() = MemoryRecord(id, contactId, MemoryCategory.valueOf(category), content, priority, MemoryStatus.valueOf(status), sourceMessageId)
-private fun MemoryRecord.toEntity() = MemoryRecordEntity(id, contactId, category.name, content, priority, status.name, sourceMessageId)
+private fun MemoryRecordEntity.toModel() = MemoryRecord(id, contactId, MemoryCategory.valueOf(category), content, priority, MemoryStatus.valueOf(status), sourceMessageId, sourceConversationId, confidence, explanation, createdAtEpochMs, updatedAtEpochMs)
+private fun MemoryRecord.toEntity() = MemoryRecordEntity(id, contactId, category.name, content, priority, status.name, sourceMessageId, sourceConversationId, confidence, explanation, createdAtEpochMs, updatedAtEpochMs)

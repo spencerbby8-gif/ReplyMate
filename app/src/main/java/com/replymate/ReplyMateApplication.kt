@@ -24,6 +24,7 @@ class ReplyMateApplication : Application() {
     lateinit var playground: PlaygroundRepository; private set
     lateinit var conversations: ConversationRepository; private set
     lateinit var conversationService: ConversationService; private set
+    lateinit var memoryInspector: MemoryInspectorRepository; private set
     lateinit var playgroundGeneration: PlaygroundGenerationService; private set
 
     override fun onCreate() {
@@ -40,7 +41,8 @@ class ReplyMateApplication : Application() {
         val registry = AiProviderRegistry(setOf(GeminiApiClient(diagnostics)))
         aiService = AiService(apiKeys, networkMonitor, registry, diagnostics)
         playgroundGeneration = PlaygroundGenerationService(apiKeys, networkMonitor, registry, diagnostics)
-        conversationService = ConversationService(conversations, MemoryUpdatePlanner(), diagnostics)
+        memoryInspector = MemoryInspectorRepository(database.memoryInspectorDao(), conversations)
+        conversationService = ConversationService(conversations, MemoryUpdatePlanner(), diagnostics, memoryInspector)
         promptPipeline = PromptPreparationPipeline(PromptAssembler(), ConservativeTokenCounter(), diagnostics)
     }
 }

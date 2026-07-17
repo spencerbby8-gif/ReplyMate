@@ -24,7 +24,7 @@ import java.util.UUID
     val scope = rememberCoroutineScope(); val contacts by app.playground.contacts.collectAsState(initial = emptyList())
     var selected by remember { mutableStateOf(PlaygroundContact(id = "")) }; var testMessage by remember { mutableStateOf("") }
     var activeContact by remember { mutableStateOf<Contact?>(null) }; var activeConversation by remember { mutableStateOf<Conversation?>(null) }; var retrievedMemory by remember { mutableStateOf<MemoryContext?>(null) }
-    var prepared by remember { mutableStateOf<PreparedPrompt?>(null) }; var outcome by remember { mutableStateOf<PlaygroundGenerationOutcome?>(null) }
+    var prepared by remember { mutableStateOf<PreparedPrompt?>(null) }; var showInspector by remember { mutableStateOf(false) }; var outcome by remember { mutableStateOf<PlaygroundGenerationOutcome?>(null) }
     val generations by app.playground.generations(selected.id).collectAsState(initial = emptyList())
     val network by app.networkMonitor.status.collectAsState()
     fun request() = selected.toPromptRequest(personalization, testMessage, retrievedMemory)
@@ -33,10 +33,10 @@ import java.util.UUID
         selected = app.playground.save(selected)
         val pair = app.conversationService.createOrOpen(MessagingPlatform.PLAYGROUND, "playground:${selected.id}", selected.name, "playground-conversation:${selected.id}", selected.nickname, selected.relationship, selected.personality, selected.communicationStyle)
         activeContact = pair.first; activeConversation = pair.second
-        selected.conversationSummary.takeIf { it.isNotBlank() }?.let { app.conversations.saveMemory(pair.first.id, MemoryCategory.LONG_TERM_MEMORY, "Conversation summary: $it", 80) }
-        selected.importantFacts.lines().filter { it.isNotBlank() }.forEach { app.conversations.saveMemory(pair.first.id, MemoryCategory.IMPORTANT_FACT, it, 70) }
-        selected.preferences.lines().filter { it.isNotBlank() }.forEach { app.conversations.saveMemory(pair.first.id, MemoryCategory.PREFERENCE, it, 65) }
-        selected.longTermMemory.lines().filter { it.isNotBlank() }.forEach { app.conversations.saveMemory(pair.first.id, MemoryCategory.LONG_TERM_MEMORY, it, 60) }
+        selected.conversationSummary.takeIf { it.isNotBlank() }?.let { app.memoryInspector.propose(pair.first.id, pair.second.id, MemoryCategory.LONG_TERM_MEMORY, "Conversation summary: $it", null, "User entered this Playground summary", 1f) }
+        selected.importantFacts.lines().filter { it.isNotBlank() }.forEach { app.memoryInspector.propose(pair.first.id, pair.second.id, MemoryCategory.IMPORTANT_FACT, it, null, "User entered this Playground fact", 1f) }
+        selected.preferences.lines().filter { it.isNotBlank() }.forEach { app.memoryInspector.propose(pair.first.id, pair.second.id, MemoryCategory.PREFERENCE, it, null, "User entered this Playground preference", 1f) }
+        selected.longTermMemory.lines().filter { it.isNotBlank() }.forEach { app.memoryInspector.propose(pair.first.id, pair.second.id, MemoryCategory.LONG_TERM_MEMORY, it, null, "User entered this Playground note", 1f) }
         retrievedMemory = app.conversationService.memoryForGeneration(pair.first.id, pair.second.id)
     }
     fun simulateIncoming() = scope.launch {
@@ -54,6 +54,7 @@ import java.util.UUID
             is PlaygroundGenerationOutcome.Failure -> outcome = result
         } }
     }
+    if (showInspector && activeContact != null && activeConversation != null) { MemoryInspectorScreen(app, activeContact!!.id, activeConversation!!.id, onBack = { showInspector = false }); return }
     Scaffold(topBar = { TopAppBar(title = { Text("AI Playground") }, navigationIcon = { TextButton(onClick = onBack) { Text("Back") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Development tool", style = MaterialTheme.typography.titleMedium); Text("Playground contacts and generations are isolated from real messaging. Nothing here sends a message.", style = MaterialTheme.typography.bodySmall)
@@ -65,7 +66,7 @@ import java.util.UUID
                 PlaygroundContactEditor(selected) { selected = it; prepared = null }
             }
             Section("Memory editor") { MemoryEditor(selected) { selected = it; prepared = null }; if (activeConversation != null) OutlinedButton(onClick = ::simulateIncoming) { Text("Simulate incoming message") } }
-            retrievedMemory?.let { MemoryInspection(it) }
+            retrievedMemory?.let { MemoryInspection(it); OutlinedButton(onClick = { showInspector = true }) { Text("Open Memory Inspector") } }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = ::prepare) { Text("Build prompt") }; Button(onClick = ::generate, enabled = testMessage.isNotBlank() && (prepared?.fitsBudget != false)) { Text("Generate in Playground") } }
             prepared?.let { PromptPreview(it) }
             PlaygroundOutcome(outcome, onRetry = ::generate)
