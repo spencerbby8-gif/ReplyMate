@@ -6,6 +6,8 @@ import com.replymate.core.network.NetworkMonitor
 import com.replymate.core.conversation.*
 import com.replymate.core.platform.*
 import com.replymate.core.draft.*
+import com.replymate.core.diagnostics.DiagnosticsService
+import com.replymate.core.diagnostics.PerformanceMonitor
 import com.replymate.core.persistence.DatabaseFactory
 import com.replymate.core.persistence.PersonalizationRepository
 import com.replymate.core.persistence.PlaygroundRepository
@@ -33,6 +35,8 @@ class ReplyMateApplication : Application() {
     lateinit var platformEvents: PlatformEventQueue; private set
     lateinit var drafts: DraftRepository; private set
     lateinit var draftGeneration: DraftGenerationService; private set
+    lateinit var diagnosticsService: DiagnosticsService; private set
+    val performanceMonitor = PerformanceMonitor()
 
     override fun onCreate() {
         super.onCreate()
@@ -57,6 +61,7 @@ class ReplyMateApplication : Application() {
         val resolver = ContactResolver(conversationService)
         drafts = DraftRepository(database.draftDao())
         draftGeneration = DraftGenerationService(conversationService, personalization, aiProviderSettings, reasoningPipeline, drafts)
+        diagnosticsService = DiagnosticsService(this, database, eventQueue, drafts, aiProviderSettings, performanceMonitor)
         notificationPipeline = NotificationProcessingPipeline(EventValidator(), PlatformManager(setOf(TelegramPlatformAdapter(), WhatsAppPlatformAdapter())), eventQueue, EventDispatcher(eventQueue, resolver, ConversationResolver(conversationService), conversationService, draftGeneration))
     }
 }

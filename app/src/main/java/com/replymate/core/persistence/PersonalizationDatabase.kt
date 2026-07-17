@@ -112,6 +112,11 @@ data class MemoryRecordEntity(@PrimaryKey val id: String, val contactId: String,
     @Query("SELECT * FROM contacts WHERE id = :id") suspend fun contactById(id: String): ContactEntity?
     @Query("SELECT * FROM contacts WHERE displayName LIKE '%' || :query || '%' OR nickname LIKE '%' || :query || '%' ORDER BY displayName") suspend fun searchContacts(query: String): List<ContactEntity>
     @Query("SELECT * FROM contacts WHERE platform = :platform ORDER BY updatedAtEpochMs DESC") fun observeContacts(platform: String): Flow<List<ContactEntity>>
+    @Query("SELECT COUNT(*) FROM contacts") suspend fun contactCount(): Int
+    @Query("SELECT COUNT(*) FROM conversations") suspend fun conversationCount(): Int
+    @Query("SELECT COUNT(*) FROM memory_records") suspend fun memoryCount(): Int
+    @Query("SELECT COUNT(*) FROM contacts c LEFT JOIN conversations v ON c.id = v.contactId WHERE v.id IS NULL") suspend fun orphanContactCount(): Int
+    @Query("SELECT COUNT(*) FROM memory_records m LEFT JOIN contacts c ON m.contactId = c.id WHERE c.id IS NULL") suspend fun orphanMemoryCount(): Int
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertConversation(value: ConversationEntity)
     @Query("SELECT * FROM conversations WHERE platform = :platform AND platformConversationIdentifier = :identifier LIMIT 1") suspend fun conversationByPlatformIdentifier(platform: String, identifier: String): ConversationEntity?
     @Query("SELECT * FROM conversations WHERE contactId = :contactId ORDER BY updatedAtEpochMs DESC") fun observeConversations(contactId: String): Flow<List<ConversationEntity>>
@@ -150,6 +155,7 @@ data class SummaryVersionEntity(@PrimaryKey val id: String, val conversationId: 
     @Query("SELECT COALESCE(MAX(version), 0) FROM summary_versions WHERE conversationId = :conversationId") suspend fun latestSummaryVersion(conversationId: String): Int
     @Query("SELECT COUNT(*) FROM memory_records WHERE contactId = :contactId AND status = 'ACTIVE'") suspend fun activeCount(contactId: String): Int
     @Query("SELECT COUNT(*) FROM memory_candidates WHERE contactId = :contactId AND status = 'PENDING_REVIEW'") suspend fun pendingCount(contactId: String): Int
+    @Query("SELECT COUNT(*) FROM memory_candidates WHERE status = 'PENDING_REVIEW'") suspend fun pendingCountAll(): Int
     @Query("SELECT COUNT(*) FROM memory_candidates WHERE contactId = :contactId AND status = 'REJECTED'") suspend fun rejectedCount(contactId: String): Int
     @Query("SELECT COUNT(*) FROM conversation_messages WHERE conversationId = :conversationId") suspend fun messageCount(conversationId: String): Int
     @Query("SELECT COUNT(*) FROM summary_versions WHERE conversationId = :conversationId") suspend fun summaryCount(conversationId: String): Int
@@ -163,11 +169,14 @@ data class PlatformEventEntity(@PrimaryKey val eventId: String, val platform: St
     @Query("UPDATE platform_events SET status = :status, result = :result, processingDurationMs = :duration, retryCount = :retryCount, localContactId = :contactId, localConversationId = :conversationId, updatedAtEpochMs = :updatedAt WHERE eventId = :eventId") suspend fun update(eventId: String, status: String, result: String?, duration: Long?, retryCount: Int, contactId: String?, conversationId: String?, updatedAt: Long = System.currentTimeMillis())
     @Query("SELECT * FROM platform_events ORDER BY createdAtEpochMs DESC LIMIT :limit") fun observeHistory(limit: Int = 200): Flow<List<PlatformEventEntity>>
     @Query("SELECT COUNT(*) FROM platform_events WHERE status = :status") suspend fun count(status: String): Int
+    @Query("SELECT platform, COUNT(*) AS count FROM platform_events GROUP BY platform") suspend fun platformDistribution(): List<PlatformCount>
+    @Query("SELECT AVG(processingDurationMs) FROM platform_events WHERE processingDurationMs IS NOT NULL") suspend fun averageProcessingDuration(): Double?
 }
 
 @Entity(tableName = "reply_drafts", indices = [androidx.room.Index(value=["status","createdAtEpochMs"]), androidx.room.Index("conversationId"), androidx.room.Index("contactId")])
 data class ReplyDraftEntity(@PrimaryKey val id:String,val platform:String,val contactId:String,val conversationId:String,val originalMessage:String,val reply:String,val intent:String,val emotion:String,val strategy:String,val qualityScore:Float,val tokenEstimate:Int,val generationDurationMs:Long,val provider:String,val model:String,val status:String,val promptText:String,val correctiveRegeneration:Boolean,val error:String?=null,val createdAtEpochMs:Long=System.currentTimeMillis(),val updatedAtEpochMs:Long=System.currentTimeMillis())
 @Entity(tableName = "draft_versions", indices=[androidx.room.Index(value=["draftId","createdAtEpochMs"])]) data class DraftVersionEntity(@PrimaryKey val id:String,val draftId:String,val reply:String,val action:String,val createdAtEpochMs:Long=System.currentTimeMillis())
+data class PlatformCount(val platform: String, val count: Int)
 @Dao interface DraftDao {
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun save(value:ReplyDraftEntity)
  @Query("SELECT * FROM reply_drafts ORDER BY createdAtEpochMs DESC") fun observeAll():Flow<List<ReplyDraftEntity>>
@@ -177,4 +186,9 @@ data class ReplyDraftEntity(@PrimaryKey val id:String,val platform:String,val co
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveVersion(value:DraftVersionEntity)
  @Query("SELECT * FROM draft_versions WHERE draftId=:draftId ORDER BY createdAtEpochMs DESC") fun observeVersions(draftId:String):Flow<List<DraftVersionEntity>>
  @Query("UPDATE reply_drafts SET status=:status,updatedAtEpochMs=:updatedAt WHERE id=:id") suspend fun setStatus(id:String,status:String,updatedAt:Long=System.currentTimeMillis())
+ @Query("SELECT COUNT(*) FROM reply_drafts") suspend fun count():Int
+ @Query("SELECT AVG(generationDurationMs) FROM reply_drafts WHERE generationDurationMs > 0") suspend fun averageGenerationDuration():Double?
+ @Query("SELECT AVG(tokenEstimate) FROM reply_drafts WHERE tokenEstimate > 0") suspend fun averageTokenEstimate():Double?
+ @Query("SELECT COUNT(*) FROM reply_drafts WHERE correctiveRegeneration = 1") suspend fun regenerationCount():Int
+ @Query("SELECT COUNT(*) FROM reply_drafts WHERE status = 'FAILED'") suspend fun failureCount():Int
 }

@@ -161,3 +161,39 @@ The platform layer introduces Telegram and WhatsApp adapters behind a common `Pl
 ## Implementation status — Phase 7
 
 Normalized notification events now create review-only local drafts after conversation/memory lookup and the existing reasoning pipeline. Drafts are encrypted locally and preserve platform/contact/conversation references, original inbound message, structured reasoning labels, quality score, token estimate, duration, provider/model, final assembled prompt, corrective-regeneration indicator, status, and version history. Failed provider generation is persisted as a failed draft rather than triggering a retry loop or send action. The Draft Review UI supports editing, copying, marking reviewed, dismissing, controlled regeneration, and prompt/metadata inspection. No Android reply action or message sending path exists.
+
+## Phase 8 Production Readiness Report
+
+### Current readiness: **62 / 100 — internal personal-use beta only**
+
+| Area | Status | Assessment |
+|---|---:|---|
+| Architecture | 8/10 | Clear local-first boundaries for platform, conversation, memory, reasoning, provider, and draft layers. |
+| Security & privacy | 8/10 | SQLCipher database, Keystore-backed secrets, no cloud dependency, and sanitized diagnostics. Device compromise remains out of scope. |
+| Data integrity | 6/10 | Stable-ID constraints, migrations, duplicate fingerprints, and orphan diagnostics exist; device migration/instrumented migration validation remains required. |
+| Performance | 5/10 | Bounded memory retrieval and queue batching are in place. Device profiling, battery measurement, and burst testing remain required. |
+| Reliability | 5/10 | Persistent events/drafts and bounded retries exist. OEM background behavior and source-app notification variations require real-device verification. |
+| Maintainability | 7/10 | Provider/platform abstractions and unit-testable pure components are present. Modules should be split into Gradle modules before broader expansion. |
+| UX | 6/10 | Review-first draft UI and developer tooling exist. Accessibility and full device UI testing remain required. |
+
+### Production checklist
+
+- [x] No automatic sending path.
+- [x] No Accessibility-service dependency.
+- [x] API keys excluded from exports and diagnostics.
+- [x] Stable platform identifiers required; display names are not identity keys.
+- [x] Queue, draft, memory, and integrity diagnostics remain local.
+- [x] Sanitized diagnostic export excludes content, prompts, profiles, memories, and secrets.
+- [ ] Compile and full unit/instrumentation suite must run in an Android SDK/JDK environment.
+- [ ] Validate Room/SQLCipher migrations on real retained data.
+- [ ] Validate Telegram/WhatsApp notification shapes on supported device/app versions.
+- [ ] Profile startup, database queries, memory, CPU, network, and battery on physical Android devices.
+- [ ] Run controlled stress scenarios: 500 contacts, 100,000 synthetic local turns, notification bursts, and repeated generation failures.
+- [ ] Complete TalkBack, font-scale, contrast, and keyboard accessibility audit.
+
+### Known limitations
+
+- The Android notification listener receives only source data apps choose to expose. Notifications lacking a stable `Person.key`/conversation identifier are safely rejected.
+- Per-feature battery attribution and complete thread utilization are not available from ordinary app APIs; diagnostics state this rather than fabricating measurements.
+- Diagnostic export currently writes a sanitized local report. A user-selected/share destination can be added later without including sensitive data.
+- This environment lacks a JDK and Android SDK, so compilation, instrumentation tests, migration tests, and device profiling could not be executed here.
