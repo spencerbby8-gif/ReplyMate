@@ -121,3 +121,7 @@ Implement summaries, reviewed facts, conversation memory UI, supported `RemoteIn
 Implement retention, encrypted export/deletion, WhatsApp capability adapter, optional opt-in encrypted Supabase sync, and optional explicitly enabled Cerebras fallback.
 
 Every phase must compile, test independently, and end with review/approval before the next phase begins.
+
+## Implementation status — Phase 2, slice 1
+
+Implemented: startup splash, persisted onboarding state, Welcome and privacy acknowledgement, Android Notification Listener settings handoff, Android 13+ ReplyMate notification permission request, listener-access status refresh on app resume, persisted theme selection, and a registered no-ingestion notification-listener shell. The listener intentionally does not read or persist notification payloads yet. Gemini keys, message ingestion, contacts, memory loading, provider requests, draft review, retry, and sending remain outside this completed slice.

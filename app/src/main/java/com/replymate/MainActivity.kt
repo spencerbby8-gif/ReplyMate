@@ -5,31 +5,37 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
 import androidx.navigation.compose.*
 import com.replymate.core.ai.PromptAssembler
 import com.replymate.core.model.*
+import com.replymate.core.settings.AppTheme
 import com.replymate.feature.home.HomeScreen
-import com.replymate.feature.onboarding.PersonalizationSetupScreen
-import com.replymate.feature.onboarding.PromptPreviewScreen
+import com.replymate.feature.onboarding.*
 import com.replymate.feature.settings.SettingsScreen
 import com.replymate.ui.theme.ReplyMateTheme
+import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { ReplyMateApp() } }
-}
+class MainActivity : ComponentActivity() { override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { ReplyMateApp() } } }
 
 @Composable private fun ReplyMateApp() {
-    val nav = rememberNavController()
     val app = LocalContext.current.applicationContext as ReplyMateApplication
-    val scope = rememberCoroutineScope()
+    val settings by app.settings.settings.collectAsState(initial = null)
     val personalization by app.personalization.personalization.collectAsState(initial = Personalization())
-    ReplyMateTheme {
-        NavHost(navController = nav, startDestination = "setup") {
-            composable("setup") { PersonalizationSetupScreen(personalization, { updated -> scope.launch { app.personalization.save(updated) } }, onReset = { scope.launch { app.personalization.reset() } }, onPreview = { nav.navigate("preview") }, onFinish = { scope.launch { app.personalization.save(personalization); app.settings.setOnboardingComplete(true) }; nav.navigate("home") { popUpTo("setup") { inclusive = true } } }) }
-            composable("preview") { PromptPreviewScreen(PromptAssembler().assemble(PromptRequest(DEFAULT_SYSTEM_PROMPT, personalization, latestIncomingMessage = "Example incoming message")), onBack = { nav.popBackStack() }) }
-            composable("home") { HomeScreen(onPersonalization = { nav.navigate("setup") }, onSettings = { nav.navigate("settings") }) }
-            composable("settings") { SettingsScreen(onPersonalization = { nav.navigate("setup") }, onBack = { nav.popBackStack() }) }
+    val scope = rememberCoroutineScope()
+    if (settings == null) { ReplyMateTheme { SplashScreen() }; return }
+    val dark = when (settings!!.theme) { AppTheme.DARK -> true; AppTheme.LIGHT -> false; AppTheme.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme() }
+    ReplyMateTheme(dark) {
+        key(settings!!.onboardingComplete) {
+            val nav = rememberNavController()
+            NavHost(navController = nav, startDestination = if (settings!!.onboardingComplete) "home" else "welcome") {
+                composable("welcome") { WelcomeScreen { nav.navigate("privacy") } }
+                composable("privacy") { PrivacyScreen { scope.launch { app.settings.setPrivacyAcknowledged(true) }; nav.navigate("notification-access") } }
+                composable("notification-access") { NotificationPermissionScreen { nav.navigate("setup") } }
+                composable("setup") { PersonalizationSetupScreen(personalization, { updated -> scope.launch { app.personalization.save(updated) } }, onReset = { scope.launch { app.personalization.reset() } }, onPreview = { nav.navigate("preview") }, onFinish = { scope.launch { app.personalization.save(personalization); app.settings.setOnboardingComplete(true) } }) }
+                composable("preview") { PromptPreviewScreen(PromptAssembler().assemble(PromptRequest(DEFAULT_SYSTEM_PROMPT, personalization, latestIncomingMessage = "Example incoming message")), onBack = { nav.popBackStack() }) }
+                composable("home") { HomeScreen(onPersonalization = { nav.navigate("setup") }, onSettings = { nav.navigate("settings") }) }
+                composable("settings") { SettingsScreen(theme = settings!!.theme, onThemeChanged = { scope.launch { app.settings.setTheme(it) } }, onPersonalization = { nav.navigate("setup") }, onBack = { nav.popBackStack() }) }
+            }
         }
     }
 }
