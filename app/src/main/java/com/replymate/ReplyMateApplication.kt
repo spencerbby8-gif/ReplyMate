@@ -3,6 +3,7 @@ package com.replymate
 import android.app.Application
 import com.replymate.core.ai.*
 import com.replymate.core.network.NetworkMonitor
+import com.replymate.core.conversation.*
 import com.replymate.core.persistence.DatabaseFactory
 import com.replymate.core.persistence.PersonalizationRepository
 import com.replymate.core.persistence.PlaygroundRepository
@@ -21,6 +22,8 @@ class ReplyMateApplication : Application() {
     lateinit var aiService: AiService; private set
     lateinit var promptPipeline: PromptPreparationPipeline; private set
     lateinit var playground: PlaygroundRepository; private set
+    lateinit var conversations: ConversationRepository; private set
+    lateinit var conversationService: ConversationService; private set
     lateinit var playgroundGeneration: PlaygroundGenerationService; private set
 
     override fun onCreate() {
@@ -28,6 +31,7 @@ class ReplyMateApplication : Application() {
         database = DatabaseFactory.create(this)
         personalization = PersonalizationRepository(database.personalizationDao())
         playground = PlaygroundRepository(database.playgroundDao())
+        conversations = ConversationRepository(database.conversationDao())
         settings = AppSettingsRepository(this)
         apiKeys = ApiKeyRepository(this)
         aiProviderSettings = AiProviderSettingsRepository(this)
@@ -36,6 +40,7 @@ class ReplyMateApplication : Application() {
         val registry = AiProviderRegistry(setOf(GeminiApiClient(diagnostics)))
         aiService = AiService(apiKeys, networkMonitor, registry, diagnostics)
         playgroundGeneration = PlaygroundGenerationService(apiKeys, networkMonitor, registry, diagnostics)
+        conversationService = ConversationService(conversations, MemoryUpdatePlanner(), diagnostics)
         promptPipeline = PromptPreparationPipeline(PromptAssembler(), ConservativeTokenCounter(), diagnostics)
     }
 }

@@ -84,5 +84,50 @@ interface PlaygroundDao {
     @Query("DELETE FROM playground_generations WHERE id = :id") suspend fun deleteGeneration(id: String)
 }
 
-@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class, PlaygroundContactEntity::class, PlaygroundGenerationEntity::class], version = 2, exportSchema = true)
-abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao; abstract fun playgroundDao(): PlaygroundDao }
+@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class, PlaygroundContactEntity::class, PlaygroundGenerationEntity::class, ContactEntity::class, ConversationEntity::class, ConversationMessageEntity::class, ConversationSummaryEntity::class, MemoryRecordEntity::class, RunningContextEntity::class], version = 3, exportSchema = true)
+abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao; abstract fun playgroundDao(): PlaygroundDao; abstract fun conversationDao(): ConversationDao }
+
+@Entity(tableName = "contacts", indices = [androidx.room.Index(value = ["platform", "platformIdentifier"], unique = true), androidx.room.Index("displayName")])
+data class ContactEntity(
+    @PrimaryKey val id: String, val platform: String, val platformIdentifier: String, val displayName: String,
+    val nickname: String = "", val relationship: String = "", val personality: String = "", val communicationStyle: String = "",
+    val createdAtEpochMs: Long = System.currentTimeMillis(), val updatedAtEpochMs: Long = System.currentTimeMillis()
+)
+@Entity(tableName = "conversations", indices = [androidx.room.Index("contactId"), androidx.room.Index(value = ["platform", "platformConversationIdentifier"], unique = true)])
+data class ConversationEntity(
+    @PrimaryKey val id: String, val contactId: String, val platform: String, val platformConversationIdentifier: String,
+    val lifecycle: String = "ACTIVE", val createdAtEpochMs: Long = System.currentTimeMillis(), val updatedAtEpochMs: Long = System.currentTimeMillis()
+)
+@Entity(tableName = "conversation_messages", indices = [androidx.room.Index(value = ["conversationId", "occurredAtEpochMs"]), androidx.room.Index("conversationId")])
+data class ConversationMessageEntity(@PrimaryKey val id: String, val conversationId: String, val direction: String, val body: String, val occurredAtEpochMs: Long = System.currentTimeMillis())
+@Entity(tableName = "conversation_summaries") data class ConversationSummaryEntity(@PrimaryKey val conversationId: String, val summary: String, val updatedAtEpochMs: Long = System.currentTimeMillis())
+@Entity(tableName = "memory_records", indices = [androidx.room.Index(value = ["contactId", "category", "status"]), androidx.room.Index("content")])
+data class MemoryRecordEntity(@PrimaryKey val id: String, val contactId: String, val category: String, val content: String, val priority: Int = 50, val status: String = "ACTIVE", val sourceMessageId: String? = null, val createdAtEpochMs: Long = System.currentTimeMillis(), val updatedAtEpochMs: Long = System.currentTimeMillis())
+@Entity(tableName = "running_contexts") data class RunningContextEntity(@PrimaryKey val conversationId: String, val context: String, val updatedAtEpochMs: Long = System.currentTimeMillis())
+
+@Dao interface ConversationDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertContact(contact: ContactEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveContact(contact: ContactEntity)
+    @Query("SELECT * FROM contacts WHERE platform = :platform AND platformIdentifier = :identifier LIMIT 1") suspend fun contactByPlatformIdentifier(platform: String, identifier: String): ContactEntity?
+    @Query("SELECT * FROM contacts WHERE id = :id") suspend fun contactById(id: String): ContactEntity?
+    @Query("SELECT * FROM contacts WHERE displayName LIKE '%' || :query || '%' OR nickname LIKE '%' || :query || '%' ORDER BY displayName") suspend fun searchContacts(query: String): List<ContactEntity>
+    @Query("SELECT * FROM contacts WHERE platform = :platform ORDER BY updatedAtEpochMs DESC") fun observeContacts(platform: String): Flow<List<ContactEntity>>
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertConversation(value: ConversationEntity)
+    @Query("SELECT * FROM conversations WHERE platform = :platform AND platformConversationIdentifier = :identifier LIMIT 1") suspend fun conversationByPlatformIdentifier(platform: String, identifier: String): ConversationEntity?
+    @Query("SELECT * FROM conversations WHERE contactId = :contactId ORDER BY updatedAtEpochMs DESC") fun observeConversations(contactId: String): Flow<List<ConversationEntity>>
+    @Query("SELECT * FROM conversations WHERE id = :id") suspend fun conversationById(id: String): ConversationEntity?
+    @Query("SELECT * FROM conversations WHERE platformConversationIdentifier LIKE '%' || :query || '%'") suspend fun searchConversations(query: String): List<ConversationEntity>
+    @Query("UPDATE conversations SET lifecycle = :lifecycle, updatedAtEpochMs = :updatedAt WHERE id = :conversationId") suspend fun setConversationLifecycle(conversationId: String, lifecycle: String, updatedAt: Long = System.currentTimeMillis())
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertMessage(value: ConversationMessageEntity)
+    @Query("SELECT * FROM conversation_messages WHERE conversationId = :conversationId ORDER BY occurredAtEpochMs DESC LIMIT :limit") suspend fun newestMessages(conversationId: String, limit: Int): List<ConversationMessageEntity>
+    @Query("SELECT * FROM conversation_messages WHERE conversationId = :conversationId ORDER BY occurredAtEpochMs ASC") fun observeMessages(conversationId: String): Flow<List<ConversationMessageEntity>>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveSummary(value: ConversationSummaryEntity)
+    @Query("SELECT * FROM conversation_summaries WHERE conversationId = :conversationId") suspend fun summary(conversationId: String): ConversationSummaryEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveMemory(value: MemoryRecordEntity)
+    @Query("SELECT * FROM memory_records WHERE contactId = :contactId AND category = :category AND status = 'ACTIVE' ORDER BY priority DESC, updatedAtEpochMs DESC LIMIT :limit") suspend fun activeMemory(contactId: String, category: String, limit: Int): List<MemoryRecordEntity>
+    @Query("SELECT * FROM memory_records WHERE contactId = :contactId ORDER BY updatedAtEpochMs DESC") fun observeMemory(contactId: String): Flow<List<MemoryRecordEntity>>
+    @Query("SELECT * FROM memory_records WHERE content LIKE '%' || :query || '%' ORDER BY priority DESC") suspend fun searchMemory(query: String): List<MemoryRecordEntity>
+    @Query("SELECT * FROM memory_records WHERE contactId = :contactId AND category = 'RELATIONSHIP_CONTEXT' AND status = 'ACTIVE' ORDER BY priority DESC LIMIT 1") suspend fun relationshipContext(contactId: String): MemoryRecordEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveRunningContext(value: RunningContextEntity)
+    @Query("SELECT * FROM running_contexts WHERE conversationId = :conversationId") suspend fun runningContext(conversationId: String): RunningContextEntity?
+}

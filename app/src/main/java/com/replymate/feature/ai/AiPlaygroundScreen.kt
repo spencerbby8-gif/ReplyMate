@@ -15,6 +15,7 @@ import com.replymate.core.ai.*
 import com.replymate.core.model.*
 import com.replymate.core.persistence.PlaygroundGenerationEntity
 import com.replymate.core.network.NetworkStatus
+import com.replymate.core.conversation.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -22,12 +23,37 @@ import java.util.UUID
 @Composable fun AiPlaygroundScreen(app: ReplyMateApplication, personalization: Personalization, model: String, onEditPersonalization: () -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope(); val contacts by app.playground.contacts.collectAsState(initial = emptyList())
     var selected by remember { mutableStateOf(PlaygroundContact(id = "")) }; var testMessage by remember { mutableStateOf("") }
+    var activeContact by remember { mutableStateOf<Contact?>(null) }; var activeConversation by remember { mutableStateOf<Conversation?>(null) }; var retrievedMemory by remember { mutableStateOf<MemoryContext?>(null) }
     var prepared by remember { mutableStateOf<PreparedPrompt?>(null) }; var outcome by remember { mutableStateOf<PlaygroundGenerationOutcome?>(null) }
     val generations by app.playground.generations(selected.id).collectAsState(initial = emptyList())
     val network by app.networkMonitor.status.collectAsState()
-    fun prepare() { prepared = app.promptPipeline.prepare(selected.toPromptRequest(personalization, testMessage)); outcome = null }
-    fun saveContact() = scope.launch { selected = app.playground.save(selected) }
-    fun generate() { val current = prepared ?: app.promptPipeline.prepare(selected.toPromptRequest(personalization, testMessage)).also { prepared = it }; outcome = null; scope.launch { when (val result = app.playgroundGeneration.generate(current, AiProviderSettings(model = model))) { is PlaygroundGenerationOutcome.Success -> { outcome = result; if (selected.id.isNotBlank()) app.playground.saveGeneration(PlaygroundGenerationEntity(UUID.randomUUID().toString(), selected.id, result.result.text, result.result.provider.name, result.result.model, result.result.durationMs, current.estimatedTokens, current.omittedHistoryTurns, current.omittedMemoryItems)) }; is PlaygroundGenerationOutcome.Failure -> outcome = result } } }
+    fun request() = selected.toPromptRequest(personalization, testMessage, retrievedMemory)
+    fun prepare() { prepared = app.promptPipeline.prepare(request()); outcome = null }
+    fun saveContact() = scope.launch {
+        selected = app.playground.save(selected)
+        val pair = app.conversationService.createOrOpen(MessagingPlatform.PLAYGROUND, "playground:${selected.id}", selected.name, "playground-conversation:${selected.id}", selected.nickname, selected.relationship, selected.personality, selected.communicationStyle)
+        activeContact = pair.first; activeConversation = pair.second
+        selected.conversationSummary.takeIf { it.isNotBlank() }?.let { app.conversations.saveMemory(pair.first.id, MemoryCategory.LONG_TERM_MEMORY, "Conversation summary: $it", 80) }
+        selected.importantFacts.lines().filter { it.isNotBlank() }.forEach { app.conversations.saveMemory(pair.first.id, MemoryCategory.IMPORTANT_FACT, it, 70) }
+        selected.preferences.lines().filter { it.isNotBlank() }.forEach { app.conversations.saveMemory(pair.first.id, MemoryCategory.PREFERENCE, it, 65) }
+        selected.longTermMemory.lines().filter { it.isNotBlank() }.forEach { app.conversations.saveMemory(pair.first.id, MemoryCategory.LONG_TERM_MEMORY, it, 60) }
+        retrievedMemory = app.conversationService.memoryForGeneration(pair.first.id, pair.second.id)
+    }
+    fun simulateIncoming() = scope.launch {
+        val contact = activeContact ?: return@launch; val conversation = activeConversation ?: return@launch
+        if (testMessage.isNotBlank()) { app.conversationService.recordTurn(contact.id, conversation.id, MessageDirection.INCOMING, testMessage); retrievedMemory = app.conversationService.memoryForGeneration(contact.id, conversation.id); prepared = null }
+    }
+    fun generate() {
+        val current = prepared ?: app.promptPipeline.prepare(request()).also { prepared = it }; outcome = null
+        scope.launch { when (val result = app.playgroundGeneration.generate(current, AiProviderSettings(model = model))) {
+            is PlaygroundGenerationOutcome.Success -> {
+                outcome = result
+                activeContact?.let { contact -> activeConversation?.let { conversation -> app.conversationService.recordTurn(contact.id, conversation.id, MessageDirection.OUTGOING, result.result.text); retrievedMemory = app.conversationService.memoryForGeneration(contact.id, conversation.id) } }
+                if (selected.id.isNotBlank()) app.playground.saveGeneration(PlaygroundGenerationEntity(UUID.randomUUID().toString(), selected.id, result.result.text, result.result.provider.name, result.result.model, result.result.durationMs, current.estimatedTokens, current.omittedHistoryTurns, current.omittedMemoryItems))
+            }
+            is PlaygroundGenerationOutcome.Failure -> outcome = result
+        } }
+    }
     Scaffold(topBar = { TopAppBar(title = { Text("AI Playground") }, navigationIcon = { TextButton(onClick = onBack) { Text("Back") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Development tool", style = MaterialTheme.typography.titleMedium); Text("Playground contacts and generations are isolated from real messaging. Nothing here sends a message.", style = MaterialTheme.typography.bodySmall)
@@ -38,7 +64,8 @@ import java.util.UUID
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { selected = PlaygroundContact(""); prepared = null }) { Text("New") }; Button(onClick = ::saveContact) { Text("Save test contact") } }
                 PlaygroundContactEditor(selected) { selected = it; prepared = null }
             }
-            Section("Memory editor") { MemoryEditor(selected) { selected = it; prepared = null } }
+            Section("Memory editor") { MemoryEditor(selected) { selected = it; prepared = null }; if (activeConversation != null) OutlinedButton(onClick = ::simulateIncoming) { Text("Simulate incoming message") } }
+            retrievedMemory?.let { MemoryInspection(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = ::prepare) { Text("Build prompt") }; Button(onClick = ::generate, enabled = testMessage.isNotBlank() && (prepared?.fitsBudget != false)) { Text("Generate in Playground") } }
             prepared?.let { PromptPreview(it) }
             PlaygroundOutcome(outcome, onRetry = ::generate)
@@ -60,10 +87,11 @@ import java.util.UUID
     Text("Estimated tokens: ${prepared.estimatedTokens}"); Text("Optimization: removed ${prepared.omittedMemoryItems} memory item(s), ${prepared.omittedHistoryTurns} history turn(s). ${if (prepared.fitsBudget) "Fits budget" else "Over budget"}", style = MaterialTheme.typography.bodySmall)
     prepared.sections.forEach { section -> Text(section.title, style = MaterialTheme.typography.labelLarge); SelectionContainer { Text(section.content, style = MaterialTheme.typography.bodySmall) }; HorizontalDivider() }
 }
+@Composable private fun MemoryInspection(context: MemoryContext) = Section("Retrieved conversation context") { Text("Contact ID: ${context.contact.id}", style = MaterialTheme.typography.bodySmall); Text("Recent turns: ${context.recentMessages.size} · Facts: ${context.importantFacts.size} · Preferences: ${context.preferences.size} · Long-term notes: ${context.longTermMemory.size}"); context.summary?.let { Text("Summary: $it") }; context.runningContext?.let { Text("Running context: $it") }; context.promptMemory().forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) } }
 @Composable private fun PlaygroundOutcome(outcome: PlaygroundGenerationOutcome?, onRetry: () -> Unit) { when (outcome) { null -> Unit; is PlaygroundGenerationOutcome.Success -> Section("Generated reply") { SelectionContainer { Text(outcome.result.text) }; Text("${outcome.result.provider} · ${outcome.result.model} · ${outcome.result.durationMs} ms", style = MaterialTheme.typography.bodySmall) }; is PlaygroundGenerationOutcome.Failure -> Section("Generation failed") { Text(outcome.error.userMessage, color = MaterialTheme.colorScheme.error); if (outcome.error.retryable) OutlinedButton(onClick = onRetry) { Text("Retry") } } } }
 @Composable private fun GenerationHistory(items: List<PlaygroundGenerationEntity>, onRegenerate: () -> Unit, onDelete: (String) -> Unit) { val clipboard = LocalClipboardManager.current; var compareId by remember { mutableStateOf<String?>(null) }; Section("Reply history") { if (items.isEmpty()) Text("No saved generations for this test contact yet.") else { items.forEach { item -> Card { Column(Modifier.padding(10.dp)) { Text(item.reply); Text("${item.provider} · ${item.model} · ${item.durationMs} ms", style = MaterialTheme.typography.bodySmall); Row { TextButton(onClick = { clipboard.setText(AnnotatedString(item.reply)) }) { Text("Copy") }; TextButton(onClick = { compareId = if (compareId == item.id) null else item.id }) { Text(if (compareId == item.id) "Comparing" else "Compare") }; TextButton(onClick = { onDelete(item.id) }) { Text("Delete") } } } } }; compareId?.let { id -> items.firstOrNull { it.id == id }?.let { compared -> Card { Column(Modifier.padding(10.dp)) { Text("Comparison target", style = MaterialTheme.typography.labelLarge); Text(compared.reply) } } } }; OutlinedButton(onClick = onRegenerate) { Text("Regenerate current test") } } }
-private fun PlaygroundContact.toPromptRequest(personalization: Personalization, latest: String): PromptRequest = PromptRequest(
+private fun PlaygroundContact.toPromptRequest(personalization: Personalization, latest: String, retrieved: MemoryContext?): PromptRequest = PromptRequest(
     baseSystemPrompt = "You are ReplyMate's internal AI Playground. Draft a natural reply in the user's voice. This is a test only; never state that a message was sent.", personalization = personalization,
     contactRule = ContactStyleRule(id, relationshipContext = listOf("Relationship: $relationship", "Nickname: $nickname", "Personality: $personality").filterNot { it.endsWith(": ") }.joinToString("\n"), customInstructions = communicationStyle),
-    recentHistory = recentHistory.lines().filter { it.isNotBlank() }.map { line -> if (line.trimStart().startsWith("Me:", true)) ConversationTurn(Speaker.ME, line.substringAfter(':').trim()) else ConversationTurn(Speaker.CONTACT, line.substringAfter(':', line).trim()) },
-    contactMemory = buildList { conversationSummary.takeIf { it.isNotBlank() }?.let { add("Conversation summary: $it") }; importantFacts.lines().filter { it.isNotBlank() }.forEach { add("Important fact: $it") }; preferences.lines().filter { it.isNotBlank() }.forEach { add("Preference: $it") }; longTermMemory.lines().filter { it.isNotBlank() }.forEach { add("Long-term memory: $it") } }, latestIncomingMessage = latest)
+    recentHistory = retrieved?.asTurns() ?: recentHistory.lines().filter { it.isNotBlank() }.map { line -> if (line.trimStart().startsWith("Me:", true)) ConversationTurn(Speaker.ME, line.substringAfter(':').trim()) else ConversationTurn(Speaker.CONTACT, line.substringAfter(':', line).trim()) },
+    contactMemory = retrieved?.promptMemory() ?: buildList { conversationSummary.takeIf { it.isNotBlank() }?.let { add("Conversation summary: $it") }; importantFacts.lines().filter { it.isNotBlank() }.forEach { add("Important fact: $it") }; preferences.lines().filter { it.isNotBlank() }.forEach { add("Preference: $it") }; longTermMemory.lines().filter { it.isNotBlank() }.forEach { add("Long-term memory: $it") } }, latestIncomingMessage = latest)
