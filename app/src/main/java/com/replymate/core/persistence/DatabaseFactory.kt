@@ -13,7 +13,7 @@ object DatabaseFactory {
         SQLiteDatabase.loadLibs(context)
         val passphrase = DatabaseKeyProvider(context).databasePassphrase()
         return Room.databaseBuilder(context, ReplyMateDatabase::class.java, "replymate.db")
-            .openHelperFactory(SupportFactory(passphrase, null, true)).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+            .openHelperFactory(SupportFactory(passphrase, null, true)).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
     }
     private val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
@@ -64,5 +64,11 @@ object DatabaseFactory {
         db.execSQL("CREATE INDEX IF NOT EXISTS index_platform_events_status_timestampEpochMs ON platform_events (status, timestampEpochMs)")
         db.execSQL("CREATE INDEX IF NOT EXISTS index_platform_events_notificationKey ON platform_events (notificationKey)")
     } }
+
+    private val MIGRATION_5_6 = object : Migration(5, 6) { override fun migrate(db: SupportSQLiteDatabase) {
+ db.execSQL("CREATE TABLE IF NOT EXISTS reply_drafts (id TEXT NOT NULL, platform TEXT NOT NULL, contactId TEXT NOT NULL, conversationId TEXT NOT NULL, originalMessage TEXT NOT NULL, reply TEXT NOT NULL, intent TEXT NOT NULL, emotion TEXT NOT NULL, strategy TEXT NOT NULL, qualityScore REAL NOT NULL, tokenEstimate INTEGER NOT NULL, generationDurationMs INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, promptText TEXT NOT NULL, correctiveRegeneration INTEGER NOT NULL, error TEXT, createdAtEpochMs INTEGER NOT NULL, updatedAtEpochMs INTEGER NOT NULL, PRIMARY KEY(id))")
+ db.execSQL("CREATE INDEX IF NOT EXISTS index_reply_drafts_status_createdAtEpochMs ON reply_drafts (status, createdAtEpochMs)"); db.execSQL("CREATE INDEX IF NOT EXISTS index_reply_drafts_conversationId ON reply_drafts (conversationId)"); db.execSQL("CREATE INDEX IF NOT EXISTS index_reply_drafts_contactId ON reply_drafts (contactId)")
+ db.execSQL("CREATE TABLE IF NOT EXISTS draft_versions (id TEXT NOT NULL, draftId TEXT NOT NULL, reply TEXT NOT NULL, action TEXT NOT NULL, createdAtEpochMs INTEGER NOT NULL, PRIMARY KEY(id))"); db.execSQL("CREATE INDEX IF NOT EXISTS index_draft_versions_draftId_createdAtEpochMs ON draft_versions (draftId, createdAtEpochMs)")
+ } }
 
 }

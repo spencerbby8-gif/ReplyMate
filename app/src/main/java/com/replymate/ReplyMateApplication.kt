@@ -5,6 +5,7 @@ import com.replymate.core.ai.*
 import com.replymate.core.network.NetworkMonitor
 import com.replymate.core.conversation.*
 import com.replymate.core.platform.*
+import com.replymate.core.draft.*
 import com.replymate.core.persistence.DatabaseFactory
 import com.replymate.core.persistence.PersonalizationRepository
 import com.replymate.core.persistence.PlaygroundRepository
@@ -30,6 +31,8 @@ class ReplyMateApplication : Application() {
     lateinit var reasoningPipeline: ReasonedResponsePipeline; private set
     lateinit var notificationPipeline: NotificationProcessingPipeline; private set
     lateinit var platformEvents: PlatformEventQueue; private set
+    lateinit var drafts: DraftRepository; private set
+    lateinit var draftGeneration: DraftGenerationService; private set
 
     override fun onCreate() {
         super.onCreate()
@@ -52,6 +55,8 @@ class ReplyMateApplication : Application() {
         val eventQueue = PlatformEventQueue(database.platformEventDao())
         platformEvents = eventQueue
         val resolver = ContactResolver(conversationService)
-        notificationPipeline = NotificationProcessingPipeline(EventValidator(), PlatformManager(setOf(TelegramPlatformAdapter(), WhatsAppPlatformAdapter())), eventQueue, EventDispatcher(eventQueue, resolver, ConversationResolver(conversationService), conversationService))
+        drafts = DraftRepository(database.draftDao())
+        draftGeneration = DraftGenerationService(conversationService, personalization, aiProviderSettings, reasoningPipeline, drafts)
+        notificationPipeline = NotificationProcessingPipeline(EventValidator(), PlatformManager(setOf(TelegramPlatformAdapter(), WhatsAppPlatformAdapter())), eventQueue, EventDispatcher(eventQueue, resolver, ConversationResolver(conversationService), conversationService, draftGeneration))
     }
 }

@@ -84,8 +84,8 @@ interface PlaygroundDao {
     @Query("DELETE FROM playground_generations WHERE id = :id") suspend fun deleteGeneration(id: String)
 }
 
-@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class, PlaygroundContactEntity::class, PlaygroundGenerationEntity::class, ContactEntity::class, ConversationEntity::class, ConversationMessageEntity::class, ConversationSummaryEntity::class, MemoryRecordEntity::class, RunningContextEntity::class, MemoryCandidateEntity::class, MemoryAuditEventEntity::class, SummaryVersionEntity::class, PlatformEventEntity::class], version = 5, exportSchema = true)
-abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao; abstract fun playgroundDao(): PlaygroundDao; abstract fun conversationDao(): ConversationDao; abstract fun memoryInspectorDao(): MemoryInspectorDao; abstract fun platformEventDao(): PlatformEventDao }
+@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class, PlaygroundContactEntity::class, PlaygroundGenerationEntity::class, ContactEntity::class, ConversationEntity::class, ConversationMessageEntity::class, ConversationSummaryEntity::class, MemoryRecordEntity::class, RunningContextEntity::class, MemoryCandidateEntity::class, MemoryAuditEventEntity::class, SummaryVersionEntity::class, PlatformEventEntity::class, ReplyDraftEntity::class, DraftVersionEntity::class], version = 6, exportSchema = true)
+abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao; abstract fun playgroundDao(): PlaygroundDao; abstract fun conversationDao(): ConversationDao; abstract fun memoryInspectorDao(): MemoryInspectorDao; abstract fun platformEventDao(): PlatformEventDao; abstract fun draftDao(): DraftDao }
 
 @Entity(tableName = "contacts", indices = [androidx.room.Index(value = ["platform", "platformIdentifier"], unique = true), androidx.room.Index("displayName")])
 data class ContactEntity(
@@ -163,4 +163,18 @@ data class PlatformEventEntity(@PrimaryKey val eventId: String, val platform: St
     @Query("UPDATE platform_events SET status = :status, result = :result, processingDurationMs = :duration, retryCount = :retryCount, localContactId = :contactId, localConversationId = :conversationId, updatedAtEpochMs = :updatedAt WHERE eventId = :eventId") suspend fun update(eventId: String, status: String, result: String?, duration: Long?, retryCount: Int, contactId: String?, conversationId: String?, updatedAt: Long = System.currentTimeMillis())
     @Query("SELECT * FROM platform_events ORDER BY createdAtEpochMs DESC LIMIT :limit") fun observeHistory(limit: Int = 200): Flow<List<PlatformEventEntity>>
     @Query("SELECT COUNT(*) FROM platform_events WHERE status = :status") suspend fun count(status: String): Int
+}
+
+@Entity(tableName = "reply_drafts", indices = [androidx.room.Index(value=["status","createdAtEpochMs"]), androidx.room.Index("conversationId"), androidx.room.Index("contactId")])
+data class ReplyDraftEntity(@PrimaryKey val id:String,val platform:String,val contactId:String,val conversationId:String,val originalMessage:String,val reply:String,val intent:String,val emotion:String,val strategy:String,val qualityScore:Float,val tokenEstimate:Int,val generationDurationMs:Long,val provider:String,val model:String,val status:String,val promptText:String,val correctiveRegeneration:Boolean,val error:String?=null,val createdAtEpochMs:Long=System.currentTimeMillis(),val updatedAtEpochMs:Long=System.currentTimeMillis())
+@Entity(tableName = "draft_versions", indices=[androidx.room.Index(value=["draftId","createdAtEpochMs"])]) data class DraftVersionEntity(@PrimaryKey val id:String,val draftId:String,val reply:String,val action:String,val createdAtEpochMs:Long=System.currentTimeMillis())
+@Dao interface DraftDao {
+ @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun save(value:ReplyDraftEntity)
+ @Query("SELECT * FROM reply_drafts ORDER BY createdAtEpochMs DESC") fun observeAll():Flow<List<ReplyDraftEntity>>
+ @Query("SELECT * FROM reply_drafts WHERE id=:id") fun observe(id:String):Flow<ReplyDraftEntity?>
+ @Query("SELECT * FROM reply_drafts WHERE id=:id") suspend fun byId(id:String):ReplyDraftEntity?
+ @Query("UPDATE reply_drafts SET reply=:reply,status=:status,updatedAtEpochMs=:updatedAt WHERE id=:id") suspend fun updateReply(id:String,reply:String,status:String,updatedAt:Long=System.currentTimeMillis())
+ @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveVersion(value:DraftVersionEntity)
+ @Query("SELECT * FROM draft_versions WHERE draftId=:draftId ORDER BY createdAtEpochMs DESC") fun observeVersions(draftId:String):Flow<List<DraftVersionEntity>>
+ @Query("UPDATE reply_drafts SET status=:status,updatedAtEpochMs=:updatedAt WHERE id=:id") suspend fun setStatus(id:String,status:String,updatedAt:Long=System.currentTimeMillis())
 }
