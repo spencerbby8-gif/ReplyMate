@@ -1,0 +1,21 @@
+package com.replymate.core.reasoning
+
+import com.replymate.core.ai.*
+import com.replymate.core.conversation.MemoryContext
+import com.replymate.core.model.*
+
+class ResponsePlanningService(
+    private val analyzer: ConversationAnalyzer = HeuristicConversationAnalyzer(), private val intents: IntentDetector = HeuristicIntentDetector(),
+    private val emotions: EmotionDetector = HeuristicEmotionDetector(), private val relationships: RelationshipAnalyzer = RelationshipAnalyzer(), private val strategies: StrategySelector = StrategySelector()
+) {
+    fun plan(message: String, memory: MemoryContext): ResponsePlan { val analysis=analyzer.analyze(message,memory.recentMessages.isNotEmpty()); val detected=intents.detect(message,analysis); val emotion=emotions.detect(message); val relationship=relationships.assess(memory); val (goal,strategy)=strategies.select(detected,emotion,relationship); return ResponsePlan(analysis,detected,emotion,relationship,goal,strategy,"Selected $strategy for $goal based on detected intent and emotional tone.") }
+    fun request(basePrompt: String, personalization: Personalization, memory: MemoryContext, message: String, plan: ResponsePlan): PromptRequest = PromptRequest(
+        baseSystemPrompt = "$basePrompt\nResponse strategy: ${plan.strategy}. Goal: ${plan.goal}. Follow this strategy without mentioning analysis.", personalization = personalization,
+        contactRule = ContactStyleRule(memory.contact.id, relationshipContext = memory.relationshipContext.orEmpty(), customInstructions = memory.contact.communicationStyle), recentHistory = memory.asTurns(), contactMemory = memory.promptMemory(), latestIncomingMessage = message)
+}
+class ReplyQualityEvaluator {
+    fun evaluate(reply: String, message: String, memory: MemoryContext, style: WritingStyle): ReplyQualityReport { val concerns=buildList { if(reply.isBlank())add("Empty response"); if(reply.length>600)add("Response is longer than the Playground quality target"); if(reply.lowercase().contains("as an ai"))add("Response contains assistant disclosure"); if(memory.promptMemory().any { it.length>20 && reply.contains(it,ignoreCase=true) })add("Response may repeat private memory verbatim") }; val relevance=if(reply.isBlank())0f else if(message.contains("?" ) && reply.contains("?")) .7f else .8f; val naturalness=if(reply.length in 2..500) .75f else .45f; val styleMatch=when(style.detailLevel){ DetailLevel.VERY_SHORT,DetailLevel.SHORT -> if(reply.length<300).8f else .45f; else -> .7f }; val score=listOf(relevance,naturalness,styleMatch).average().toFloat(); return ReplyQualityReport(relevance,relevance,if(concerns.none{it.contains("memory")}) .9f else .5f,relevance,naturalness,.75f,score,concerns,score>=.62f && concerns.none{it=="Empty response"}) }
+}
+class ReasonedResponsePipeline(private val planning: ResponsePlanningService, private val preparation: PromptPreparationPipeline, private val generation: PlaygroundGenerationService, private val evaluator: ReplyQualityEvaluator) {
+    suspend fun generate(basePrompt:String, personalization:Personalization, memory:MemoryContext, message:String, settings:AiProviderSettings): Result<ReasonedDraft> { val plan=planning.plan(message,memory); val first=preparation.prepare(planning.request(basePrompt,personalization,memory,message,plan)); val generated=generation.generate(first,settings); if(generated is PlaygroundGenerationOutcome.Failure)return Result.failure(IllegalStateException(generated.error.userMessage)); val firstResult=(generated as PlaygroundGenerationOutcome.Success).result; var quality=evaluator.evaluate(firstResult.text,message,memory,personalization.globalStyle); var result=firstResult; var retried=false; if(!quality.passed){ val corrected=first.copy(text=first.text+"\nQuality correction: answer the latest message naturally, avoid invented facts/private details, and be concise."); when(val retry=generation.generate(corrected,settings)){ is PlaygroundGenerationOutcome.Success->{result=retry.result;quality=evaluator.evaluate(result.text,message,memory,personalization.globalStyle);retried=true}; is PlaygroundGenerationOutcome.Failure->Unit } }; return Result.success(ReasonedDraft(result.text,plan,first,quality,retried,result.durationMs,result.provider.name,result.model)) }
+}

@@ -147,3 +147,9 @@ The Playground can now materialize its test data as `PLAYGROUND` platform contac
 ## Implementation status — Phase 4
 
 Memory Inspector infrastructure adds traceable pending candidates, audit events, summary versions, source conversation/message references, confidence, explanation, and timestamps. Permanent candidate-derived memory requires explicit approval; reject and ignore retain an auditable candidate outcome. The inspector is available from a materialized Playground conversation and presents the approval queue, permanent records, recent messages, statistics, and timeline. The Playground now routes manual test-memory entries through the review queue rather than silently making them permanent.
+
+## Implementation status — Phase 5
+
+The AI Reasoning Engine adds modular, replaceable conversation-analysis, intent, emotion, relationship, strategy, planning, quality-evaluation, and response-pipeline components. The current local analyzers produce transparent structured labels/confidences rather than hidden reasoning. Relationship labels are only taken from approved relationship-context memory; absent context remains explicitly unknown.
+
+The response pipeline prepares context, selects a strategy, generates through the existing provider boundary, evaluates structured quality signals, and permits at most one corrective regeneration. It never loops. The Playground exposes labels, goal, strategy explanation, quality scores/notes, provider/model, duration, and regeneration state—never chain of thought or secrets.

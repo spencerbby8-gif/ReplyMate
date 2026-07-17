@@ -26,6 +26,7 @@ class ReplyMateApplication : Application() {
     lateinit var conversationService: ConversationService; private set
     lateinit var memoryInspector: MemoryInspectorRepository; private set
     lateinit var playgroundGeneration: PlaygroundGenerationService; private set
+    lateinit var reasoningPipeline: ReasonedResponsePipeline; private set
 
     override fun onCreate() {
         super.onCreate()
@@ -44,5 +45,6 @@ class ReplyMateApplication : Application() {
         memoryInspector = MemoryInspectorRepository(database.memoryInspectorDao(), conversations)
         conversationService = ConversationService(conversations, MemoryUpdatePlanner(), diagnostics, memoryInspector)
         promptPipeline = PromptPreparationPipeline(PromptAssembler(), ConservativeTokenCounter(), diagnostics)
+        reasoningPipeline = ReasonedResponsePipeline(ResponsePlanningService(), promptPipeline, playgroundGeneration, ReplyQualityEvaluator())
     }
 }
