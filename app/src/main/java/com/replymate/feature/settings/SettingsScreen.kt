@@ -9,15 +9,15 @@ import androidx.compose.ui.unit.dp
 import com.replymate.core.settings.AppTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun SettingsScreen(theme: AppTheme, onThemeChanged: (AppTheme) -> Unit, onPersonalization: () -> Unit, onBack: () -> Unit) {
+@Composable fun SettingsScreen(theme: AppTheme, geminiConfigured: Boolean, onThemeChanged: (AppTheme) -> Unit, onPersonalization: () -> Unit, onGeminiSettings: () -> Unit, onBack: () -> Unit) {
     Scaffold(topBar = { TopAppBar(title = { Text("Settings") }, navigationIcon = { TextButton(onClick = onBack) { Text("Back") } }) }) { padding ->
         Column(Modifier.padding(padding)) {
             Text("Appearance", Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp), style = MaterialTheme.typography.titleMedium)
             AppTheme.entries.forEach { option -> ListItem(headlineContent = { Text(option.name.lowercase().replaceFirstChar { it.uppercase() }) }, trailingContent = { RadioButton(selected = option == theme, onClick = { onThemeChanged(option) }) }, modifier = Modifier.fillMaxWidth().clickable { onThemeChanged(option) }) }
             HorizontalDivider()
             SettingRow("Personalization", "Profile, global writing style, custom prompt", onPersonalization)
+            SettingRow("Gemini", if (geminiConfigured) "API key configured on this device" else "API key not configured", onGeminiSettings)
             SettingRow("Notification access", "Configure through Android system settings", {})
-            SettingRow("API keys", "Available in the next approved slice", {})
             SettingRow("Notification behavior", "Available in a later slice", {})
             SettingRow("Memory management", "Available in a later slice", {})
             SettingRow("Data export", "Available in a later slice", {})

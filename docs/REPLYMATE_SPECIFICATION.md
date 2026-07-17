@@ -125,3 +125,7 @@ Every phase must compile, test independently, and end with review/approval befor
 ## Implementation status — Phase 2, slice 1
 
 Implemented: startup splash, persisted onboarding state, Welcome and privacy acknowledgement, Android Notification Listener settings handoff, Android 13+ ReplyMate notification permission request, listener-access status refresh on app resume, persisted theme selection, and a registered no-ingestion notification-listener shell. The listener intentionally does not read or persist notification payloads yet. Gemini keys, message ingestion, contacts, memory loading, provider requests, draft review, retry, and sending remain outside this completed slice.
+
+## Implementation status — Phase 2, slice 2
+
+Implemented AI infrastructure only: Keystore-backed encrypted Gemini API-key storage; Gemini key entry, masked configured-key display, local preflight validation, connection test, retry and loading states; a provider-neutral `AiProvider`/registry boundary; persisted non-secret provider model configuration; connectivity monitoring; metadata-only Logcat diagnostics; Gemini REST connection client; and a reusable prompt-preparation pipeline with local conservative token estimation and budget-based removal of low-priority memory/history. The pipeline preserves the approved prompt assembly order and never submits a prompt. Draft/reply generation, notification ingestion, contacts, conversation memory, and sending are deliberately not implemented in this slice.
