@@ -1,0 +1,67 @@
+package com.replymate
+
+import android.app.Application
+import com.replymate.core.ai.*
+import com.replymate.core.network.NetworkMonitor
+import com.replymate.core.conversation.*
+import com.replymate.core.platform.*
+import com.replymate.core.draft.*
+import com.replymate.core.diagnostics.DiagnosticsService
+import com.replymate.core.diagnostics.PerformanceMonitor
+import com.replymate.core.persistence.DatabaseFactory
+import com.replymate.core.persistence.PersonalizationRepository
+import com.replymate.core.persistence.PlaygroundRepository
+import com.replymate.core.persistence.ReplyMateDatabase
+import com.replymate.core.security.ApiKeyRepository
+import com.replymate.core.settings.AppSettingsRepository
+
+/** Application-level composition root; later features receive interfaces rather than provider details. */
+class ReplyMateApplication : Application() {
+    lateinit var database: ReplyMateDatabase; private set
+    lateinit var personalization: PersonalizationRepository; private set
+    lateinit var settings: AppSettingsRepository; private set
+    lateinit var apiKeys: ApiKeyRepository; private set
+    lateinit var aiProviderSettings: AiProviderSettingsRepository; private set
+    lateinit var networkMonitor: NetworkMonitor; private set
+    lateinit var aiService: AiService; private set
+    lateinit var promptPipeline: PromptPreparationPipeline; private set
+    lateinit var playground: PlaygroundRepository; private set
+    lateinit var conversations: ConversationRepository; private set
+    lateinit var conversationService: ConversationService; private set
+    lateinit var memoryInspector: MemoryInspectorRepository; private set
+    lateinit var playgroundGeneration: PlaygroundGenerationService; private set
+    lateinit var reasoningPipeline: ReasonedResponsePipeline; private set
+    lateinit var notificationPipeline: NotificationProcessingPipeline; private set
+    lateinit var platformEvents: PlatformEventQueue; private set
+    lateinit var drafts: DraftRepository; private set
+    lateinit var draftGeneration: DraftGenerationService; private set
+    lateinit var diagnosticsService: DiagnosticsService; private set
+    val performanceMonitor = PerformanceMonitor()
+
+    override fun onCreate() {
+        super.onCreate()
+        database = DatabaseFactory.create(this)
+        personalization = PersonalizationRepository(database.personalizationDao())
+        playground = PlaygroundRepository(database.playgroundDao())
+        conversations = ConversationRepository(database.conversationDao())
+        settings = AppSettingsRepository(this)
+        apiKeys = ApiKeyRepository(this)
+        aiProviderSettings = AiProviderSettingsRepository(this)
+        networkMonitor = NetworkMonitor(this)
+        val diagnostics = LogcatAiDiagnostics()
+        val registry = AiProviderRegistry(setOf(GeminiApiClient(diagnostics)))
+        aiService = AiService(apiKeys, networkMonitor, registry, diagnostics)
+        playgroundGeneration = PlaygroundGenerationService(apiKeys, networkMonitor, registry, diagnostics)
+        memoryInspector = MemoryInspectorRepository(database.memoryInspectorDao(), conversations)
+        conversationService = ConversationService(conversations, MemoryUpdatePlanner(), diagnostics, memoryInspector)
+        promptPipeline = PromptPreparationPipeline(PromptAssembler(), ConservativeTokenCounter(), diagnostics)
+        reasoningPipeline = ReasonedResponsePipeline(ResponsePlanningService(), promptPipeline, playgroundGeneration, ReplyQualityEvaluator())
+        val eventQueue = PlatformEventQueue(database.platformEventDao())
+        platformEvents = eventQueue
+        val resolver = ContactResolver(conversationService)
+        drafts = DraftRepository(database.draftDao())
+        draftGeneration = DraftGenerationService(conversationService, personalization, aiProviderSettings, reasoningPipeline, drafts)
+        diagnosticsService = DiagnosticsService(this, database, eventQueue, drafts, aiProviderSettings, performanceMonitor)
+        notificationPipeline = NotificationProcessingPipeline(EventValidator(), PlatformManager(setOf(TelegramPlatformAdapter(), WhatsAppPlatformAdapter())), eventQueue, EventDispatcher(eventQueue, resolver, ConversationResolver(conversationService), conversationService, draftGeneration))
+    }
+}
