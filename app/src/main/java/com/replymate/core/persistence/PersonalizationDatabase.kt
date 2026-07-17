@@ -84,8 +84,8 @@ interface PlaygroundDao {
     @Query("DELETE FROM playground_generations WHERE id = :id") suspend fun deleteGeneration(id: String)
 }
 
-@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class, PlaygroundContactEntity::class, PlaygroundGenerationEntity::class, ContactEntity::class, ConversationEntity::class, ConversationMessageEntity::class, ConversationSummaryEntity::class, MemoryRecordEntity::class, RunningContextEntity::class, MemoryCandidateEntity::class, MemoryAuditEventEntity::class, SummaryVersionEntity::class], version = 4, exportSchema = true)
-abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao; abstract fun playgroundDao(): PlaygroundDao; abstract fun conversationDao(): ConversationDao; abstract fun memoryInspectorDao(): MemoryInspectorDao }
+@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class, PlaygroundContactEntity::class, PlaygroundGenerationEntity::class, ContactEntity::class, ConversationEntity::class, ConversationMessageEntity::class, ConversationSummaryEntity::class, MemoryRecordEntity::class, RunningContextEntity::class, MemoryCandidateEntity::class, MemoryAuditEventEntity::class, SummaryVersionEntity::class, PlatformEventEntity::class], version = 5, exportSchema = true)
+abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao; abstract fun playgroundDao(): PlaygroundDao; abstract fun conversationDao(): ConversationDao; abstract fun memoryInspectorDao(): MemoryInspectorDao; abstract fun platformEventDao(): PlatformEventDao }
 
 @Entity(tableName = "contacts", indices = [androidx.room.Index(value = ["platform", "platformIdentifier"], unique = true), androidx.room.Index("displayName")])
 data class ContactEntity(
@@ -153,4 +153,14 @@ data class SummaryVersionEntity(@PrimaryKey val id: String, val conversationId: 
     @Query("SELECT COUNT(*) FROM memory_candidates WHERE contactId = :contactId AND status = 'REJECTED'") suspend fun rejectedCount(contactId: String): Int
     @Query("SELECT COUNT(*) FROM conversation_messages WHERE conversationId = :conversationId") suspend fun messageCount(conversationId: String): Int
     @Query("SELECT COUNT(*) FROM summary_versions WHERE conversationId = :conversationId") suspend fun summaryCount(conversationId: String): Int
+}
+
+@Entity(tableName = "platform_events", indices = [androidx.room.Index(value = ["fingerprint"], unique = true), androidx.room.Index(value = ["status", "timestampEpochMs"]), androidx.room.Index("notificationKey")])
+data class PlatformEventEntity(@PrimaryKey val eventId: String, val platform: String, val platformUserIdentifier: String, val platformConversationIdentifier: String, val localContactId: String? = null, val localConversationId: String? = null, val displayName: String, val messageContent: String, val timestampEpochMs: Long, val direction: String, val packageName: String, val notificationKey: String, val notificationId: Int, val notificationTag: String?, val channelId: String?, val isGroupSummary: Boolean, val isSilent: Boolean, val fingerprint: String, val status: String = "QUEUED", val retryCount: Int = 0, val result: String? = null, val processingDurationMs: Long? = null, val createdAtEpochMs: Long = System.currentTimeMillis(), val updatedAtEpochMs: Long = System.currentTimeMillis())
+@Dao interface PlatformEventDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun enqueue(value: PlatformEventEntity): Long
+    @Query("SELECT * FROM platform_events WHERE status = 'QUEUED' OR (status = 'FAILED' AND retryCount < :maxRetries) ORDER BY timestampEpochMs ASC LIMIT :limit") suspend fun nextEvents(maxRetries: Int = 3, limit: Int = 25): List<PlatformEventEntity>
+    @Query("UPDATE platform_events SET status = :status, result = :result, processingDurationMs = :duration, retryCount = :retryCount, localContactId = :contactId, localConversationId = :conversationId, updatedAtEpochMs = :updatedAt WHERE eventId = :eventId") suspend fun update(eventId: String, status: String, result: String?, duration: Long?, retryCount: Int, contactId: String?, conversationId: String?, updatedAt: Long = System.currentTimeMillis())
+    @Query("SELECT * FROM platform_events ORDER BY createdAtEpochMs DESC LIMIT :limit") fun observeHistory(limit: Int = 200): Flow<List<PlatformEventEntity>>
+    @Query("SELECT COUNT(*) FROM platform_events WHERE status = :status") suspend fun count(status: String): Int
 }

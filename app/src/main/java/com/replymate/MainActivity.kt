@@ -12,6 +12,7 @@ import com.replymate.core.settings.AppTheme
 import com.replymate.feature.home.HomeScreen
 import com.replymate.feature.ai.GeminiApiKeyScreen
 import com.replymate.feature.ai.AiPlaygroundScreen
+import com.replymate.feature.platform.PlatformEventViewerScreen
 import com.replymate.feature.onboarding.*
 import com.replymate.feature.settings.SettingsScreen
 import com.replymate.ui.theme.ReplyMateTheme
@@ -37,9 +38,10 @@ class MainActivity : ComponentActivity() { override fun onCreate(savedInstanceSt
                 composable("setup") { PersonalizationSetupScreen(personalization, { updated -> scope.launch { app.personalization.save(updated) } }, onReset = { scope.launch { app.personalization.reset() } }, onPreview = { nav.navigate("preview") }, onFinish = { scope.launch { app.personalization.save(personalization); app.settings.setOnboardingComplete(true) } }) }
                 composable("preview") { PromptPreviewScreen(PromptAssembler().assemble(PromptRequest(DEFAULT_SYSTEM_PROMPT, personalization, latestIncomingMessage = "Example incoming message")), onBack = { nav.popBackStack() }) }
                 composable("home") { HomeScreen(onPersonalization = { nav.navigate("setup") }, onSettings = { nav.navigate("settings") }) }
-                composable("settings") { SettingsScreen(theme = settings!!.theme, geminiConfigured = app.apiKeys.isGeminiConfigured(), onThemeChanged = { scope.launch { app.settings.setTheme(it) } }, onPersonalization = { nav.navigate("setup") }, onGeminiSettings = { nav.navigate("gemini-settings") }, onPlayground = { nav.navigate("ai-playground") }, onBack = { nav.popBackStack() }) }
+                composable("settings") { SettingsScreen(theme = settings!!.theme, geminiConfigured = app.apiKeys.isGeminiConfigured(), onThemeChanged = { scope.launch { app.settings.setTheme(it) } }, onPersonalization = { nav.navigate("setup") }, onGeminiSettings = { nav.navigate("gemini-settings") }, onPlayground = { nav.navigate("ai-playground") }, onPlatformEvents = { nav.navigate("platform-events") }, onBack = { nav.popBackStack() }) }
                 composable("gemini-settings") { GeminiApiKeyScreen(app, aiProviderSettings.model, onBack = { nav.popBackStack() }) }
                 composable("ai-playground") { AiPlaygroundScreen(app, personalization, aiProviderSettings.model, onEditPersonalization = { nav.navigate("setup") }, onBack = { nav.popBackStack() }) }
+                composable("platform-events") { PlatformEventViewerScreen(app, onBack = { nav.popBackStack() }) }
             }
         }
     }

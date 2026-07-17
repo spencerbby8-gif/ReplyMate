@@ -13,7 +13,7 @@ object DatabaseFactory {
         SQLiteDatabase.loadLibs(context)
         val passphrase = DatabaseKeyProvider(context).databasePassphrase()
         return Room.databaseBuilder(context, ReplyMateDatabase::class.java, "replymate.db")
-            .openHelperFactory(SupportFactory(passphrase, null, true)).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+            .openHelperFactory(SupportFactory(passphrase, null, true)).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
     }
     private val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
@@ -57,5 +57,12 @@ object DatabaseFactory {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_summary_versions_conversationId ON summary_versions (conversationId)")
         }
     }
+
+    private val MIGRATION_4_5 = object : Migration(4, 5) { override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS platform_events (eventId TEXT NOT NULL, platform TEXT NOT NULL, platformUserIdentifier TEXT NOT NULL, platformConversationIdentifier TEXT NOT NULL, localContactId TEXT, localConversationId TEXT, displayName TEXT NOT NULL, messageContent TEXT NOT NULL, timestampEpochMs INTEGER NOT NULL, direction TEXT NOT NULL, packageName TEXT NOT NULL, notificationKey TEXT NOT NULL, notificationId INTEGER NOT NULL, notificationTag TEXT, channelId TEXT, isGroupSummary INTEGER NOT NULL, isSilent INTEGER NOT NULL, fingerprint TEXT NOT NULL, status TEXT NOT NULL, retryCount INTEGER NOT NULL, result TEXT, processingDurationMs INTEGER, createdAtEpochMs INTEGER NOT NULL, updatedAtEpochMs INTEGER NOT NULL, PRIMARY KEY(eventId))")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_platform_events_fingerprint ON platform_events (fingerprint)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_platform_events_status_timestampEpochMs ON platform_events (status, timestampEpochMs)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_platform_events_notificationKey ON platform_events (notificationKey)")
+    } }
 
 }

@@ -4,6 +4,7 @@ import android.app.Application
 import com.replymate.core.ai.*
 import com.replymate.core.network.NetworkMonitor
 import com.replymate.core.conversation.*
+import com.replymate.core.platform.*
 import com.replymate.core.persistence.DatabaseFactory
 import com.replymate.core.persistence.PersonalizationRepository
 import com.replymate.core.persistence.PlaygroundRepository
@@ -27,6 +28,8 @@ class ReplyMateApplication : Application() {
     lateinit var memoryInspector: MemoryInspectorRepository; private set
     lateinit var playgroundGeneration: PlaygroundGenerationService; private set
     lateinit var reasoningPipeline: ReasonedResponsePipeline; private set
+    lateinit var notificationPipeline: NotificationProcessingPipeline; private set
+    lateinit var platformEvents: PlatformEventQueue; private set
 
     override fun onCreate() {
         super.onCreate()
@@ -46,5 +49,9 @@ class ReplyMateApplication : Application() {
         conversationService = ConversationService(conversations, MemoryUpdatePlanner(), diagnostics, memoryInspector)
         promptPipeline = PromptPreparationPipeline(PromptAssembler(), ConservativeTokenCounter(), diagnostics)
         reasoningPipeline = ReasonedResponsePipeline(ResponsePlanningService(), promptPipeline, playgroundGeneration, ReplyQualityEvaluator())
+        val eventQueue = PlatformEventQueue(database.platformEventDao())
+        platformEvents = eventQueue
+        val resolver = ContactResolver(conversationService)
+        notificationPipeline = NotificationProcessingPipeline(EventValidator(), PlatformManager(setOf(TelegramPlatformAdapter(), WhatsAppPlatformAdapter())), eventQueue, EventDispatcher(eventQueue, resolver, ConversationResolver(conversationService), conversationService))
     }
 }

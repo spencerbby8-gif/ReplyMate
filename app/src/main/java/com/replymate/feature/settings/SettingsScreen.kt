@@ -9,7 +9,7 @@ import androidx.compose.ui.unit.dp
 import com.replymate.core.settings.AppTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun SettingsScreen(theme: AppTheme, geminiConfigured: Boolean, onThemeChanged: (AppTheme) -> Unit, onPersonalization: () -> Unit, onGeminiSettings: () -> Unit, onPlayground: () -> Unit, onBack: () -> Unit) {
+@Composable fun SettingsScreen(theme: AppTheme, geminiConfigured: Boolean, onThemeChanged: (AppTheme) -> Unit, onPersonalization: () -> Unit, onGeminiSettings: () -> Unit, onPlayground: () -> Unit, onPlatformEvents: () -> Unit, onBack: () -> Unit) {
     Scaffold(topBar = { TopAppBar(title = { Text("Settings") }, navigationIcon = { TextButton(onClick = onBack) { Text("Back") } }) }) { padding ->
         Column(Modifier.padding(padding)) {
             Text("Appearance", Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp), style = MaterialTheme.typography.titleMedium)
@@ -19,6 +19,7 @@ import com.replymate.core.settings.AppTheme
             SettingRow("Gemini", if (geminiConfigured) "API key configured on this device" else "API key not configured", onGeminiSettings)
             SettingRow("AI Playground", "Internal prompt, memory, and generation test tool", onPlayground)
             SettingRow("Memory Inspector", "Developer tool — select a Playground conversation", onPlayground)
+            SettingRow("Platform Event Viewer", "Developer tool — sanitized notification event history", onPlatformEvents)
             SettingRow("Notification access", "Configure through Android system settings", {})
             SettingRow("Notification behavior", "Available in a later slice", {})
             SettingRow("Memory management", "Available in a later slice", {})
