@@ -10,12 +10,15 @@ sealed interface ConnectionResult {
     data object Success : ConnectionResult
     data class Failure(val category: AiErrorCategory, val userMessage: String, val retryable: Boolean) : ConnectionResult
 }
+data class GenerationResult(val text: String, val provider: AiProviderId, val model: String, val durationMs: Long)
+
 enum class AiErrorCategory { MISSING_KEY, OFFLINE, UNAUTHORIZED, RATE_LIMITED, TIMEOUT, SERVICE_UNAVAILABLE, BAD_RESPONSE, UNKNOWN }
 
 /** Provider boundary deliberately excludes reply generation until its own approved slice. */
 interface AiProvider {
     val id: AiProviderId
     suspend fun testConnection(apiKey: String, model: String): ConnectionResult
+    suspend fun generateText(apiKey: String, model: String, prompt: String): GenerationResult
 }
 
 class AiProviderRegistry(private val providers: Set<AiProvider>) {

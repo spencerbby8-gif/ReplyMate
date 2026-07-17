@@ -8,7 +8,7 @@ class ConservativeTokenCounter : TokenCounter {
     override fun estimate(text: String): Int = if (text.isBlank()) 0 else (text.length + 3) / 4
 }
 data class PromptBudget(val maxInputTokens: Int = 6_000, val reservedOutputTokens: Int = 500)
-data class PreparedPrompt(val text: String, val estimatedTokens: Int, val omittedHistoryTurns: Int, val omittedMemoryItems: Int, val fitsBudget: Boolean)
+data class PreparedPrompt(val text: String, val sections: List<PromptSection>, val estimatedTokens: Int, val omittedHistoryTurns: Int, val omittedMemoryItems: Int, val fitsBudget: Boolean)
 
 /** Builds a transparent prompt but never submits it to a provider in this slice. */
 class PromptPreparationPipeline(private val assembler: PromptAssembler, private val counter: TokenCounter, private val diagnostics: AiDiagnostics = NoOpAiDiagnostics) {
@@ -29,7 +29,8 @@ class PromptPreparationPipeline(private val assembler: PromptAssembler, private 
             history = history.drop(1); droppedHistory++
             prompt = assembler.assemble(request.copy(contactMemory = memory, recentHistory = history)); tokens = counter.estimate(prompt)
         }
-        val prepared = PreparedPrompt(prompt, tokens, droppedHistory, droppedMemory, tokens <= limit)
+        val finalRequest = request.copy(contactMemory = memory, recentHistory = history)
+        val prepared = PreparedPrompt(prompt, assembler.sections(finalRequest), tokens, droppedHistory, droppedMemory, tokens <= limit)
         diagnostics.event("prompt_prepared", mapOf("estimatedTokens" to prepared.estimatedTokens, "omittedHistoryTurns" to prepared.omittedHistoryTurns, "omittedMemoryItems" to prepared.omittedMemoryItems, "fitsBudget" to prepared.fitsBudget))
         return prepared
     }

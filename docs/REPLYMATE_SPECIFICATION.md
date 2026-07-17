@@ -129,3 +129,9 @@ Implemented: startup splash, persisted onboarding state, Welcome and privacy ack
 ## Implementation status — Phase 2, slice 2
 
 Implemented AI infrastructure only: Keystore-backed encrypted Gemini API-key storage; Gemini key entry, masked configured-key display, local preflight validation, connection test, retry and loading states; a provider-neutral `AiProvider`/registry boundary; persisted non-secret provider model configuration; connectivity monitoring; metadata-only Logcat diagnostics; Gemini REST connection client; and a reusable prompt-preparation pipeline with local conservative token estimation and budget-based removal of low-priority memory/history. The pipeline preserves the approved prompt assembly order and never submits a prompt. Draft/reply generation, notification ingestion, contacts, conversation memory, and sending are deliberately not implemented in this slice.
+
+## Implementation status — Phase 2, slice 2.5
+
+Implemented an internal-only AI Playground, reachable from Settings. It uses the existing encrypted database, personalization repository, prompt assembler, preparation pipeline, provider registry, Gemini client, connectivity monitor, and metadata-only diagnostics—there is no duplicate prompt or provider path. Playground-only contacts keep name, relationship, nickname, personality, communication style, summary, facts, preferences, long-term notes, and recent history in dedicated encrypted local tables. They are never exposed as real contacts.
+
+The Playground provides exact sectioned prompt previews, token estimates and trimming results, safe diagnostics, Gemini generation, generation timing/provider/model status, retryable failures, and local history with copy, comparison target, deletion, and current-test regeneration. Generated replies are deliberately scoped to this development screen; notification ingestion, platform adapters, conversation capture, background work, and automatic messaging remain unimplemented.

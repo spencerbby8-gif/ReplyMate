@@ -13,7 +13,7 @@ class PromptAssemblerTest {
             recentHistory = listOf(ConversationTurn(Speaker.CONTACT, "HISTORY")),
             contactMemory = listOf("MEMORY"), latestIncomingMessage = "LATEST"
         ))
-        listOf("BASE", "MY PROFILE", "GLOBAL WRITING STYLE", "MY CUSTOM INSTRUCTIONS", "PER-CONTACT STYLE RULES", "RECENT CONVERSATION HISTORY", "CONTACT MEMORY", "LATEST INCOMING MESSAGE").zipWithNext().forEach { (a,b) -> assertTrue(prompt.indexOf(a) < prompt.indexOf(b)) }
+        listOf("BASE", "MY PROFILE", "WRITING STYLE", "CUSTOM PROMPT", "CONTACT STYLE", "RECENT HISTORY", "CONTACT MEMORY", "LATEST MESSAGE").zipWithNext().forEach { (a,b) -> assertTrue(prompt.indexOf(a) < prompt.indexOf(b)) }
         assertTrue(prompt.contains("Name or nickname: Sam"))
         assertTrue(!prompt.contains("Background story:"))
     }

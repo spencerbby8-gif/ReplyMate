@@ -55,3 +55,18 @@ data class PromptRequest(
 
 data class ConversationTurn(val speaker: Speaker, val text: String)
 enum class Speaker { ME, CONTACT }
+
+/** Isolated development-only data. It is never treated as a real messaging contact. */
+data class PlaygroundContact(
+    val id: String,
+    val name: String = "",
+    val relationship: String = "",
+    val nickname: String = "",
+    val personality: String = "",
+    val communicationStyle: String = "",
+    val conversationSummary: String = "",
+    val importantFacts: String = "",
+    val preferences: String = "",
+    val longTermMemory: String = "",
+    val recentHistory: String = ""
+)

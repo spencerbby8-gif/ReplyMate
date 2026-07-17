@@ -60,5 +60,29 @@ interface PersonalizationDao {
     @Transaction suspend fun resetAll() { clearProfile(); clearStyle(); clearContactRules() }
 }
 
-@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class], version = 1, exportSchema = true)
-abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao }
+
+@Entity(tableName = "playground_contacts")
+data class PlaygroundContactEntity(
+    @PrimaryKey val id: String, val name: String = "", val relationship: String = "", val nickname: String = "",
+    val personality: String = "", val communicationStyle: String = "", val conversationSummary: String = "",
+    val importantFacts: String = "", val preferences: String = "", val longTermMemory: String = "", val recentHistory: String = "",
+    val updatedAtEpochMs: Long = System.currentTimeMillis()
+)
+@Entity(tableName = "playground_generations", indices = [androidx.room.Index("contactId"), androidx.room.Index("createdAtEpochMs")])
+data class PlaygroundGenerationEntity(
+    @PrimaryKey val id: String, val contactId: String, val reply: String, val provider: String, val model: String,
+    val durationMs: Long, val estimatedTokens: Int, val omittedHistoryTurns: Int, val omittedMemoryItems: Int,
+    val createdAtEpochMs: Long = System.currentTimeMillis()
+)
+@Dao
+interface PlaygroundDao {
+    @Query("SELECT * FROM playground_contacts ORDER BY updatedAtEpochMs DESC") fun observeContacts(): Flow<List<PlaygroundContactEntity>>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveContact(value: PlaygroundContactEntity)
+    @Query("DELETE FROM playground_contacts WHERE id = :id") suspend fun deleteContact(id: String)
+    @Query("SELECT * FROM playground_generations WHERE contactId = :contactId ORDER BY createdAtEpochMs DESC") fun observeGenerations(contactId: String): Flow<List<PlaygroundGenerationEntity>>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveGeneration(value: PlaygroundGenerationEntity)
+    @Query("DELETE FROM playground_generations WHERE id = :id") suspend fun deleteGeneration(id: String)
+}
+
+@Database(entities = [PersonalizationProfileEntity::class, GlobalWritingStyleEntity::class, ContactStyleRuleEntity::class, PlaygroundContactEntity::class, PlaygroundGenerationEntity::class], version = 2, exportSchema = true)
+abstract class ReplyMateDatabase : RoomDatabase() { abstract fun personalizationDao(): PersonalizationDao; abstract fun playgroundDao(): PlaygroundDao }
