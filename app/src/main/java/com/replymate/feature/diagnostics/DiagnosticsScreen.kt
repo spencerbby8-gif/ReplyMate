@@ -26,7 +26,7 @@ fun DiagnosticsScreen(app: ReplyMateApplication, onBack: () -> Unit) {
                 Card { Column(Modifier.padding(12.dp)) { Text("Data: ${d.contacts} contacts · ${d.conversations} conversations · ${d.memories} memories · ${d.candidates} candidates · ${d.drafts} drafts"); Text("Integrity: orphan contacts ${d.orphanContacts} · orphan memories ${d.orphanMemories}") } }
                 Card { Column(Modifier.padding(12.dp)) { Text("AI: avg ${d.averageGenerationMs ?: 0.0}ms · ${d.averageTokens ?: 0.0} tokens · regeneration ${(d.regenerationRate * 100).toInt()}% · failures ${d.failures}") } }
                 Card { Column(Modifier.padding(12.dp)) { Text("Notifications: queue ${d.queue} · avg ${d.averageNotificationMs ?: 0.0}ms · platforms ${d.platforms}") } }
-                Card { Column(Modifier.padding(12.dp)) { Text("Storage: ${d.storageBytes} bytes"); d.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall) } }
+                Card { Column(Modifier.padding(12.dp)) { Text("Storage: ${d.storageBytes} bytes"); d.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall) } } }
                 Button(onClick = { scope.launch { exportPath = app.diagnosticsService.exportSanitized().absolutePath } }) { Text("Export sanitized report") }
                 exportPath?.let { Text("Exported local report: $it", style = MaterialTheme.typography.bodySmall) }
             }

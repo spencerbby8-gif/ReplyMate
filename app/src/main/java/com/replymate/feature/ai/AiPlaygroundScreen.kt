@@ -94,7 +94,30 @@ import java.util.UUID
 @Composable private fun MemoryInspection(context: MemoryContext) = Section("Retrieved conversation context") { Text("Contact ID: ${context.contact.id}", style = MaterialTheme.typography.bodySmall); Text("Recent turns: ${context.recentMessages.size} · Facts: ${context.importantFacts.size} · Preferences: ${context.preferences.size} · Long-term notes: ${context.longTermMemory.size}"); context.summary?.let { Text("Summary: $it") }; context.runningContext?.let { Text("Running context: $it") }; context.promptMemory().forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) } }
 @Composable private fun ReasoningPanel(draft: ReasonedDraft) = Section("Response pipeline") { Text("Intent: ${draft.plan.intents.joinToString { it.label.name }}"); Text("Emotion: ${draft.plan.emotion.label} (${(draft.plan.emotion.confidence * 100).toInt()}%)"); Text("Relationship: ${draft.plan.relationship.label ?: "Unknown"}"); Text("Goal: ${draft.plan.goal} · Strategy: ${draft.plan.strategy}"); Text(draft.plan.strategyExplanation, style = MaterialTheme.typography.bodySmall); Text("Final reply", style = MaterialTheme.typography.titleSmall); Text(draft.reply); Text("Quality — style ${(draft.quality.styleMatch * 100).toInt()} · relevance ${(draft.quality.relevance * 100).toInt()} · naturalness ${(draft.quality.naturalness * 100).toInt()} · confidence ${(draft.quality.estimatedConfidence * 100).toInt()}%", style = MaterialTheme.typography.bodySmall); if(draft.quality.concerns.isNotEmpty()) Text("Quality notes: ${draft.quality.concerns.joinToString()}", style = MaterialTheme.typography.bodySmall); Text("${draft.provider} · ${draft.model} · ${draft.generationDurationMs} ms${if(draft.regenerated) " · regenerated once" else ""}", style = MaterialTheme.typography.bodySmall) }
 @Composable private fun PlaygroundOutcome(outcome: PlaygroundGenerationOutcome?, onRetry: () -> Unit) { when (outcome) { null -> Unit; is PlaygroundGenerationOutcome.Success -> Section("Generated reply") { SelectionContainer { Text(outcome.result.text) }; Text("${outcome.result.provider} · ${outcome.result.model} · ${outcome.result.durationMs} ms", style = MaterialTheme.typography.bodySmall) }; is PlaygroundGenerationOutcome.Failure -> Section("Generation failed") { Text(outcome.error.userMessage, color = MaterialTheme.colorScheme.error); if (outcome.error.retryable) OutlinedButton(onClick = onRetry) { Text("Retry") } } } }
-@Composable private fun GenerationHistory(items: List<PlaygroundGenerationEntity>, onRegenerate: () -> Unit, onDelete: (String) -> Unit) { val clipboard = LocalClipboardManager.current; var compareId by remember { mutableStateOf<String?>(null) }; Section("Reply history") { if (items.isEmpty()) Text("No saved generations for this test contact yet.") else { items.forEach { item -> Card { Column(Modifier.padding(10.dp)) { Text(item.reply); Text("${item.provider} · ${item.model} · ${item.durationMs} ms", style = MaterialTheme.typography.bodySmall); Row { TextButton(onClick = { clipboard.setText(AnnotatedString(item.reply)) }) { Text("Copy") }; TextButton(onClick = { compareId = if (compareId == item.id) null else item.id }) { Text(if (compareId == item.id) "Comparing" else "Compare") }; TextButton(onClick = { onDelete(item.id) }) { Text("Delete") } } } } }; compareId?.let { id -> items.firstOrNull { it.id == id }?.let { compared -> Card { Column(Modifier.padding(10.dp)) { Text("Comparison target", style = MaterialTheme.typography.labelLarge); Text(compared.reply) } } } }; OutlinedButton(onClick = onRegenerate) { Text("Regenerate current test") } } }
+@Composable private fun GenerationHistory(items: List<PlaygroundGenerationEntity>, onRegenerate: () -> Unit, onDelete: (String) -> Unit) {
+    val clipboard = LocalClipboardManager.current; var compareId by remember { mutableStateOf<String?>(null) }
+    Section("Reply history") {
+        if (items.isEmpty()) {
+            Text("No saved generations for this test contact yet.")
+        } else {
+            items.forEach { item ->
+                Card {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(item.reply)
+                        Text("${item.provider} · ${item.model} · ${item.durationMs} ms", style = MaterialTheme.typography.bodySmall)
+                        Row {
+                            TextButton(onClick = { clipboard.setText(AnnotatedString(item.reply)) }) { Text("Copy") }
+                            TextButton(onClick = { compareId = if (compareId == item.id) null else item.id }) { Text(if (compareId == item.id) "Comparing" else "Compare") }
+                            TextButton(onClick = { onDelete(item.id) }) { Text("Delete") }
+                        }
+                    }
+                }
+            }
+            compareId?.let { id -> items.firstOrNull { it.id == id }?.let { compared -> Card { Column(Modifier.padding(10.dp)) { Text("Comparison target", style = MaterialTheme.typography.labelLarge); Text(compared.reply) } } } }
+            OutlinedButton(onClick = onRegenerate) { Text("Regenerate current test") }
+        }
+    }
+}
 private fun PlaygroundContact.toPromptRequest(personalization: Personalization, latest: String, retrieved: MemoryContext?): PromptRequest = PromptRequest(
     baseSystemPrompt = "You are ReplyMate's internal AI Playground. Draft a natural reply in the user's voice. This is a test only; never state that a message was sent.", personalization = personalization,
     contactRule = ContactStyleRule(id, relationshipContext = listOf("Relationship: $relationship", "Nickname: $nickname", "Personality: $personality").filterNot { it.endsWith(": ") }.joinToString("\n"), customInstructions = communicationStyle),

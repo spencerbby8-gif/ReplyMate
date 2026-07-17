@@ -11,7 +11,7 @@ import java.security.MessageDigest
 import java.util.UUID
 
 class EventValidator {
-    fun validate(sbn: StatusBarNotification): EventRejection? { val n=sbn.notification; return when { n.isSilent -> EventRejection.SILENT_NOTIFICATION; n.flags and android.app.Notification.FLAG_GROUP_SUMMARY != 0 -> EventRejection.GROUP_SUMMARY; n.extras.getCharSequence("android.title") == null && n.extras.getParcelableArray("android.messages") == null -> EventRejection.UNSUPPORTED_FORMAT; else -> null } }
+    fun validate(sbn: StatusBarNotification): EventRejection? { val n=sbn.notification; return when { n.isSilent -> EventRejection.SILENT_NOTIFICATION; (n.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0 -> EventRejection.GROUP_SUMMARY; n.extras.getCharSequence("android.title") == null && n.extras.getParcelableArray("android.messages") == null -> EventRejection.UNSUPPORTED_FORMAT; else -> null } }
 }
 class PlatformManager(adapters: Set<PlatformAdapter>) { private val byPackage=adapters.associateBy { it.packageName }; fun adapter(packageName:String)=byPackage[packageName] }
 class PlatformEventQueue(private val dao: PlatformEventDao) {
