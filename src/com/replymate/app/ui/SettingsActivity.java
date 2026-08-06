@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import com.replymate.app.R;
 import com.replymate.app.ReplyMateApp;
 import com.replymate.app.di.AppContainer;
@@ -94,11 +95,15 @@ public final class SettingsActivity extends Activity {
         notifRow = Ui.row(this, "ReplyMate notifications", "");
         notifRow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
+                // NEVER a dead row: request the runtime grant on 33+ when missing,
+                // otherwise open the real system notification settings for this app.
                 if (Build.VERSION.SDK_INT >= 33
                         && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
                             != PackageManager.PERMISSION_GRANTED) {
                     requestPermissions(
                         new String[] {"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIF);
+                } else {
+                    openSystemNotificationSettings();
                 }
             }
         });
@@ -137,6 +142,22 @@ public final class SettingsActivity extends Activity {
 
         LinearLayout aboutRow = Ui.row(this, "About", buildAboutLine());
         root.addView(aboutRow);
+        final TextView aboutDetails = Ui.sub(this, "");
+        aboutDetails.setVisibility(View.GONE);
+        aboutDetails.setPadding(0, 0, 0, Ui.dp(this, 8));
+        root.addView(aboutDetails);
+        aboutRow.setOnClickListener(new View.OnClickListener() {
+            boolean open;
+            @Override public void onClick(View v) {
+                open = !open;
+                if (open) {
+                    aboutDetails.setText(buildAboutDetails());
+                    aboutDetails.setVisibility(View.VISIBLE);
+                } else {
+                    aboutDetails.setVisibility(View.GONE);
+                }
+            }
+        });
         root.addView(Ui.divider(this));
 
         TextView footer = Ui.sub(this, "\nReplyMate only READS notifications you allow. It never sends,\nauto-replies, or syncs anything off this phone.");
@@ -152,6 +173,86 @@ public final class SettingsActivity extends Activity {
             return "ReplyMate " + pi.versionName + " (" + vc + ") · read-only listening · no sending";
         } catch (PackageManager.NameNotFoundException nnf) {
             return "ReplyMate · read-only listening · no sending";
+        }
+    }
+
+    /** Expanded About panel (real action for the row): build + runtime truth. */
+    private String buildAboutDetails() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager()
+                .getPackageInfo(getPackageName(), 0);
+            long vc = Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
+            sb.append("version: ").append(pi.versionName).append(" (").append(vc).append(")\n");
+        } catch (PackageManager.NameNotFoundException nnf) {
+            sb.append("version: unknown\n");
+        }
+        sb.append("min sdk: 24 · target sdk: ").append(getApplicationInfo().targetSdkVersion)
+          .append(" · device sdk: ").append(Build.VERSION.SDK_INT).append('\n');
+        sb.append("signer: ").append(signerDigest()).append('\n');
+        sb.append("local db: replymate.db (schema v")
+          .append(com.replymate.data.db.Migrations.LATEST).append(") · backups: off\n");
+        sb.append("listener service: ")
+          .append(ListenerStatus.isServiceEnabled(this) ? "enabled" : "not enabled").append('\n');
+        sb.append("cloud sync: OFF (local-first)\n");
+        sb.append("watch flags: ").append(watchSummary());
+        return sb.toString();
+    }
+
+    private String signerDigest() {
+        try {
+            if (Build.VERSION.SDK_INT >= 28) {
+                android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(
+                    getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
+                android.content.pm.Signature[] sigs = pi.signingInfo.getApkContentsSigners();
+                if (sigs != null && sigs.length > 0) {
+                    java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                    byte[] d = md.digest(sigs[0].toByteArray());
+                    StringBuilder hex = new StringBuilder();
+                    for (int i = 0; i < 8 && i < d.length; i++) {
+                        hex.append(String.format(java.util.Locale.US, "%02x", d[i]));
+                    }
+                    return "sha256 " + hex + "…";
+                }
+            }
+        } catch (Exception e) { /* fall through */ }
+        return "unavailable";
+    }
+
+    /** The channels whose watch flag is effectively ON (real kv state). */
+    private String watchSummary() {
+        java.util.Set<com.replymate.core.model.Channel> enabled =
+            com.replymate.core.listener.ParserRegistry.enabledFromKv(
+                c.kv(), java.util.EnumSet.of(
+                    com.replymate.core.model.Channel.WHATSAPP,
+                    com.replymate.core.model.Channel.TELEGRAM));
+        if (enabled.isEmpty()) return "none (all off)";
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (com.replymate.core.model.Channel ch : com.replymate.core.model.Channel.values()) {
+            if (!enabled.contains(ch)) continue;
+            if (!first) sb.append(", ");
+            sb.append(ch.wire);
+            first = false;
+        }
+        return sb.toString();
+    }
+
+    /** Real system screens for our own notification settings. */
+    private void openSystemNotificationSettings() {
+        Intent i = new Intent();
+        if (Build.VERSION.SDK_INT >= 26) {
+            i.setAction("android.settings.APP_NOTIFICATION_SETTINGS");
+            i.putExtra("android.provider.extra.APP_PACKAGE", getPackageName());
+        } else {
+            i.setAction("android.settings.APPLICATION_DETAILS_SETTINGS");
+            i.setData(android.net.Uri.parse("package:" + getPackageName()));
+        }
+        try {
+            startActivity(i);
+        } catch (RuntimeException boom) {
+            Toast.makeText(this, "No settings screen available on this device",
+                Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -227,7 +328,8 @@ public final class SettingsActivity extends Activity {
         return sb.toString();
     }
 
-    /** One line per watched app: received / parsed / ignored / failed + last reason. */
+    /** Per-app stats ONLY for apps really installed on this device (detection via
+     *  PackageManager; not-installed apps can't emit notifications to count). */
     private String perAppStats() {
         StringBuilder sb = new StringBuilder();
         com.replymate.core.listener.ListenerStats stats =
@@ -238,8 +340,26 @@ public final class SettingsActivity extends Activity {
                 : com.replymate.core.listener.WatchedApps.all()) {
             ordered.add(def.channel);
         }
+        java.util.Set<com.replymate.core.model.Channel> enabled =
+            com.replymate.core.listener.ParserRegistry.enabledFromKv(
+                c.kv(), java.util.EnumSet.of(
+                    com.replymate.core.model.Channel.WHATSAPP,
+                    com.replymate.core.model.Channel.TELEGRAM));
+        StringBuilder notInstalled = new StringBuilder();
+        int installed = 0;
         for (com.replymate.core.model.Channel ch : ordered) {
-            sb.append("  ").append(ch.wire).append(": ")
+            boolean has = false;
+            for (String p : com.replymate.core.listener.WatchedApps.packagesFor(ch)) {
+                has |= com.replymate.app.platform.DeepLinks.packageExists(this, p);
+            }
+            if (!has) {
+                if (notInstalled.length() > 0) notInstalled.append(", ");
+                notInstalled.append(com.replymate.core.listener.WatchedApps.labelFor(ch));
+                continue;
+            }
+            installed++;
+            sb.append("  ").append(ch.wire)
+              .append(enabled.contains(ch) ? " [on]" : " [off]").append(": ")
               .append("recv ").append(stats.receivedOf(ch))
               .append(" · parsed ").append(stats.parsedOf(ch))
               .append(" · ignored ").append(stats.ignoredOf(ch))
@@ -250,7 +370,14 @@ public final class SettingsActivity extends Activity {
             }
             sb.append('\n');
         }
-        return sb.toString();
+        StringBuilder out = new StringBuilder();
+        out.append("  installed supported apps: ").append(installed)
+           .append(" of ").append(ordered.size()).append('\n');
+        out.append(sb);
+        if (notInstalled.length() > 0) {
+            out.append("  not installed: ").append(notInstalled).append('\n');
+        }
+        return out.toString();
     }
 
     private String tsLine(String key) {

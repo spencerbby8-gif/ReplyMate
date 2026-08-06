@@ -155,6 +155,29 @@ public class ParserRegistryTest {
         assertTrue(tuned.contains(Channel.TELEGRAM));
     }
 
+    @Test public void tiersMatchTheWiredParsersPerChannel() {
+        // The label a user sees comes from the REGISTERED parser, nothing else.
+        assertEquals(WatchedApps.Tier.FULL, WatchedApps.tierFor(Channel.WHATSAPP));
+        assertEquals(WatchedApps.Tier.FULL, WatchedApps.tierFor(Channel.TELEGRAM));
+        assertEquals(WatchedApps.Tier.FULL, WatchedApps.tierFor(Channel.SIGNAL));
+        assertEquals(WatchedApps.Tier.FULL, WatchedApps.tierFor(Channel.GOOGLE_MESSAGES));
+        assertEquals(WatchedApps.Tier.FULL, WatchedApps.tierFor(Channel.MESSENGER));
+        assertEquals(WatchedApps.Tier.PARTIAL, WatchedApps.tierFor(Channel.SLACK));
+        assertEquals(WatchedApps.Tier.PARTIAL, WatchedApps.tierFor(Channel.DISCORD));
+        assertEquals(WatchedApps.Tier.LIMITED, WatchedApps.tierFor(Channel.INSTAGRAM));
+        assertEquals(WatchedApps.Tier.LIMITED, WatchedApps.tierFor(Channel.X));
+        assertEquals(WatchedApps.Tier.LIMITED, WatchedApps.tierFor(Channel.TIKTOK));
+        assertNull("manual mode is not a watched source", WatchedApps.tierFor(Channel.MANUAL));
+        for (WatchedApps.AppDef def : WatchedApps.all()) {
+            assertEquals("tier of " + def.packageName + " must equal its parser class",
+                def.parser instanceof MessagingStyleParser
+                    ? WatchedApps.Tier.FULL
+                    : (def.channel == Channel.SLACK || def.channel == Channel.DISCORD
+                        ? WatchedApps.Tier.PARTIAL : WatchedApps.Tier.LIMITED),
+                def.tier);
+        }
+    }
+
     @Test public void statsReasonIsTruncatedAndContentFree() {
         StringBuilder longReason = new StringBuilder();
         for (int i = 0; i < 100; i++) longReason.append('x');

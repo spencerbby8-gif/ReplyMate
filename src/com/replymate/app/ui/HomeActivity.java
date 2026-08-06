@@ -111,16 +111,18 @@ public final class HomeActivity extends Activity {
         }
     }
 
-    /** e.g. "WhatsApp, Signal" — the channels currently enabled for monitoring. */
+    /** e.g. "WhatsApp, Discord" — channels enabled AND actually installed (real state). */
     private String enabledSummary() {
         Set<Channel> enabled = ParserRegistry.enabledFromKv(c.kv(), DEFAULTS_ON);
-        if (enabled.isEmpty()) return "0 apps watched";
         List<String> names = new ArrayList<String>();
         for (WatchedApps.AppDef def : WatchedApps.all()) {
-            if (enabled.contains(def.channel) && !names.contains(def.label)) {
+            if (enabled.contains(def.channel)
+                    && com.replymate.app.platform.DeepLinks.packageExists(this, def.packageName)
+                    && !names.contains(def.label)) {
                 names.add(def.label);
             }
         }
+        if (names.isEmpty()) return "no installed apps enabled";
         if (names.size() <= 3) return join(names);
         return names.get(0) + ", " + names.get(1) + " +" + (names.size() - 2) + " more";
     }

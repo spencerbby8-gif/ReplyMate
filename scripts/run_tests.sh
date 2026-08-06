@@ -77,6 +77,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.data.MigrationTest \
     com.replymate.data.MigrationV2Test \
     com.replymate.data.PragmaRowBehaviorTest \
-    com.replymate.data.PlatformGuardTest
+    com.replymate.data.PlatformGuardTest \
+    com.replymate.data.ManifestCatalogTest
 
 echo "ALL SUITES PASSED"
