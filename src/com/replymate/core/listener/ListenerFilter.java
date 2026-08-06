@@ -1,7 +1,5 @@
 package com.replymate.core.listener;
 
-import com.replymate.core.model.Channel;
-
 /** What to do with each parsed event (approved P2 policy):
  *   - nothing readable and no attachment → SKIP
  *   - media-only/attachment → STORE_ONLY (placeholder, no proactive ping)
@@ -25,12 +23,5 @@ public final class ListenerFilter {
         if (e.group) return Verdict.STORE_ONLY;
         return Verdict.STORE_AND_PING;
     }
-
-    /** Watched packages (P2 scope: WhatsApp + Telegram only). */
-    public static Channel channelForPackage(String pkg) {
-        if (pkg == null) return null;
-        if (pkg.equals("com.whatsapp")) return Channel.WHATSAPP;
-        if (pkg.equals("org.telegram.messenger")) return Channel.TELEGRAM;
-        return null;
-    }
+    // NOTE: package→channel mapping moved to WatchedApps/ParserRegistry (P3).
 }

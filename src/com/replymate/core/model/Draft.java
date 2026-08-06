@@ -14,6 +14,7 @@ public class Draft {
     public int tokensIn;
     public int tokensOut;
     public long createdAt;
+    public boolean favorite;             // user-pinned draft (P3 draft cards)
 
     public Draft() { }
 }

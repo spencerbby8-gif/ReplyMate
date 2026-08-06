@@ -68,6 +68,16 @@ public final class SettingsActivity extends Activity {
         root.addView(listenRow);
         root.addView(Ui.divider(this));
 
+        LinearLayout sourcesRow = Ui.row(this, "Notification sources",
+            "choose which messaging apps ReplyMate may read");
+        sourcesRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, SourcesActivity.class));
+            }
+        });
+        root.addView(sourcesRow);
+        root.addView(Ui.divider(this));
+
         waRow = Ui.row(this, "Watch WhatsApp", "");
         waRow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { toggle("watch.whatsapp"); }
@@ -95,7 +105,17 @@ public final class SettingsActivity extends Activity {
         root.addView(notifRow);
         root.addView(Ui.divider(this));
 
-        LinearLayout diagRow = Ui.row(this, "Diagnostics", "database + listener self-test, recent events");
+        LinearLayout usageRow = Ui.row(this, "Usage dashboard",
+            "local metering of every AI call (count + tokens)");
+        usageRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, UsageActivity.class));
+            }
+        });
+        root.addView(usageRow);
+        root.addView(Ui.divider(this));
+
+        LinearLayout diagRow = Ui.row(this, "Diagnostics", "database + listener self-test, per-app stats, recent events");
         root.addView(diagRow);
         final TextView diagDetails = Ui.sub(this, "");
         diagDetails.setVisibility(View.GONE);
@@ -179,6 +199,8 @@ public final class SettingsActivity extends Activity {
           .append(" · telegram: ").append(c.kv().get("watch.telegram", "1")).append('\n');
         sb.append("  messages stored (listener): ")
           .append(c.kv().get(IngestCoordinator.KV_STORED_TOTAL, "0")).append('\n');
+        sb.append("Per-app listener stats:\n");
+        sb.append(perAppStats()).append('\n');
         sb.append("  last event: ").append(tsLine(IngestCoordinator.KV_LAST_EVENT)).append('\n');
         sb.append("Cloud (foundation):\n");
         sb.append("  endpoint: ").append(com.replymate.core.supabase.SupabaseConfig.PROJECT_URL).append('\n');
@@ -201,6 +223,32 @@ public final class SettingsActivity extends Activity {
                 sb.append("  ").append(ts > 0 ? TimeFmt.dayTime(ts) : "?").append(" — ")
                   .append(text).append('\n');
             }
+        }
+        return sb.toString();
+    }
+
+    /** One line per watched app: received / parsed / ignored / failed + last reason. */
+    private String perAppStats() {
+        StringBuilder sb = new StringBuilder();
+        com.replymate.core.listener.ListenerStats stats =
+            new com.replymate.core.listener.ListenerStats(c.kv());
+        java.util.LinkedHashSet<com.replymate.core.model.Channel> ordered =
+            new java.util.LinkedHashSet<com.replymate.core.model.Channel>();
+        for (com.replymate.core.listener.WatchedApps.AppDef def
+                : com.replymate.core.listener.WatchedApps.all()) {
+            ordered.add(def.channel);
+        }
+        for (com.replymate.core.model.Channel ch : ordered) {
+            sb.append("  ").append(ch.wire).append(": ")
+              .append("recv ").append(stats.receivedOf(ch))
+              .append(" · parsed ").append(stats.parsedOf(ch))
+              .append(" · ignored ").append(stats.ignoredOf(ch))
+              .append(" · failed ").append(stats.failedOf(ch));
+            String reason = stats.lastReasonOf(ch);
+            if (reason != null && !reason.isEmpty()) {
+                sb.append(" · last: ").append(reason);
+            }
+            sb.append('\n');
         }
         return sb.toString();
     }

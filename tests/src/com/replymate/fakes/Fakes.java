@@ -119,6 +119,21 @@ public final class Fakes {
             int from = Math.max(0, all.size() - limit);
             return new ArrayList<Message>(all.subList(from, all.size()));
         }
+        @Override public List<Message> searchByBody(String query, int limit) {
+            List<Message> hits = new ArrayList<Message>();
+            if (query == null || query.trim().isEmpty()) return hits;
+            String needle = query.trim().toLowerCase(java.util.Locale.US);
+            for (List<Message> list : byContact.values()) {
+                for (int i = list.size() - 1; i >= 0; i--) {
+                    Message m = list.get(i);
+                    if (m.body != null && m.body.toLowerCase(java.util.Locale.US).contains(needle)) {
+                        hits.add(m);
+                        if (hits.size() >= limit) return hits;
+                    }
+                }
+            }
+            return hits;
+        }
         @Override public int countByContact(long contactId) {
             List<Message> all = byContact.get(contactId);
             return all == null ? 0 : all.size();
@@ -139,10 +154,24 @@ public final class Fakes {
         public final List<Draft> saved = new ArrayList<Draft>();
         private long nextId = 1;
         @Override public long insert(Draft d) { d.id = nextId++; saved.add(d); return d.id; }
-        @Override public List<Draft> byContact(long contactId, int limit) { return saved; }
+        @Override public List<Draft> byContact(long contactId, int limit) {
+            List<Draft> out = new ArrayList<Draft>();
+            for (Draft d : saved) if (d.contactId == contactId && out.size() < limit) out.add(d);
+            return out;
+        }
         @Override public List<Draft> byVariantGroup(String variantGroup) { return saved; }
-        @Override public void updateStatus(long draftId, DraftStatus status) { }
-        @Override public void updateText(long draftId, String newText) { }
+        @Override public void updateStatus(long draftId, DraftStatus status) {
+            for (Draft d : saved) if (d.id == draftId) d.status = status;
+        }
+        @Override public void updateText(long draftId, String newText) {
+            for (Draft d : saved) if (d.id == draftId) d.replyText = newText;
+        }
+        @Override public void updateFavorite(long draftId, boolean favorite) {
+            for (Draft d : saved) if (d.id == draftId) d.favorite = favorite;
+        }
+        @Override public void delete(long draftId) {
+            for (int i = saved.size() - 1; i >= 0; i--) if (saved.get(i).id == draftId) saved.remove(i);
+        }
         @Override public void deleteByContact(long contactId) { }
     }
 
@@ -155,6 +184,11 @@ public final class Fakes {
             return t;
         }
         @Override public int countSince(long ts) { return events.size(); }
+        @Override public List<UsageEvent> since(long ts) {
+            List<UsageEvent> out = new ArrayList<UsageEvent>();
+            for (int i = events.size() - 1; i >= 0; i--) if (events.get(i).ts >= ts) out.add(events.get(i));
+            return out;
+        }
         @Override public void purgeBefore(long ts) { }
     }
 

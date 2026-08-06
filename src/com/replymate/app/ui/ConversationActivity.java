@@ -4,8 +4,12 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.graphics.Typeface;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -15,23 +19,35 @@ import android.widget.Toast;
 import com.replymate.app.R;
 import com.replymate.app.ReplyMateApp;
 import com.replymate.app.di.AppContainer;
+import com.replymate.app.platform.DeepLinks;
 import com.replymate.app.platform.Tasks;
+import com.replymate.core.listener.WatchedApps;
 import com.replymate.core.model.Channel;
 import com.replymate.core.model.Contact;
+import com.replymate.core.model.ContactChannel;
 import com.replymate.core.model.Direction;
 import com.replymate.core.model.Draft;
 import com.replymate.core.model.DraftStatus;
 import com.replymate.core.model.Message;
 import com.replymate.core.model.Source;
+import com.replymate.core.model.ToneTransform;
 import com.replymate.core.usecase.DraftOutcome;
 import com.replymate.core.util.Result;
 import com.replymate.core.util.TimeFmt;
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
-
+/** S04 — Conversation: thread (with in-thread search), manual capture buttons,
+ *  AI draft cards (Edit / Copy / Regenerate / Delete / Favorite + tone transforms
+ *  + open-in-source-app via official deep links), prompt-audit entry point.
+ *  Layout contract preserved from P2 (same view ids), features are additive. */
 public final class ConversationActivity extends Activity {
+
     public static final String EXTRA_CONTACT_ID = "contact_id";
+
     private Button btnGen;
     private AppContainer c;
     private Contact contact;
@@ -40,245 +56,399 @@ public final class ConversationActivity extends Activity {
     private TextView genStatus;
     private boolean generating;
     private EditText input;
+    private EditText search;
     private LinearLayout msgList;
     private ScrollView scroll;
+    private String filter = "";
+    /** Drafts with a tone transform currently in flight (loading/retry guard). */
+    private final Set<Long> busyDrafts = new HashSet<Long>();
 
-    @Override // android.app.Activity
-    protected void onCreate(Bundle bundle) {
-        super.onCreate(bundle);
+    @Override protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_conversation);
-        this.c = ReplyMateApp.containerOf(this);
-        long longExtra = getIntent().getLongExtra("contact_id", -1L);
-        Contact contact = longExtra > 0 ? this.c.contacts().get(longExtra) : null;
-        this.contact = contact;
-        if (contact == null) {
-            finish();
-            return;
-        }
-        this.msgList = (LinearLayout) findViewById(R.id.msg_list);
-        this.draftList = (LinearLayout) findViewById(R.id.draft_list);
-        this.genStatus = (TextView) findViewById(R.id.gen_status);
-        this.draftsHeader = (TextView) findViewById(R.id.drafts_header);
-        this.input = (EditText) findViewById(R.id.msg_input);
-        this.scroll = (ScrollView) findViewById(R.id.conv_scroll);
-        this.btnGen = (Button) findViewById(R.id.btn_gen);
-        ((TextView) findViewById(R.id.conv_name)).setText(this.contact.displayName);
-        ((TextView) findViewById(R.id.conv_rel)).setText(this.contact.relationshipType.isEmpty() ? "manual mode" : this.contact.relationshipType);
-        findViewById(R.id.back_btn).setOnClickListener(new View.OnClickListener() { // from class: com.replymate.app.ui.ConversationActivity.1
-            @Override // android.view.View.OnClickListener
-            public void onClick(View view) {
-                ConversationActivity.this.finish();
+        c = ReplyMateApp.containerOf(this);
+        long contactId = getIntent().getLongExtra(EXTRA_CONTACT_ID, -1L);
+        contact = contactId > 0 ? c.contacts().get(contactId) : null;
+        if (contact == null) { finish(); return; }
+
+        msgList = (LinearLayout) findViewById(R.id.msg_list);
+        draftList = (LinearLayout) findViewById(R.id.draft_list);
+        genStatus = (TextView) findViewById(R.id.gen_status);
+        draftsHeader = (TextView) findViewById(R.id.drafts_header);
+        input = (EditText) findViewById(R.id.msg_input);
+        search = (EditText) findViewById(R.id.conv_search);
+        scroll = (ScrollView) findViewById(R.id.conv_scroll);
+        btnGen = (Button) findViewById(R.id.btn_gen);
+
+        ((TextView) findViewById(R.id.conv_name)).setText(contact.displayName);
+        ((TextView) findViewById(R.id.conv_rel)).setText(
+            contact.relationshipType.isEmpty() ? "manual mode" : contact.relationshipType);
+
+        findViewById(R.id.back_btn).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { finish(); }
+        });
+        findViewById(R.id.edit_btn).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Intent i = new Intent(ConversationActivity.this, ContactEditActivity.class);
+                i.putExtra("contact_id", contact.id);
+                startActivity(i);
             }
         });
-        findViewById(R.id.edit_btn).setOnClickListener(new View.OnClickListener() { // from class: com.replymate.app.ui.ConversationActivity.2
-            @Override // android.view.View.OnClickListener
-            public void onClick(View view) {
-                Intent intent = new Intent(ConversationActivity.this, (Class<?>) ContactEditActivity.class);
-                intent.putExtra("contact_id", ConversationActivity.this.contact.id);
-                ConversationActivity.this.startActivity(intent);
+        findViewById(R.id.audit_btn).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Intent i = new Intent(ConversationActivity.this, PromptAuditActivity.class);
+                i.putExtra(PromptAuditActivity.EXTRA_CONTACT_ID, contact.id);
+                startActivity(i);
             }
         });
-        findViewById(R.id.btn_them).setOnClickListener(new View.OnClickListener() { // from class: com.replymate.app.ui.ConversationActivity.3
-            @Override // android.view.View.OnClickListener
-            public void onClick(View view) {
-                ConversationActivity.this.addMessage(Direction.INCOMING);
+        findViewById(R.id.btn_them).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { addMessage(Direction.INCOMING); }
+        });
+        findViewById(R.id.btn_me).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { addMessage(Direction.OUTGOING); }
+        });
+        btnGen.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { generate(); }
+        });
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int n) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int n) { }
+            @Override public void afterTextChanged(Editable s) {
+                filter = s == null ? "" : s.toString().trim().toLowerCase(Locale.US);
+                refreshThread();
             }
         });
-        findViewById(R.id.btn_me).setOnClickListener(new View.OnClickListener() { // from class: com.replymate.app.ui.ConversationActivity.4
-            @Override // android.view.View.OnClickListener
-            public void onClick(View view) {
-                ConversationActivity.this.addMessage(Direction.OUTGOING);
-            }
-        });
-        this.btnGen.setOnClickListener(new View.OnClickListener() { // from class: com.replymate.app.ui.ConversationActivity.5
-            @Override // android.view.View.OnClickListener
-            public void onClick(View view) {
-                ConversationActivity.this.generate();
-            }
-        });
+
         refreshThread();
         refreshDrafts();
     }
 
-    @Override // android.app.Activity
-    protected void onResume() {
-        AppContainer appContainer;
-        Contact contact;
+    @Override protected void onResume() {
         super.onResume();
-        if (this.contact != null && (appContainer = this.c) != null && (contact = appContainer.contacts().get(this.contact.id)) != null) {
-            this.contact = contact;
-            ((TextView) findViewById(R.id.conv_name)).setText(this.contact.displayName);
+        if (contact != null && c != null) {
+            Contact fresh = c.contacts().get(contact.id);
+            if (fresh != null) {
+                contact = fresh;
+                ((TextView) findViewById(R.id.conv_name)).setText(contact.displayName);
+            }
         }
     }
 
-    /* JADX INFO: Access modifiers changed from: private */
-    public void addMessage(Direction direction) {
-        String trim = this.input.getText().toString().trim();
-        if (trim.isEmpty()) {
-            Toast.makeText(this, "Type or paste a message first", 0).show();
+    /* ------------------------------------------------------------------ thread */
+
+    private void addMessage(Direction direction) {
+        String text = input.getText().toString().trim();
+        if (text.isEmpty()) {
+            Toast.makeText(this, "Type or paste a message first", Toast.LENGTH_SHORT).show();
             return;
         }
-        Message message = new Message();
-        message.contactId = this.contact.id;
-        message.channel = Channel.MANUAL;
-        message.direction = direction;
-        message.body = trim;
-        message.sentAt = this.c.clock().now();
-        message.source = Source.MANUAL;
-        this.c.messages().insert(message);
-        this.input.setText("");
+        Message m = new Message();
+        m.contactId = contact.id;
+        m.channel = Channel.MANUAL;
+        m.direction = direction;
+        m.body = text;
+        m.sentAt = c.clock().now();
+        m.source = Source.MANUAL;
+        c.messages().insert(m);
+        input.setText("");
         refreshThread();
     }
 
     private void refreshThread() {
-        this.msgList.removeAllViews();
-        List<Message> lastMessages = this.c.messages().lastMessages(this.contact.id, 100);
-        if (lastMessages.isEmpty()) {
-            TextView sub = Ui.sub(this, "No messages yet.\nPaste what " + this.contact.displayName + " sent you (＋them), then tap ✨ Generate.");
-            sub.setGravity(17);
-            sub.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 24));
-            this.msgList.addView(sub);
+        msgList.removeAllViews();
+        List<Message> all = c.messages().lastMessages(contact.id, filter.isEmpty() ? 100 : 400);
+        List<Message> shown = new ArrayList<Message>();
+        for (Message m : all) {
+            if (filter.isEmpty()
+                    || (m.body != null && m.body.toLowerCase(Locale.US).contains(filter))) {
+                shown.add(m);
+            }
+        }
+        if (shown.isEmpty()) {
+            TextView empty = Ui.sub(this, !filter.isEmpty()
+                ? "No messages match “" + filter + "”."
+                : "No messages yet.\nPaste what " + contact.displayName
+                    + " sent you (＋them), then tap ✨ Generate.");
+            empty.setGravity(android.view.Gravity.CENTER);
+            empty.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 24));
+            msgList.addView(empty);
             return;
         }
-        Iterator<Message> it = lastMessages.iterator();
-        while (it.hasNext()) {
-            this.msgList.addView(bubble(it.next()));
-        }
+        for (Message m : shown) msgList.addView(bubble(m));
         scrollToBottom();
     }
 
-    private View bubble(Message message) {
-        LinearLayout linearLayout = new LinearLayout(this);
-        linearLayout.setOrientation(1);
-        LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
-        layoutParams.topMargin = Ui.dp(this, 6);
-        linearLayout.setLayoutParams(layoutParams);
-        boolean z = message.direction == Direction.OUTGOING;
-        TextView tv = Ui.tv(this, message.body, 15.0f, -1);
-        tv.setBackgroundResource(z ? R.drawable.bg_bubble_out : R.drawable.bg_bubble_in);
-        int dp = Ui.dp(this, 12);
-        int dp2 = Ui.dp(this, 8);
-        tv.setPadding(dp, dp2, dp, dp2);
-        LinearLayout.LayoutParams layoutParams2 = new LinearLayout.LayoutParams(-2, -2);
-        layoutParams2.gravity = z ? 8388613 : 8388611;
-        int dp3 = Ui.dp(this, 48);
-        int i = z ? dp3 : 0;
-        if (z) {
-            dp3 = 0;
+    private View bubble(Message m) {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = Ui.dp(this, 6);
+        wrap.setLayoutParams(lp);
+        boolean out = m.direction == Direction.OUTGOING;
+
+        TextView body = Ui.tv(this, m.body, 15, Ui.PRIMARY);
+        body.setBackgroundResource(out ? R.drawable.bg_bubble_out : R.drawable.bg_bubble_in);
+        int hp = Ui.dp(this, 12), vp = Ui.dp(this, 8);
+        body.setPadding(hp, vp, hp, vp);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.gravity = out ? android.view.Gravity.END : android.view.Gravity.START;
+        int side = Ui.dp(this, 48);
+        blp.setMargins(out ? side : 0, 0, out ? 0 : side, 0);
+        wrap.addView(body, blp);
+
+        String who = out ? "You" : contact.displayName;
+        if (m.channel != null && m.channel != Channel.MANUAL) {
+            who += " · " + WatchedApps.labelFor(m.channel);
         }
-        layoutParams2.setMargins(i, 0, dp3, 0);
-        linearLayout.addView(tv, layoutParams2);
-        TextView sub = Ui.sub(this, (z ? "You" : this.contact.displayName) + " · " + TimeFmt.clock(message.sentAt));
-        LinearLayout.LayoutParams layoutParams3 = new LinearLayout.LayoutParams(-2, -2);
-        layoutParams3.gravity = z ? 8388613 : 8388611;
-        layoutParams3.topMargin = Ui.dp(this, 2);
-        linearLayout.addView(sub, layoutParams3);
-        return linearLayout;
+        TextView meta = Ui.sub(this, who + " · " + TimeFmt.clock(m.sentAt));
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mlp.gravity = out ? android.view.Gravity.END : android.view.Gravity.START;
+        mlp.topMargin = Ui.dp(this, 2);
+        wrap.addView(meta, mlp);
+        return wrap;
     }
 
-    /* JADX INFO: Access modifiers changed from: private */
-    public void scrollToBottom() {
-        this.scroll.post(new Runnable() { // from class: com.replymate.app.ui.ConversationActivity.6
-            @Override // java.lang.Runnable
-            public void run() {
-                if (ConversationActivity.this.scroll.getChildCount() > 0) {
-                    ConversationActivity.this.scroll.scrollTo(0, ConversationActivity.this.scroll.getChildAt(0).getHeight());
+    private void scrollToBottom() {
+        scroll.post(new Runnable() {
+            @Override public void run() {
+                if (scroll.getChildCount() > 0) {
+                    scroll.scrollTo(0, scroll.getChildAt(0).getHeight());
                 }
             }
         });
     }
 
-    /* JADX INFO: Access modifiers changed from: private */
-    public void generate() {
-        if (this.generating) {
-            return;
-        }
-        this.generating = true;
-        this.btnGen.setEnabled(false);
+    /* ---------------------------------------------------------------- generate */
+
+    private void generate() {
+        if (generating) return;
+        generating = true;
+        btnGen.setEnabled(false);
         showStatus("Generating…", Ui.ACCENT);
-        final long j = this.contact.id;
-        Tasks.call(new Tasks.Job<Result<DraftOutcome>>() { // from class: com.replymate.app.ui.ConversationActivity.7
-            /* JADX WARN: Can't rename method to resolve collision */
-            @Override // com.replymate.app.platform.Tasks.Job
-            public Result<DraftOutcome> run() {
-                return ConversationActivity.this.c.draftService().generateForContact(j);
+        final long contactId = contact.id;
+        Tasks.call(new Tasks.Job<Result<DraftOutcome>>() {
+            @Override public Result<DraftOutcome> run() {
+                return c.draftService().generateForContact(contactId);
             }
-        }, new Tasks.Done<Result<DraftOutcome>>() { // from class: com.replymate.app.ui.ConversationActivity.8
-            @Override // com.replymate.app.platform.Tasks.Done
-            public void accept(Result<DraftOutcome> result) {
-                ConversationActivity.this.generating = false;
-                ConversationActivity.this.btnGen.setEnabled(true);
-                if (result.ok) {
-                    ConversationActivity.this.showStatus("Ready — " + result.value.drafts.size() + " suggestions in " + (result.value.latencyMs / 1000.0d) + "s", Ui.GREEN);
-                    ConversationActivity.this.refreshDrafts();
-                    ConversationActivity.this.scrollToBottom();
-                    return;
+        }, new Tasks.Done<Result<DraftOutcome>>() {
+            @Override public void accept(Result<DraftOutcome> r) {
+                generating = false;
+                btnGen.setEnabled(true);
+                if (r.ok) {
+                    showStatus("Ready — " + r.value.drafts.size() + " suggestions in "
+                        + (r.value.latencyMs / 1000.0d) + "s", Ui.GREEN);
+                    refreshDrafts();
+                    scrollToBottom();
+                } else {
+                    showStatus("Couldn't generate: " + withHint(r.error), Ui.RED);
                 }
-                ConversationActivity.this.showStatus("Couldn't generate: " + result.error, Ui.RED);
             }
         });
     }
 
-    /* JADX INFO: Access modifiers changed from: private */
-    public void refreshDrafts() {
-        this.draftList.removeAllViews();
-        List<Draft> byContact = this.c.drafts().byContact(this.contact.id, 30);
-        this.draftsHeader.setVisibility(byContact.isEmpty() ? 8 : 0);
-        Iterator<Draft> it = byContact.iterator();
-        while (it.hasNext()) {
-            this.draftList.addView(draftCard(it.next()));
-        }
+    /* ------------------------------------------------------------------ drafts */
+
+    private void refreshDrafts() {
+        draftList.removeAllViews();
+        List<Draft> drafts = c.drafts().byContact(contact.id, 30);
+        draftsHeader.setVisibility(drafts.isEmpty() ? View.GONE : View.VISIBLE);
+        for (Draft d : drafts) draftList.addView(draftCard(d));
     }
 
     private View draftCard(final Draft draft) {
-        LinearLayout linearLayout = new LinearLayout(this);
-        linearLayout.setOrientation(1);
-        linearLayout.setBackgroundResource(R.drawable.bg_card);
-        int dp = Ui.dp(this, 12);
-        linearLayout.setPadding(dp, dp, dp, dp);
-        LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
-        layoutParams.topMargin = Ui.dp(this, 8);
-        linearLayout.setLayoutParams(layoutParams);
-        final EditText editText = new EditText(this);
-        editText.setText(draft.replyText);
-        editText.setTextColor(-1);
-        editText.setTextSize(2, 15.0f);
-        editText.setBackground(null);
-        editText.setPadding(0, 0, 0, Ui.dp(this, 6));
-        linearLayout.addView(editText);
-        LinearLayout linearLayout2 = new LinearLayout(this);
-        linearLayout2.setOrientation(0);
-        linearLayout2.setGravity(16);
-        linearLayout.addView(linearLayout2);
-        linearLayout2.addView(Ui.sub(this, draft.model + " · " + TimeFmt.dayTime(draft.createdAt) + " · " + draft.status.wire), new LinearLayout.LayoutParams(0, -2, 1.0f));
-        Button btn = Ui.btn(this, "Copy");
-        btn.setTextSize(2, 12.0f);
-        linearLayout2.addView(btn, new LinearLayout.LayoutParams(-2, -2));
-        btn.setOnClickListener(new View.OnClickListener() { // from class: com.replymate.app.ui.ConversationActivity.9
-            @Override // android.view.View.OnClickListener
-            public void onClick(View view) {
-                String trim = editText.getText().toString().trim();
-                if (trim.isEmpty()) {
-                    Toast.makeText(ConversationActivity.this, "Nothing to copy", 0).show();
-                    return;
-                }
-                if (!trim.equals(draft.replyText)) {
-                    ConversationActivity.this.c.drafts().updateText(draft.id, trim);
-                    ConversationActivity.this.c.drafts().updateStatus(draft.id, DraftStatus.EDITED);
-                } else {
-                    ConversationActivity.this.c.drafts().updateStatus(draft.id, DraftStatus.COPIED);
-                }
-                ((ClipboardManager) ConversationActivity.this.getSystemService("clipboard")).setPrimaryClip(ClipData.newPlainText("replymate draft", trim));
-                Toast.makeText(ConversationActivity.this, "Copied", 0).show();
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_card);
+        int pad = Ui.dp(this, 12);
+        card.setPadding(pad, pad, pad, pad);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = Ui.dp(this, 8);
+        card.setLayoutParams(lp);
+
+        // Editable draft text (the "Edit" action — persisted on Copy/status changes).
+        final EditText body = new EditText(this);
+        body.setText(draft.replyText);
+        body.setTextColor(Ui.PRIMARY);
+        body.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        body.setBackground(null);
+        body.setPadding(0, 0, 0, Ui.dp(this, 6));
+        card.addView(body);
+
+        // Meta row.
+        String favMark = draft.favorite ? "★ " : "";
+        card.addView(Ui.sub(this, favMark + draft.model + " · "
+            + TimeFmt.dayTime(draft.createdAt) + " · " + draft.status.wire));
+
+        // Action row: Copy · ☆/★ · Regen · Delete · Open-in-app.
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, Ui.dp(this, 4), 0, 0);
+        card.addView(actions);
+
+        addAction(actions, "Copy", new View.OnClickListener() {
+            @Override public void onClick(View v) { copyDraft(draft, body); }
+        });
+        addAction(actions, draft.favorite ? "★" : "☆", new View.OnClickListener() {
+            @Override public void onClick(View v) { toggleFavorite(draft); }
+        });
+        addAction(actions, "Re-gen", new View.OnClickListener() {
+            @Override public void onClick(View v) { generate(); }
+        });
+        addAction(actions, "Delete", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                c.drafts().delete(draft.id);
+                Toast.makeText(ConversationActivity.this,
+                    "Draft deleted", Toast.LENGTH_SHORT).show();
+                refreshDrafts();
             }
         });
-        return linearLayout;
+
+        final Channel origin = originChannel();
+        if (origin != null) {
+            TextView open = addAction(actions, "Open in " + WatchedApps.labelFor(origin),
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { openInApp(origin, body); }
+                });
+            open.setTextColor(Ui.ACCENT);
+        }
+
+        if (busyDrafts.contains(draft.id)) {
+            TextView busy = Ui.sub(this, "Transforming…");
+            busy.setPadding(0, Ui.dp(this, 4), 0, 0);
+            card.addView(busy);
+            return card;                            // no tone chips while working
+        }
+
+        // Tone transforms row.
+        LinearLayout tones = new LinearLayout(this);
+        tones.setOrientation(LinearLayout.HORIZONTAL);
+        tones.setPadding(0, Ui.dp(this, 4), 0, 0);
+        card.addView(tones);
+        for (final ToneTransform tone : ToneTransform.values()) {
+            TextView chip = Ui.tv(this, tone.label, 11, Ui.DIM);
+            chip.setBackgroundResource(R.drawable.bg_field);
+            int hp = Ui.dp(this, 8), vp = Ui.dp(this, 4);
+            chip.setPadding(hp, vp, hp, vp);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.rightMargin = Ui.dp(this, 6);
+            clp.topMargin = Ui.dp(this, 4);
+            tones.addView(chip, clp);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { transform(draft, tone); }
+            });
+        }
+        return card;
     }
 
-    /* JADX INFO: Access modifiers changed from: private */
-    public void showStatus(String str, int i) {
-        this.genStatus.setVisibility(0);
-        this.genStatus.setText(str);
-        this.genStatus.setTextColor(i);
+    private TextView addAction(LinearLayout parent, String label,
+                               View.OnClickListener listener) {
+        TextView a = Ui.tv(this, label, 12, Ui.DIM);
+        a.setTypeface(Typeface.DEFAULT_BOLD);
+        int hp = Ui.dp(this, 8), vp = Ui.dp(this, 6);
+        a.setPadding(hp, vp, hp, vp);
+        a.setOnClickListener(listener);
+        parent.addView(a);
+        return a;
+    }
+
+    private void copyDraft(Draft draft, EditText body) {
+        String text = body.getText().toString().trim();
+        if (text.isEmpty()) {
+            Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!text.equals(draft.replyText)) {
+            c.drafts().updateText(draft.id, text);
+            c.drafts().updateStatus(draft.id, DraftStatus.EDITED);
+        } else {
+            c.drafts().updateStatus(draft.id, DraftStatus.COPIED);
+        }
+        ((ClipboardManager) getSystemService("clipboard"))
+            .setPrimaryClip(ClipData.newPlainText("replymate draft", text));
+        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show();
+        refreshDrafts();
+    }
+
+    private void toggleFavorite(Draft draft) {
+        c.drafts().updateFavorite(draft.id, !draft.favorite);
+        refreshDrafts();
+    }
+
+    private void transform(final Draft draft, final ToneTransform tone) {
+        if (busyDrafts.contains(draft.id)) return;          // loading/retry guard
+        busyDrafts.add(draft.id);
+        showStatus("Transforming: " + tone.label + "…", Ui.ACCENT);
+        final long contactId = contact.id;
+        Tasks.call(new Tasks.Job<Result<DraftOutcome>>() {
+            @Override public Result<DraftOutcome> run() {
+                return c.draftService().transformDraftForContact(contactId, draft.id, tone);
+            }
+        }, new Tasks.Done<Result<DraftOutcome>>() {
+            @Override public void accept(Result<DraftOutcome> r) {
+                busyDrafts.remove(draft.id);
+                if (r.ok) {
+                    showStatus("Added a " + tone.label.toLowerCase(Locale.US)
+                        + " variant ✓", Ui.GREEN);
+                    refreshDrafts();
+                } else {
+                    showStatus("Transform failed: " + withHint(r.error), Ui.RED);
+                    refreshDrafts();                        // un-freeze the card UI
+                }
+            }
+        });
+    }
+
+    /** The channel this contact was discovered on (deep-link target), else null. */
+    private Channel originChannel() {
+        for (ContactChannel ch : c.contacts().channelsByContact(contact.id)) {
+            if (ch.channel != null && ch.channel != Channel.MANUAL) return ch.channel;
+        }
+        return null;
+    }
+
+    private void openInApp(Channel channel, EditText body) {
+        String text = body.getText().toString().trim();
+        boolean opened = DeepLinks.openChat(this, channel, contact.displayName,
+            text, WatchedApps.primaryPackageFor(channel));
+        if (!opened) {
+            if (!text.isEmpty()) {
+                ((ClipboardManager) getSystemService("clipboard"))
+                    .setPrimaryClip(ClipData.newPlainText("replymate draft", text));
+            }
+            Toast.makeText(this,
+                "Couldn't open " + WatchedApps.labelFor(channel)
+                    + " — draft copied, paste it there",
+                Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /* ------------------------------------------------------------------ status */
+
+    private void showStatus(String msg, int color) {
+        genStatus.setVisibility(View.VISIBLE);
+        genStatus.setText(msg);
+        genStatus.setTextColor(color);
+    }
+
+    /** Error text + actionable hint: offline-friendly messaging for network failures. */
+    private static String withHint(String error) {
+        if (error == null) return "unknown error";
+        String low = error.toLowerCase(Locale.US);
+        if (low.contains("api key") || low.contains("401") || low.contains("403")) {
+            return error + " — check your API key in Settings → AI provider";
+        }
+        if (low.contains("network") || low.contains("timeout") || low.contains("connect")
+                || low.contains("unreachable") || low.contains("socket")) {
+            return error + " — check your internet connection, then tap ✨ again to retry";
+        }
+        if (low.contains("429") || low.contains("quota") || low.contains("rate")) {
+            return error + " — provider limit hit; wait a moment, then retry";
+        }
+        return error;
     }
 }

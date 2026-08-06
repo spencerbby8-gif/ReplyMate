@@ -4,7 +4,15 @@ package com.replymate.core.model;
 public enum Channel {
     WHATSAPP("whatsapp"),
     TELEGRAM("telegram"),
-    MANUAL("manual");
+    MANUAL("manual"),
+    SIGNAL("signal"),
+    GOOGLE_MESSAGES("gmessages"),
+    MESSENGER("messenger"),
+    SLACK("slack"),
+    DISCORD("discord"),
+    INSTAGRAM("instagram"),
+    X("x"),
+    TIKTOK("tiktok");
 
     public final String wire;
     Channel(String wire) { this.wire = wire; }

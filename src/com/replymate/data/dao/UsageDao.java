@@ -33,6 +33,20 @@ public final class UsageDao {
         }
     }
 
+    public java.util.List<com.replymate.core.model.UsageEvent> since(long ts) {
+        android.database.Cursor c = helper.getReadableDatabase().query(
+            "usage_event", null, "ts>=?", new String[] {String.valueOf(ts)},
+            null, null, "ts DESC, id DESC");
+        java.util.List<com.replymate.core.model.UsageEvent> out =
+            new java.util.ArrayList<com.replymate.core.model.UsageEvent>();
+        try {
+            while (c.moveToNext()) out.add(event(c));
+        } finally {
+            c.close();
+        }
+        return out;
+    }
+
     public int countSince(long ts) {
         Cursor c = helper.getReadableDatabase().rawQuery(
             "SELECT COUNT(*) FROM usage_event WHERE ts>=?",
@@ -47,5 +61,17 @@ public final class UsageDao {
     public void purgeBefore(long ts) {
         helper.getWritableDatabase().delete("usage_event", "ts<?",
             new String[] {String.valueOf(ts)});
+    }
+
+    private static com.replymate.core.model.UsageEvent event(android.database.Cursor c) {
+        com.replymate.core.model.UsageEvent o = new com.replymate.core.model.UsageEvent();
+        o.id = c.getLong(c.getColumnIndexOrThrow("id"));
+        o.ts = c.getLong(c.getColumnIndexOrThrow("ts"));
+        o.model = c.getString(c.getColumnIndexOrThrow("model"));
+        o.tokensIn = c.getInt(c.getColumnIndexOrThrow("tokens_in"));
+        o.tokensOut = c.getInt(c.getColumnIndexOrThrow("tokens_out"));
+        o.kind = com.replymate.core.model.UsageKind.fromWire(
+            c.getString(c.getColumnIndexOrThrow("kind")));
+        return o;
     }
 }

@@ -9,6 +9,8 @@ import com.replymate.core.model.DraftStatus;
 import com.replymate.core.model.Message;
 import com.replymate.core.model.Scope;
 import com.replymate.core.model.StyleProfile;
+import com.replymate.core.model.ToneTransform;
+import java.util.Collections;
 import com.replymate.core.model.UsageEvent;
 import com.replymate.core.model.UsageKind;
 import com.replymate.core.ports.AiProvider;
@@ -139,4 +141,92 @@ public final class DraftService {
             + " in " + latency + "ms");
         return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
     }
+
+    /** P3: explicit regenerate — same pipeline, fresh variants for the contact. */
+    public Result<DraftOutcome> regenerateForContact(long contactId) {
+        return generateForContact(contactId);
+    }
+
+    /** P3: tone-transform ONE existing draft into new variant(s).
+     *  Isolation: only the draft's own text crosses the wire — no other contact's
+     *  data is ever read here. Audit: prompt snapshot stored on the new drafts. */
+    /** Contact-scoped transform entry point used by the UI. */
+    public Result<DraftOutcome> transformDraftForContact(long contactId, long draftId,
+                                                         ToneTransform tone) {
+        if (tone == null) return Result.err("Pick a tone first.");
+        Contact c = contacts.get(contactId);
+        if (c == null) return Result.err("Contact not found.");
+        if (c.privateMode) return Result.err("This contact is private — AI generation is disabled.");
+        if (!c.aiEnabled) return Result.err("AI replies are disabled for this contact.");
+
+        Draft origin = null;
+        for (Draft d : drafts.byContact(contactId, 200)) {
+            if (d.id == draftId) { origin = d; break; }
+        }
+        if (origin == null) return Result.err("That draft is gone.");
+        if (origin.replyText.trim().isEmpty()) return Result.err("Nothing to transform.");
+
+        AiProvider provider = gateway.active();
+        if (provider == null) {
+            return Result.err("Set up your Gemini API key first (Settings → AI provider).");
+        }
+
+        String system = "You rewrite a single chat reply draft on request. "
+            + "Keep the same language as the draft, keep every factual detail, never add "
+            + "new facts, names, dates or promises. Output ONLY the rewritten reply.";
+        String taskText = "Draft:\n" + origin.replyText.trim()
+            + "\n\nRewrite it like this: " + tone.instruction;
+        ChatRequest request = new ChatRequest(system,
+            Collections.<com.replymate.core.ai.Turn>emptyList(),
+            com.replymate.core.ai.Turn.user(taskText),
+            com.replymate.core.ai.GenerationOpts.defaults());
+
+        long t0 = clock.now();
+        Result<ChatReply> reply = provider.generate(request);
+        long latency = clock.now() - t0;
+        if (!reply.ok) {
+            log.w("DraftService", "tone transform failed for draft " + draftId + ": " + reply.error);
+            return Result.err(reply.error);
+        }
+        ChatReply r = reply.value;
+        if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
+
+        long now = clock.now();
+        String group = ids.next();
+        String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        String snapshot = PromptBuilder.snapshot(request, model, "tone:" + tone.wire);
+        int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
+
+        List<Draft> saved = new ArrayList<Draft>();
+        for (String variant : r.variants) {
+            String text = variant == null ? "" : variant.trim();
+            if (text.isEmpty()) continue;
+            Draft d = new Draft();
+            d.contactId = contactId;
+            d.inReplyToId = origin.inReplyToId;
+            d.promptSnapshotJson = snapshot;
+            d.replyText = text;
+            d.model = model;
+            d.variantGroup = group;
+            d.status = DraftStatus.GENERATED;
+            d.latencyMs = latency;
+            d.tokensIn = r.tokensIn;
+            d.tokensOut = outEach;
+            d.createdAt = now;
+            d.id = drafts.insert(d);
+            saved.add(d);
+        }
+        if (saved.isEmpty()) return Result.err("The provider returned empty replies.");
+
+        UsageEvent u = new UsageEvent();
+        u.ts = now;
+        u.model = model;
+        u.tokensIn = r.tokensIn;
+        u.tokensOut = r.tokensOut;
+        u.kind = UsageKind.REPLY;
+        usage.insert(u);
+
+        return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
+    }
+
 }

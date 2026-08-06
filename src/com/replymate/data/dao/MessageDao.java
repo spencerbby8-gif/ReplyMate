@@ -69,6 +69,31 @@ public final class MessageDao {
         return out;
     }
 
+    /** UI inbox search (P3) — see MessageStore.searchByBody for the isolation contract. */
+    public List<Message> searchByBody(String query, int limit) {
+        List<Message> out = new ArrayList<Message>();
+        if (query == null) return out;
+        String needle = query.trim();
+        if (needle.isEmpty()) return out;
+        StringBuilder like = new StringBuilder("%");
+        for (int i = 0; i < needle.length(); i++) {
+            char ch = needle.charAt(i);
+            if (ch == '%' || ch == '_' || ch == '\\') like.append('\\');
+            like.append(ch);
+        }
+        like.append('%');
+        Cursor c = helper.getReadableDatabase().query("message", null,
+            "body LIKE ? ESCAPE '\\'",
+            new String[] {like.toString()}, null, null,
+            "sent_at DESC, id DESC", String.valueOf(Math.max(1, limit)));
+        try {
+            while (c.moveToNext()) out.add(message(c));
+        } finally {
+            c.close();
+        }
+        return out;
+    }
+
     public int countByContact(long contactId) {
         Cursor c = helper.getReadableDatabase().rawQuery(
             "SELECT COUNT(*) FROM message WHERE contact_id=?",

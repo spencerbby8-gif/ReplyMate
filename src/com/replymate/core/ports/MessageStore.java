@@ -16,6 +16,12 @@ public interface MessageStore {
 
     Message getByNotifKey(Channel channel, String notifKey);      // dedupe, null if absent
     List<Message> lastMessages(long contactId, int limit);        // oldest-first within the window
+
+    /** UI inbox search (P3): newest-first messages whose body contains the query.
+     *  STRICTLY for the Home screen's "find a conversation" box — results are rendered
+     *  as a pick-list only and are NEVER used to assemble AI prompt context (isolation). */
+    List<Message> searchByBody(String query, int limit);
+
     int countByContact(long contactId);
     void deleteByContact(long contactId);
 }

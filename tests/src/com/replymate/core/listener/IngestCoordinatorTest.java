@@ -47,10 +47,18 @@ public class IngestCoordinatorTest {
         return new ArrayList<NotifEvent>(Arrays.asList(events));
     }
 
+    private static java.util.Set<Channel> allOn() {
+        return null;   // null set = no gate (registry normally gates before this layer)
+    }
+
+    private static java.util.Set<Channel> only(Channel... channels) {
+        return new java.util.HashSet<Channel>(Arrays.asList(channels));
+    }
+
     @Test public void storesIncomingAndAutoDiscoversContactAndPingsOnce() {
         IngestReport rep = engine.handle(list(
             ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "you dey?", 1000, false, false),
-            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "??", 2000, false, false)), true, true);
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "??", 2000, false, false)), allOn());
 
         assertEquals(2, rep.stored);
         assertEquals(0, rep.duplicates);
@@ -71,12 +79,12 @@ public class IngestCoordinatorTest {
     @Test public void repostedNotificationDoesNotDuplicateOldMessages() {
         // WhatsApp re-posts the conversation with message#1+#2 in MessagingStyle:
         IngestReport first = engine.handle(list(
-            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "m1", 1000, false, false)), true, true);
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "m1", 1000, false, false)), allOn());
         assertEquals(1, first.stored);
 
         IngestReport second = engine.handle(list(
             ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "m1", 1000, false, false),   // OLD msg again
-            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "m2", 2000, false, false)), true, true);
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "m2", 2000, false, false)), allOn());
 
         assertEquals(1, second.stored);        // only m2 is new
         assertEquals(1, second.duplicates);    // m1 deduped by content hash
@@ -86,7 +94,7 @@ public class IngestCoordinatorTest {
 
     @Test public void ownMessagesStoredAsOutgoingNeverPing() {
         IngestReport rep = engine.handle(list(
-            ev(Channel.WHATSAPP, "Amara", "Me", "Me", "my reply", 1000, false, false)), true, true);
+            ev(Channel.WHATSAPP, "Amara", "Me", "Me", "my reply", 1000, false, false)), allOn());
         assertEquals(1, rep.stored);
         assertEquals(0, rep.pings.size());
         Contact c = contacts.all().get(0);
@@ -95,7 +103,7 @@ public class IngestCoordinatorTest {
 
     @Test public void groupsStoredButNeverPing() {
         IngestReport rep = engine.handle(list(
-            ev(Channel.WHATSAPP, "Family", "Ada", "Me", "hello fam", 1000, true, false)), true, true);
+            ev(Channel.WHATSAPP, "Family", "Ada", "Me", "hello fam", 1000, true, false)), allOn());
         assertEquals(1, rep.stored);
         assertEquals(0, rep.pings.size());
         assertEquals("family", contacts.all().get(0).displayName.equals("Family")
@@ -104,7 +112,7 @@ public class IngestCoordinatorTest {
 
     @Test public void mediaOnlyStoresPlaceholderNoPing() {
         IngestReport rep = engine.handle(list(
-            ev(Channel.TELEGRAM, "Sam", "Sam", "Me", null, 1000, false, true)), true, true);
+            ev(Channel.TELEGRAM, "Sam", "Sam", "Me", null, 1000, false, true)), allOn());
         assertEquals(1, rep.stored);
         assertEquals(0, rep.pings.size());
         Contact c = contacts.all().get(0);
@@ -113,7 +121,7 @@ public class IngestCoordinatorTest {
 
     @Test public void emptyTextWithoutAttachmentFiltered() {
         IngestReport rep = engine.handle(list(
-            ev(Channel.TELEGRAM, "Sam", "Sam", "Me", "  ", 1000, false, false)), true, true);
+            ev(Channel.TELEGRAM, "Sam", "Sam", "Me", "  ", 1000, false, false)), allOn());
         assertEquals(0, rep.stored);
         assertEquals(1, rep.filtered);
         assertTrue(contacts.all().isEmpty());
@@ -122,7 +130,7 @@ public class IngestCoordinatorTest {
     @Test public void watchTogglesGateChannels() {
         IngestReport rep = engine.handle(list(
             ev(Channel.WHATSAPP, "A", "A", "Me", "wa msg", 1000, false, false),
-            ev(Channel.TELEGRAM, "B", "B", "Me", "tg msg", 1001, false, false)), false, true);
+            ev(Channel.TELEGRAM, "B", "B", "Me", "tg msg", 1001, false, false)), only(Channel.TELEGRAM));
         assertEquals(1, rep.stored);            // telegram only
         assertEquals(1, rep.filtered);          // whatsapp gated out
         assertEquals(1, contacts.all().size());
@@ -132,7 +140,7 @@ public class IngestCoordinatorTest {
     @Test public void isolationBetweenContactsMaintained() {
         engine.handle(list(
             ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "A1", 1000, false, false),
-            ev(Channel.TELEGRAM, "Zoe", "Zoe", "Me", "Z1", 1001, false, false)), true, true);
+            ev(Channel.TELEGRAM, "Zoe", "Zoe", "Me", "Z1", 1001, false, false)), allOn());
         assertEquals(2, contacts.all().size());
         for (Contact c : contacts.all()) {
             List<Message> thread = messages.lastMessages(c.id, 10);
@@ -144,7 +152,7 @@ public class IngestCoordinatorTest {
 
     @Test public void unknownConversationStillWorks() {
         IngestReport rep = engine.handle(list(
-            ev(Channel.TELEGRAM, null, null, "Me", "hey", 1000, false, false)), true, true);
+            ev(Channel.TELEGRAM, null, null, "Me", "hey", 1000, false, false)), allOn());
         assertEquals(1, rep.stored);
         assertEquals(1, rep.pings.size());
         assertTrue(rep.pings.get(0).displayName.length() > 0);
@@ -154,7 +162,7 @@ public class IngestCoordinatorTest {
         for (int i = 0; i < 20; i++) {
             engine.handle(list(
                 ev(Channel.WHATSAPP, "P" + i, "P" + i, "Me", "m" + i, 1000 + i, false, false)),
-                true, true);
+                allOn());
         }
         assertTrue(DiagnosticsRing.lines(kv.get(IngestCoordinator.KV_RING, "")).size()
             <= DiagnosticsRing.CAP);

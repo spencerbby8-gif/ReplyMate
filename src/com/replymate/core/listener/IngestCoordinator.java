@@ -13,6 +13,7 @@ import com.replymate.core.util.Logger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Listener ingestion pipeline (P2 core). Rules (approved design):
  *  - messages are STORED immediately (durability gate: zero unlogged text messages);
@@ -49,8 +50,10 @@ public final class IngestCoordinator {
         long ts;
     }
 
-    public IngestReport handle(List<NotifEvent> events, boolean watchWhatsApp,
-                               boolean watchTelegram) {
+    /** Store + aggregate parsed events. Watch-gating normally happens BEFORE parsing
+     *  in ParserRegistry; the enabled-set check here is defence in depth for callers
+     *  that bypass the registry. Passing null means "no gate" (all channels allowed). */
+    public IngestReport handle(List<NotifEvent> events, Set<Channel> enabled) {
         IngestReport rep = new IngestReport();
         if (events == null || events.isEmpty()) return rep;
 
@@ -61,8 +64,7 @@ public final class IngestCoordinator {
 
         for (NotifEvent e : events) {
             if (e == null || e.channel == null) { rep.filtered++; continue; }
-            if ((e.channel == Channel.WHATSAPP && !watchWhatsApp)
-                    || (e.channel == Channel.TELEGRAM && !watchTelegram)) {
+            if (enabled != null && !enabled.contains(e.channel)) {
                 rep.filtered++;
                 continue;
             }

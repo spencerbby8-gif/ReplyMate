@@ -22,5 +22,9 @@ public final class SqlDraftStore implements DraftStore {
         dao.updateStatus(draftId, status);
     }
     @Override public void updateText(long draftId, String newText) { dao.updateText(draftId, newText); }
+    @Override public void updateFavorite(long draftId, boolean favorite) {
+        dao.updateFavorite(draftId, favorite);
+    }
+    @Override public void delete(long draftId) { dao.delete(draftId); }
     @Override public void deleteByContact(long contactId) { dao.deleteByContact(contactId); }
 }

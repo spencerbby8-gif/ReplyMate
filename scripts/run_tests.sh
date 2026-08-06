@@ -53,9 +53,11 @@ echo "running suites…"
 java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.junit.runner.JUnitCore \
     com.replymate.core.json.JsonTest \
     com.replymate.core.util.ResultTest \
+    com.replymate.core.model.ToneTransformTest \
     com.replymate.core.prompt.PromptBuilderTest \
     com.replymate.core.budget.TokenBudgeterTest \
     com.replymate.core.usecase.DraftServiceTest \
+    com.replymate.core.usecase.DraftServiceToneTest \
     com.replymate.core.usecase.ContactServiceTest \
     com.replymate.core.listener.IdentityResolverTest \
     com.replymate.core.listener.TextIdsTest \
@@ -63,12 +65,17 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.listener.ListenerFilterTest \
     com.replymate.core.listener.BatchWindowTest \
     com.replymate.core.listener.IngestCoordinatorTest \
+    com.replymate.core.listener.MessagingStyleParserTest \
+    com.replymate.core.listener.TitleTextParserTest \
+    com.replymate.core.listener.ParserRegistryTest \
+    com.replymate.core.listener.ChatLinkTest \
     com.replymate.core.supabase.SupabaseConfigTest \
     com.replymate.provider.RetryPolicyTest \
     com.replymate.provider.ApiErrorTest \
     com.replymate.provider.GeminiPayloadTest \
     com.replymate.provider.GeminiParserTest \
     com.replymate.data.MigrationTest \
+    com.replymate.data.MigrationV2Test \
     com.replymate.data.PragmaRowBehaviorTest \
     com.replymate.data.PlatformGuardTest
 

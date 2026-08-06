@@ -45,6 +45,15 @@
         </LinearLayout>
 
         <TextView
+            android:id="@+id/audit_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Audit"
+            android:textColor="@color/accent"
+            android:textSize="14sp"
+            android:padding="8dp" />
+
+        <TextView
             android:id="@+id/edit_btn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -53,6 +62,22 @@
             android:textSize="14sp"
             android:padding="8dp" />
     </LinearLayout>
+
+    <EditText
+        android:id="@+id/conv_search"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="16dp"
+        android:layout_marginRight="16dp"
+        android:layout_marginBottom="6dp"
+        android:hint="@string/conv_search_hint"
+        android:textColorHint="@color/text_dim"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp"
+        android:background="@drawable/bg_field"
+        android:padding="8dp"
+        android:singleLine="true"
+        android:inputType="text" />
 
     <ScrollView
         android:id="@+id/conv_scroll"

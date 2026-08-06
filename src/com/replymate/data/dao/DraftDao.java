@@ -27,6 +27,7 @@ public final class DraftDao {
         v.put("latency_ms", d.latencyMs);
         v.put("tokens_in", d.tokensIn);
         v.put("tokens_out", d.tokensOut);
+        v.put("favorite", d.favorite ? 1 : 0);
         v.put("created_at", d.createdAt);
         return helper.getWritableDatabase().insert("draft", null, v);
     }
@@ -70,6 +71,18 @@ public final class DraftDao {
             new String[] {String.valueOf(draftId)});
     }
 
+    public void updateFavorite(long draftId, boolean favorite) {
+        ContentValues v = new ContentValues();
+        v.put("favorite", favorite ? 1 : 0);
+        helper.getWritableDatabase().update("draft", v, "id=?",
+            new String[] {String.valueOf(draftId)});
+    }
+
+    public void delete(long draftId) {
+        helper.getWritableDatabase().delete("draft", "id=?",
+            new String[] {String.valueOf(draftId)});
+    }
+
     public void deleteByContact(long contactId) {
         helper.getWritableDatabase().delete("draft", "contact_id=?",
             new String[] {String.valueOf(contactId)});
@@ -89,6 +102,7 @@ public final class DraftDao {
         o.latencyMs = c.getLong(c.getColumnIndexOrThrow("latency_ms"));
         o.tokensIn = c.getInt(c.getColumnIndexOrThrow("tokens_in"));
         o.tokensOut = c.getInt(c.getColumnIndexOrThrow("tokens_out"));
+        o.favorite = c.getInt(c.getColumnIndexOrThrow("favorite")) == 1;
         o.createdAt = c.getLong(c.getColumnIndexOrThrow("created_at"));
         return o;
     }

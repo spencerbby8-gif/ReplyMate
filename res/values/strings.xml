@@ -5,4 +5,6 @@
     <string name="home_status_loading">Initializing database…</string>
     <string name="home_empty">No contacts yet.\nAdd someone to start drafting replies.</string>
     <string name="home_new_contact">＋ New contact</string>
+    <string name="home_search_hint">Search contacts or messages…</string>
+    <string name="conv_search_hint">Search this conversation…</string>
 </resources>

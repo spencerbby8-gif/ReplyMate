@@ -28,6 +28,12 @@ public final class PromptBuilder {
 
     /** Audit snapshot of exactly what is sent (stored on each draft row). */
     public static String snapshot(ChatRequest req, String model) {
+        return snapshot(req, model, "reply");
+    }
+
+    /** As above, with an explicit kind tag ("reply", "tone:friendlier", …) so the
+     *  audit viewer can tell full generations from tone transforms. */
+    public static String snapshot(ChatRequest req, String model, String kind) {
         JsonArr turns = JsonArr.create();
         for (Turn t : req.turns) {
             turns.add(JsonObj.create()
@@ -35,6 +41,7 @@ public final class PromptBuilder {
                 .put("text", t.text));
         }
         return JsonObj.create()
+            .put("kind", kind)
             .put("model", model)
             .put("system", req.system)
             .put("turns", turns)

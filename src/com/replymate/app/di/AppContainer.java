@@ -46,6 +46,7 @@ import com.replymate.provider.http.RetryPolicy;
 public final class AppContainer {
     private AiProvider cachedProvider;
     private String cachedSignature;
+    private final Context app;
     private final Clock clock;
     private final ContactService contactService;
     private final ContactStore contactStore;
@@ -66,6 +67,7 @@ public final class AppContainer {
 
     public AppContainer(Context context) {
         Context applicationContext = context.getApplicationContext();
+        this.app = applicationContext;
         ScrubLogger wrap = ScrubLogger.wrap(new AndroidLogger());
         this.scrubLogger = wrap;
         this.logger = wrap;
@@ -144,6 +146,11 @@ public final class AppContainer {
     public void invalidateProvider() {
         this.cachedProvider = null;
         this.cachedSignature = null;
+    }
+
+    /** Application context for platform helpers (deep links, package manager). */
+    public Context app() {
+        return this.app;
     }
 
     public Logger logger() {

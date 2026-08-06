@@ -1,6 +1,5 @@
 package com.replymate.core.listener;
 
-import com.replymate.core.model.Channel;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
@@ -32,11 +31,5 @@ public class ListenerFilterTest {
     @Test public void plainIncomingPings() {
         assertEquals(ListenerFilter.Verdict.STORE_AND_PING, ListenerFilter.verdict(ev("hello", false, false)));
     }
-
-    @Test public void packageClassification() {
-        assertEquals(Channel.WHATSAPP, ListenerFilter.channelForPackage("com.whatsapp"));
-        assertEquals(Channel.TELEGRAM, ListenerFilter.channelForPackage("org.telegram.messenger"));
-        assertNull(ListenerFilter.channelForPackage("com.instagram.android"));
-        assertNull(ListenerFilter.channelForPackage(null));
-    }
+    // NOTE: package→channel mapping is covered by ParserRegistryTest (moved in P3).
 }
