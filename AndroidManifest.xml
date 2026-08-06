@@ -4,6 +4,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.replymate.app">
 
+    <!-- AI provider calls today; Supabase REST later (foundation phase). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- For OUR OWN "new message" pings (Android 13+ runtime grant). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

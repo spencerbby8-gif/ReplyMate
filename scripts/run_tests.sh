@@ -63,6 +63,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.listener.ListenerFilterTest \
     com.replymate.core.listener.BatchWindowTest \
     com.replymate.core.listener.IngestCoordinatorTest \
+    com.replymate.core.supabase.SupabaseConfigTest \
     com.replymate.provider.RetryPolicyTest \
     com.replymate.provider.ApiErrorTest \
     com.replymate.provider.GeminiPayloadTest \

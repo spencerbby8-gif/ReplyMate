@@ -180,6 +180,12 @@ public final class SettingsActivity extends Activity {
         sb.append("  messages stored (listener): ")
           .append(c.kv().get(IngestCoordinator.KV_STORED_TOTAL, "0")).append('\n');
         sb.append("  last event: ").append(tsLine(IngestCoordinator.KV_LAST_EVENT)).append('\n');
+        sb.append("Cloud (foundation):\n");
+        sb.append("  endpoint: ").append(com.replymate.core.supabase.SupabaseConfig.PROJECT_URL).append('\n');
+        sb.append("  tables provisioned: ")
+          .append(com.replymate.core.supabase.SupabaseConfig.TABLES.length)
+          .append(" · sync: ").append(com.replymate.core.supabase.SupabaseConfig.SYNC_ENABLED ? "ON" : "OFF (local-first)")
+          .append('\n');
         sb.append("  parse errors: ").append(c.kv().get("listener.parse_errors", "0"))
           .append(" · unparsed (non-chat) notifs: ").append(c.kv().get("listener.unparsed_total", "0"))
           .append('\n');
