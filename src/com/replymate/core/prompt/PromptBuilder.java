@@ -1,0 +1,47 @@
+package com.replymate.core.prompt;
+
+import com.replymate.core.ai.ChatRequest;
+import com.replymate.core.ai.GenerationOpts;
+import com.replymate.core.ai.Turn;
+import com.replymate.core.budget.TokenBudgeter;
+import com.replymate.core.json.JsonArr;
+import com.replymate.core.json.JsonObj;
+import java.util.List;
+
+/** Assembles the full provider request (BLUEPRINT §5.3, P1 scope: L0 + L3 + L4). */
+public final class PromptBuilder {
+
+    public static final int VARIANT_COUNT = 3;
+
+    private PromptBuilder() { }
+
+    public static ChatRequest build(PromptBundle bundle) {
+        String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules);
+        List<Turn> turns = ThreadMapper.map(bundle.thread, bundle.contact.displayName);
+        Turn task = TaskComposer.defaultTask(
+            bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
+            bundle.contact.displayName);
+        ChatRequest req = new ChatRequest(system, turns, task,
+            GenerationOpts.of(VARIANT_COUNT, 0.8, 220));
+        return TokenBudgeter.fit(req, TokenBudgeter.DEFAULT_MAX_INPUT);
+    }
+
+    /** Audit snapshot of exactly what is sent (stored on each draft row). */
+    public static String snapshot(ChatRequest req, String model) {
+        JsonArr turns = JsonArr.create();
+        for (Turn t : req.turns) {
+            turns.add(JsonObj.create()
+                .put("role", t.role == Turn.Role.USER ? "user" : "model")
+                .put("text", t.text));
+        }
+        return JsonObj.create()
+            .put("model", model)
+            .put("system", req.system)
+            .put("turns", turns)
+            .put("task", req.task == null ? "" : req.task.text)
+            .put("temperature", req.opts.temperature)
+            .put("candidateCount", req.opts.candidates)
+            .put("maxOutputTokens", req.opts.maxOutputTokens)
+            .toJson();
+    }
+}

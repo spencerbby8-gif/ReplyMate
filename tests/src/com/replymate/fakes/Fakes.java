@@ -1,0 +1,219 @@
+package com.replymate.fakes;
+
+import com.replymate.core.ai.ChatReply;
+import com.replymate.core.ai.ChatRequest;
+import com.replymate.core.ai.RateLimitInfo;
+import com.replymate.core.model.Channel;
+import com.replymate.core.model.Contact;
+import com.replymate.core.model.ContactChannel;
+import com.replymate.core.model.Draft;
+import com.replymate.core.model.DraftStatus;
+import com.replymate.core.model.Message;
+import com.replymate.core.model.Scope;
+import com.replymate.core.model.StyleProfile;
+import com.replymate.core.model.UsageEvent;
+import com.replymate.core.ports.AiProvider;
+import com.replymate.core.ports.ContactStore;
+import com.replymate.core.ports.DraftStore;
+import com.replymate.core.ports.KvStore;
+import com.replymate.core.ports.MessageStore;
+import com.replymate.core.ports.ProviderGateway;
+import com.replymate.core.ports.StyleStore;
+import com.replymate.core.ports.UsageStore;
+import com.replymate.core.util.Clock;
+import com.replymate.core.util.IdGen;
+import com.replymate.core.util.Logger;
+import com.replymate.core.util.Result;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/** In-memory fakes for unit-testing core use-cases on the JVM. */
+public final class Fakes {
+
+    private Fakes() { }
+
+    public static final long NOW = 1_752_000_000_000L;   // fixed test time
+
+    public static Contact contact(long id, String name) {
+        Contact c = new Contact();
+        c.id = id;
+        c.displayName = name;
+        c.createdAt = NOW;
+        c.updatedAt = NOW;
+        return c;
+    }
+
+    public static Message msg(long contactId, com.replymate.core.model.Direction dir, String body) {
+        Message m = new Message();
+        m.contactId = contactId;
+        m.channel = Channel.MANUAL;
+        m.direction = dir;
+        m.body = body;
+        m.sentAt = NOW;
+        m.source = com.replymate.core.model.Source.MANUAL;
+        return m;
+    }
+
+    public static final class ContactStoreFake implements ContactStore {
+        public final Map<Long, Contact> byId = new HashMap<Long, Contact>();
+        public final List<ContactChannel> channels = new ArrayList<ContactChannel>();
+        private long nextId = 100;
+        private long nextChannelId = 1;
+        public void put(Contact c) { byId.put(c.id, c); }
+        @Override public long insert(Contact c) { if (c.id == 0) c.id = nextId++; byId.put(c.id, c); return c.id; }
+        @Override public void update(Contact c) { byId.put(c.id, c); }
+        @Override public Contact get(long contactId) { return byId.get(contactId); }
+        @Override public List<Contact> all() { return new ArrayList<Contact>(byId.values()); }
+        @Override public void delete(long contactId) { byId.remove(contactId); }
+        @Override public List<ContactChannel> channelsByContact(long contactId) {
+            List<ContactChannel> out = new ArrayList<ContactChannel>();
+            for (ContactChannel ch : channels) if (ch.contactId == contactId) out.add(ch);
+            return out;
+        }
+        @Override public ContactChannel findChannel(Channel channel, String remoteKey) {
+            for (ContactChannel ch : channels) {
+                if (ch.channel == channel && ch.remoteKey.equals(remoteKey)) return ch;
+            }
+            return null;
+        }
+        @Override public long upsertChannel(ContactChannel ch) {
+            ContactChannel existing = findChannel(ch.channel, ch.remoteKey);
+            if (existing != null) {
+                existing.contactId = ch.contactId;
+                existing.lastSeenAt = ch.lastSeenAt;
+                return existing.id;
+            }
+            ch.id = nextChannelId++;
+            channels.add(ch);
+            return ch.id;
+        }
+        @Override public void touchChannel(long channelId, long lastSeenAt) {
+            for (ContactChannel ch : channels) if (ch.id == channelId) ch.lastSeenAt = lastSeenAt;
+        }
+    }
+
+    public static final class MessageStoreFake implements MessageStore {
+        public final Map<Long, List<Message>> byContact = new HashMap<Long, List<Message>>();
+        private long nextId = 1;
+        public void add(Message m) {
+            if (!byContact.containsKey(m.contactId)) byContact.put(m.contactId, new ArrayList<Message>());
+            m.id = nextId++;
+            byContact.get(m.contactId).add(m);
+        }
+        @Override public long insert(Message m) { add(m); return m.id; }
+        @Override public Message getByNotifKey(Channel channel, String notifKey) {
+            if (notifKey == null) return null;
+            for (List<Message> list : byContact.values()) {
+                for (Message m : list) {
+                    if (m.channel == channel && notifKey.equals(m.notifKey)) return m;
+                }
+            }
+            return null;
+        }
+        @Override public List<Message> lastMessages(long contactId, int limit) {
+            List<Message> all = byContact.get(contactId);
+            if (all == null) return new ArrayList<Message>();
+            int from = Math.max(0, all.size() - limit);
+            return new ArrayList<Message>(all.subList(from, all.size()));
+        }
+        @Override public int countByContact(long contactId) {
+            List<Message> all = byContact.get(contactId);
+            return all == null ? 0 : all.size();
+        }
+        @Override public void deleteByContact(long contactId) { byContact.remove(contactId); }
+    }
+
+    public static final class StyleStoreFake implements StyleStore {
+        public StyleProfile global;
+        @Override public StyleProfile get(Scope scope, Long contactId) {
+            return scope == Scope.GLOBAL ? global : null;
+        }
+        @Override public long upsert(StyleProfile p) { if (p.scope == Scope.GLOBAL) global = p; return 1; }
+        @Override public void deleteByContact(long contactId) { }
+    }
+
+    public static final class DraftStoreFake implements DraftStore {
+        public final List<Draft> saved = new ArrayList<Draft>();
+        private long nextId = 1;
+        @Override public long insert(Draft d) { d.id = nextId++; saved.add(d); return d.id; }
+        @Override public List<Draft> byContact(long contactId, int limit) { return saved; }
+        @Override public List<Draft> byVariantGroup(String variantGroup) { return saved; }
+        @Override public void updateStatus(long draftId, DraftStatus status) { }
+        @Override public void updateText(long draftId, String newText) { }
+        @Override public void deleteByContact(long contactId) { }
+    }
+
+    public static final class UsageStoreFake implements UsageStore {
+        public final List<UsageEvent> events = new ArrayList<UsageEvent>();
+        @Override public long insert(UsageEvent e) { events.add(e); return events.size(); }
+        @Override public long totalTokensSince(long ts) {
+            long t = 0;
+            for (UsageEvent e : events) t += e.tokensIn + e.tokensOut;
+            return t;
+        }
+        @Override public int countSince(long ts) { return events.size(); }
+        @Override public void purgeBefore(long ts) { }
+    }
+
+    public static final class KvStoreFake implements KvStore {
+        private final Map<String, String> map = new HashMap<String, String>();
+        @Override public String get(String key, String defValue) {
+            return map.containsKey(key) ? map.get(key) : defValue;
+        }
+        @Override public void put(String key, String value) { map.put(key, value); }
+        @Override public void delete(String key) { map.remove(key); }
+        @Override public boolean contains(String key) { return map.containsKey(key); }
+    }
+
+    public static final class FakeProvider implements AiProvider {
+        private final Result<ChatReply> result;
+        public ChatRequest lastRequest;
+        public int calls;
+
+        public static FakeProvider returning(String... variants) {
+            return new FakeProvider(Result.ok(new ChatReply(
+                new ArrayList<String>(Arrays.asList(variants)), 11, 7, RateLimitInfo.NONE)), null);
+        }
+        public static FakeProvider failing(String error) {
+            return new FakeProvider(null, error);
+        }
+        private FakeProvider(Result<ChatReply> result, String error) {
+            this.result = result != null ? result : Result.<ChatReply>err(error);
+        }
+        @Override public String type() { return "gemini"; }
+        @Override public Result<ChatReply> generate(ChatRequest request) {
+            calls++;
+            lastRequest = request;
+            return result;
+        }
+        @Override public Result<Boolean> validateKey() { return Result.ok(Boolean.TRUE); }
+    }
+
+    public static final class GatewayFake implements ProviderGateway {
+        public AiProvider provider;
+        public String model = "test-model";
+        public GatewayFake(AiProvider provider) { this.provider = provider; }
+        @Override public AiProvider active() { return provider; }
+        @Override public String activeModel() { return model; }
+    }
+
+    public static final Clock FIXED_CLOCK = new Clock() {
+        @Override public long now() { return NOW; }
+    };
+
+    public static final IdGen IDS = new IdGen() {
+        private int n;
+        @Override public String next() { return "group-" + (++n); }
+    };
+
+    public static final Logger NOOP_LOG = new Logger() {
+        @Override public void d(String tag, String msg) { }
+        @Override public void i(String tag, String msg) { }
+        @Override public void w(String tag, String msg) { }
+        @Override public void e(String tag, String msg) { }
+        @Override public void e(String tag, String msg, Throwable t) { }
+    };
+}

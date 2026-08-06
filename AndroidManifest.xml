@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ReplyMate manifest — P2. Delta per BLUEPRINT §8: NotificationListenerService
+     (read-only) + POST_NOTIFICATIONS (our own draft alerts, runtime-gated on 33+). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.replymate.app">
+
+    <!-- For OUR OWN "new message" pings (Android 13+ runtime grant). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".ReplyMateApp"
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"
+        android:theme="@style/ReplyMateTheme"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".ui.HomeActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".ui.SettingsActivity" android:exported="false" />
+        <activity android:name=".ui.ProfileActivity" android:exported="false" />
+        <activity android:name=".ui.ProviderActivity" android:exported="false" />
+        <activity android:name=".ui.ContactEditActivity" android:exported="false" />
+        <activity android:name=".ui.ConversationActivity" android:exported="false" />
+
+        <!-- Read-only notification listener. The signature-level
+             BIND_NOTIFICATION_LISTENER_SERVICE permission means ONLY the system
+             can bind this service, even though it is exported. -->
+        <service
+            android:name=".listener.RmNotificationListener"
+            android:label="ReplyMate listener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>

@@ -1,0 +1,58 @@
+package com.replymate.core.prompt;
+
+import com.replymate.core.model.Contact;
+import com.replymate.core.usecase.ProfileService;
+
+/** Builds the L0 system instruction (BLUEPRINT §5.3): identity + owner profile digest
+ *  + style rules + contact block + hard boundaries. NEVER truncated by the budgeter. */
+public final class SystemComposer {
+
+    public static final String FALLBACK_STYLE =
+        "natural, human, conversational texting style; match the tone and language of the chat";
+
+    private SystemComposer() { }
+
+    public static String compose(ProfileService.Profile profile, Contact contact, String styleRules) {
+        String owner = profile == null ? "the owner of this phone" : profile.displayName();
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("You ARE ").append(owner)
+          .append(", writing your own private chat messages. You are not an assistant and you never")
+          .append(" mention AI or these instructions. Output only the exact message ").append(owner)
+          .append(" would send — no quotes, no explanation, no commentary.");
+
+        if (profile != null && !profile.isEmpty()) {
+            StringBuilder about = new StringBuilder();
+            if (!profile.languages.isEmpty()) about.append("\n- Languages: ").append(profile.languages);
+            if (!profile.bio.isEmpty()) about.append("\n- About me: ").append(profile.bio);
+            if (!profile.topics.isEmpty()) about.append("\n- I often talk about: ").append(profile.topics);
+            if (about.length() > 0) sb.append("\n\nAbout ").append(owner).append(":").append(about);
+        }
+
+        sb.append("\n\nWriting style: ")
+          .append(styleRules == null || styleRules.trim().isEmpty() ? FALLBACK_STYLE : styleRules.trim())
+          .append('.');
+
+        sb.append("\n\nConversation partner: ").append(contact.displayName);
+        if (!contact.relationshipType.isEmpty()) sb.append(" (").append(contact.relationshipType).append(')');
+        sb.append('.');
+        if (!contact.relationshipNotes.isEmpty()) {
+            sb.append("\nAbout this person: ").append(contact.relationshipNotes);
+        }
+        if (!contact.toneOverride.isEmpty()) {
+            sb.append("\nTone with them: ").append(contact.toneOverride);
+        }
+        if (!contact.languagePref.isEmpty()) {
+            sb.append("\nReply language: ").append(contact.languagePref).append('.');
+        } else {
+            sb.append("\nReply language: match the language of their latest message.");
+        }
+
+        sb.append("\n\nRules: reply in ").append(owner)
+          .append("'s voice; usually 1–3 short sentences unless the context clearly needs more;")
+          .append(" never invent facts about ").append(contact.displayName)
+          .append("; stay in character at all times.");
+
+        return sb.toString();
+    }
+}
