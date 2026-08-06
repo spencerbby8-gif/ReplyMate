@@ -175,6 +175,87 @@ public final class Fakes {
         @Override public void deleteByContact(long contactId) { }
     }
 
+    public static final class MemoryStoreFake implements com.replymate.core.ports.MemoryStore {
+        /** contactId -> facts (insertion order). */
+        public final Map<Long, List<com.replymate.core.model.MemoryFact>> factsByContact =
+            new HashMap<Long, List<com.replymate.core.model.MemoryFact>>();
+        public final Map<Long, List<com.replymate.core.model.ContactSummary>> summariesByContact =
+            new HashMap<Long, List<com.replymate.core.model.ContactSummary>>();
+        private long nextId = 1;
+
+        private List<com.replymate.core.model.MemoryFact> list(long contactId) {
+            List<com.replymate.core.model.MemoryFact> l = factsByContact.get(contactId);
+            if (l == null) {
+                l = new ArrayList<com.replymate.core.model.MemoryFact>();
+                factsByContact.put(contactId, l);
+            }
+            return l;
+        }
+
+        @Override public List<com.replymate.core.model.MemoryFact> activeFacts(long contactId) {
+            List<com.replymate.core.model.MemoryFact> out =
+                new ArrayList<com.replymate.core.model.MemoryFact>();
+            for (com.replymate.core.model.MemoryFact f : list(contactId)) {
+                if (!f.disabled) out.add(f);
+            }
+            return out;
+        }
+        @Override public List<com.replymate.core.model.MemoryFact> allFacts(long contactId) {
+            return new ArrayList<com.replymate.core.model.MemoryFact>(list(contactId));
+        }
+        /** Same merge key as SQLite: (contact_id, text_norm); id stable on update. */
+        @Override public long upsertFact(com.replymate.core.model.MemoryFact f) {
+            for (com.replymate.core.model.MemoryFact cur : list(f.contactId)) {
+                if (cur.textNorm.equals(f.textNorm)) {
+                    f.id = f.id > 0 ? f.id : cur.id;
+                    list(f.contactId).remove(cur);
+                    list(f.contactId).add(f);
+                    return f.id;
+                }
+            }
+            f.id = f.id > 0 ? f.id : nextId++;
+            list(f.contactId).add(f);
+            return f.id;
+        }
+        @Override public void setFactPinned(long factId, boolean pinned) {
+            for (List<com.replymate.core.model.MemoryFact> l : factsByContact.values()) {
+                for (com.replymate.core.model.MemoryFact f : l) if (f.id == factId) f.pinned = pinned;
+            }
+        }
+        @Override public void setFactDisabled(long factId, boolean disabled) {
+            for (List<com.replymate.core.model.MemoryFact> l : factsByContact.values()) {
+                for (com.replymate.core.model.MemoryFact f : l) if (f.id == factId) f.disabled = disabled;
+            }
+        }
+        @Override public void deleteFact(long factId) {
+            for (List<com.replymate.core.model.MemoryFact> l : factsByContact.values()) {
+                for (int i = l.size() - 1; i >= 0; i--) if (l.get(i).id == factId) l.remove(i);
+            }
+        }
+        @Override public com.replymate.core.model.ContactSummary latestSummary(long contactId) {
+            List<com.replymate.core.model.ContactSummary> l = summariesByContact.get(contactId);
+            if (l == null || l.isEmpty()) return null;
+            com.replymate.core.model.ContactSummary best = l.get(0);
+            for (com.replymate.core.model.ContactSummary s : l) {
+                if (s.version > best.version) best = s;
+            }
+            return best;
+        }
+        @Override public long insertSummary(com.replymate.core.model.ContactSummary s) {
+            List<com.replymate.core.model.ContactSummary> l = summariesByContact.get(s.contactId);
+            if (l == null) {
+                l = new ArrayList<com.replymate.core.model.ContactSummary>();
+                summariesByContact.put(s.contactId, l);
+            }
+            l.add(s);
+            return l.size();
+        }
+        @Override public void deleteAllForContact(long contactId) {
+            factsByContact.remove(contactId);
+            summariesByContact.remove(contactId);
+        }
+    }
+
     public static final class UsageStoreFake implements UsageStore {
         public final List<UsageEvent> events = new ArrayList<UsageEvent>();
         @Override public long insert(UsageEvent e) { events.add(e); return events.size(); }

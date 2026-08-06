@@ -5,8 +5,10 @@ import com.replymate.core.model.MemoryFact;
 import java.util.List;
 
 /** Per-contact memory layers M2 (summary) + M3 (facts). ISOLATION: contact-scoped only; this is the
- *  single choke point that also filters private_mode contacts' rows (belt & braces with PromptBuilder). */
-public interface MemoryStore {
+ *  single choke point that also filters private_mode contacts' rows (belt & braces with PromptBuilder).
+ *  Extends the engine's narrowed writer surface so MemoryEngine.merge can only ever
+ *  see upsertFact — never deletes or cross-contact operations. */
+public interface MemoryStore extends com.replymate.core.memory.MemoryEngine.FactStoreWriter {
     // facts
     List<MemoryFact> activeFacts(long contactId);                 // disabled=0, ranked by MemoryEngine later
     List<MemoryFact> allFacts(long contactId);                    // memory browser
