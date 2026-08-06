@@ -21,6 +21,7 @@ import com.replymate.app.ReplyMateApp;
 import com.replymate.app.di.AppContainer;
 import com.replymate.app.platform.DeepLinks;
 import com.replymate.app.platform.Tasks;
+import com.replymate.core.learning.LearningEngine;
 import com.replymate.core.listener.WatchedApps;
 import com.replymate.core.model.Channel;
 import com.replymate.core.model.Contact;
@@ -30,6 +31,7 @@ import com.replymate.core.model.Draft;
 import com.replymate.core.model.DraftStatus;
 import com.replymate.core.model.Message;
 import com.replymate.core.model.Source;
+import com.replymate.core.model.StyleSignal;
 import com.replymate.core.model.ToneTransform;
 import com.replymate.core.usecase.DraftOutcome;
 import com.replymate.core.util.Result;
@@ -229,6 +231,9 @@ public final class ConversationActivity extends Activity {
         btnGen.setEnabled(false);
         showStatus("Generating…", Ui.ACCENT);
         final long contactId = contact.id;
+        // P4 learning: generating while drafts already exist = the user asked for
+        // another take → REGENERATED (recorded on success, gated per contact).
+        final boolean hadDrafts = !c.drafts().byContact(contactId, 1).isEmpty();
         Tasks.call(new Tasks.Job<Result<DraftOutcome>>() {
             @Override public Result<DraftOutcome> run() {
                 return c.draftService().generateForContact(contactId);
@@ -238,6 +243,10 @@ public final class ConversationActivity extends Activity {
                 generating = false;
                 btnGen.setEnabled(true);
                 if (r.ok) {
+                    if (hadDrafts) {
+                        c.learningService().record(contact,
+                            StyleSignal.Kind.REGENERATED, "re-generate", null);
+                    }
                     showStatus("Ready — " + r.value.drafts.size() + " suggestions in "
                         + (r.value.latencyMs / 1000.0d) + "s", Ui.GREEN);
                     refreshDrafts();
@@ -301,6 +310,9 @@ public final class ConversationActivity extends Activity {
         addAction(actions, "Delete", new View.OnClickListener() {
             @Override public void onClick(View v) {
                 c.drafts().delete(draft.id);
+                // P4 learning: deleting a draft without copying = rejection.
+                c.learningService().record(contact,
+                    StyleSignal.Kind.REJECTED, "deleted", draft.id);
                 Toast.makeText(ConversationActivity.this,
                     "Draft deleted", Toast.LENGTH_SHORT).show();
                 refreshDrafts();
@@ -365,8 +377,14 @@ public final class ConversationActivity extends Activity {
         if (!text.equals(draft.replyText)) {
             c.drafts().updateText(draft.id, text);
             c.drafts().updateStatus(draft.id, DraftStatus.EDITED);
+            // P4 learning: edited-then-copied carries the richest style signal.
+            c.learningService().record(contact, StyleSignal.Kind.EDITED,
+                LearningEngine.classifyEdit(draft.replyText, text), draft.id);
         } else {
             c.drafts().updateStatus(draft.id, DraftStatus.COPIED);
+            // P4 learning: copied as-is = approval of this exact style.
+            c.learningService().record(contact,
+                StyleSignal.Kind.APPROVED, "copied-as-is", draft.id);
         }
         ((ClipboardManager) getSystemService("clipboard"))
             .setPrimaryClip(ClipData.newPlainText("replymate draft", text));

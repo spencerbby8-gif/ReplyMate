@@ -13,6 +13,14 @@ public final class SystemComposer {
     private SystemComposer() { }
 
     public static String compose(ProfileService.Profile profile, Contact contact, String styleRules) {
+        return compose(profile, contact, styleRules, "", null, "");
+    }
+
+    /** P4: voiceLine = resolved 9-control "Voice: …" rule; voiceExtra = custom prompt
+     *  + learned hints for THIS contact; aboutExtra = filtered free-text about-me. */
+    public static String compose(ProfileService.Profile profile, Contact contact, String styleRules,
+                                 String voiceLine, java.util.List<String> voiceExtra,
+                                 String aboutExtra) {
         String owner = profile == null ? "the owner of this phone" : profile.displayName();
         StringBuilder sb = new StringBuilder();
 
@@ -26,12 +34,18 @@ public final class SystemComposer {
             if (!profile.languages.isEmpty()) about.append("\n- Languages: ").append(profile.languages);
             if (!profile.bio.isEmpty()) about.append("\n- About me: ").append(profile.bio);
             if (!profile.topics.isEmpty()) about.append("\n- I often talk about: ").append(profile.topics);
+            if (aboutExtra != null && !aboutExtra.trim().isEmpty()) {
+                about.append("\n- More about me: ").append(aboutExtra.trim());
+            }
             if (about.length() > 0) sb.append("\n\nAbout ").append(owner).append(":").append(about);
         }
 
         sb.append("\n\nWriting style: ")
           .append(styleRules == null || styleRules.trim().isEmpty() ? FALLBACK_STYLE : styleRules.trim())
           .append('.');
+        if (voiceLine != null && !voiceLine.trim().isEmpty()) {
+            sb.append('\n').append(voiceLine.trim());
+        }
 
         sb.append("\n\nConversation partner: ").append(contact.displayName);
         if (!contact.relationshipType.isEmpty()) sb.append(" (").append(contact.relationshipType).append(')');
@@ -46,6 +60,13 @@ public final class SystemComposer {
             sb.append("\nReply language: ").append(contact.languagePref).append('.');
         } else {
             sb.append("\nReply language: match the language of their latest message.");
+        }
+        if (voiceExtra != null) {
+            for (String line : voiceExtra) {
+                if (line != null && !line.trim().isEmpty()) {
+                    sb.append('\n').append(line.trim());
+                }
+            }
         }
 
         sb.append("\n\nRules: reply in ").append(owner)

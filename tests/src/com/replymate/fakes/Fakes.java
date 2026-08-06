@@ -11,6 +11,7 @@ import com.replymate.core.model.DraftStatus;
 import com.replymate.core.model.Message;
 import com.replymate.core.model.Scope;
 import com.replymate.core.model.StyleProfile;
+import com.replymate.core.model.StyleSignal;
 import com.replymate.core.model.UsageEvent;
 import com.replymate.core.ports.AiProvider;
 import com.replymate.core.ports.ContactStore;
@@ -254,6 +255,72 @@ public final class Fakes {
             factsByContact.remove(contactId);
             summariesByContact.remove(contactId);
         }
+    }
+
+    public static final class StyleSettingStoreFake implements com.replymate.core.ports.StyleSettingStore {
+        /** contactId (null=global) -> (key -> value). */
+        public final Map<Long, Map<String, String>> rows = new HashMap<Long, Map<String, String>>();
+
+        private Map<String, String> scope(Long contactId) {
+            Map<String, String> m = rows.get(contactId);
+            if (m == null) {
+                m = new HashMap<String, String>();
+                rows.put(contactId, m);
+            }
+            return m;
+        }
+
+        @Override public Map<String, String> all(Long contactId) {
+            return new HashMap<String, String>(scope(contactId));
+        }
+        @Override public void put(Long contactId, String key, String value) {
+            scope(contactId).put(key, value);
+        }
+        @Override public void remove(Long contactId, String key) {
+            scope(contactId).remove(key);
+        }
+        @Override public void deleteForContact(long contactId) {
+            rows.remove(contactId);
+        }
+    }
+
+    public static final class LearningStoreFake implements com.replymate.core.ports.LearningStore {
+        public final Map<Long, List<StyleSignal>> byContact =
+            new HashMap<Long, List<StyleSignal>>();
+        private long nextId = 1;
+
+        @Override public long insert(StyleSignal s) {
+            List<StyleSignal> l = byContact.get(s.contactId);
+            if (l == null) {
+                l = new ArrayList<StyleSignal>();
+                byContact.put(s.contactId, l);
+            }
+            s.id = nextId++;
+            l.add(s);
+            return s.id;
+        }
+        @Override public List<StyleSignal> byContact(long contactId, int limit) {
+            List<StyleSignal> l = byContact.get(contactId);
+            List<StyleSignal> out = new ArrayList<StyleSignal>();
+            if (l == null) return out;
+            for (int i = l.size() - 1; i >= 0 && out.size() < limit; i--) out.add(l.get(i));
+            return out;
+        }
+        @Override public void deleteForContact(long contactId) {
+            byContact.remove(contactId);
+        }
+    }
+
+    /** P4 convenience: a LearningService over fresh fakes. */
+    public static com.replymate.core.learning.LearningService learningService(
+            LearningStoreFake store, KvStoreFake kv) {
+        return new com.replymate.core.learning.LearningService(store, kv, FIXED_CLOCK);
+    }
+
+    /** P4 convenience: a StyleService over fresh fakes. */
+    public static com.replymate.core.style.StyleService styleService(
+            StyleSettingStoreFake settings, com.replymate.core.learning.LearningService learning) {
+        return new com.replymate.core.style.StyleService(settings, learning);
     }
 
     public static final class UsageStoreFake implements UsageStore {

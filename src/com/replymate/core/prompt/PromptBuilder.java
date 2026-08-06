@@ -16,7 +16,8 @@ public final class PromptBuilder {
     private PromptBuilder() { }
 
     public static ChatRequest build(PromptBundle bundle) {
-        String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules);
+        String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
+            bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra);
         List<Turn> turns = ThreadMapper.map(bundle.thread, bundle.contact.displayName);
         Turn task = TaskComposer.defaultTask(
             bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
@@ -34,15 +35,29 @@ public final class PromptBuilder {
     /** As above, with an explicit kind tag ("reply", "tone:friendlier", …) so the
      *  audit viewer can tell full generations from tone transforms. */
     public static String snapshot(ChatRequest req, String model, String kind) {
+        return snapshot(req, model, kind, null);
+    }
+
+    /** Full audit snapshot incl. the "why" notes: human-readable lines explaining
+     *  exactly which style inputs shaped this request (P4 prompt audit). */
+    public static String snapshot(ChatRequest req, String model, String kind,
+                                  List<String> why) {
         JsonArr turns = JsonArr.create();
         for (Turn t : req.turns) {
             turns.add(JsonObj.create()
                 .put("role", t.role == Turn.Role.USER ? "user" : "model")
                 .put("text", t.text));
         }
+        JsonArr whyArr = JsonArr.create();
+        if (why != null) {
+            for (String w : why) {
+                if (w != null && !w.trim().isEmpty()) whyArr.add(w.trim());
+            }
+        }
         return JsonObj.create()
             .put("kind", kind)
             .put("model", model)
+            .put("why", whyArr)
             .put("system", req.system)
             .put("turns", turns)
             .put("task", req.task == null ? "" : req.task.text)

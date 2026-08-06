@@ -316,9 +316,15 @@ Each phase ships an installable APK from this sandbox + a test gate. Effort in f
   real WhatsApp + Telegram, 0 missed-text failures, 0 dupes.
 - **P3 — Draft UX polish (1–2 S):** variants, tone transforms, open-chat deep-links, draft history, faster
   perceived latency (prefetch on notification). *Gate:* daily driver by owner for a week.
-- **P4 — Memory layers (3–4 S):** facts extraction+merge UI, pinned facts, rolling summaries, budgeter v2,
-  memory browser/edit/delete, isolation audit tests. *Gate:* cross-contact leak test suite (seeded A/B
-  contacts — impossible-by-construction assertions); reply quality review by owner.
+- **P4 — Personalization & learning (3–4 S):** *(scope redefined by the owner, 2026-08: was "Memory
+  layers")* global user voice (9 style controls) as base style, per-contact overrides + custom prompt box,
+  private "About me" extra + per-section use-toggles, learning from approved/edited/regenerated/rejected
+  drafts with per-contact reset/pause/export/disable, prompt audit showing WHY a reply sounded the way it
+  did. Local-first, contact-isolated. *Gate:* customization+learning+isolation suites green; owner review.
+- **P4b — Memory layers (planned):** original P4 scope (groundwork merged in P4): facts extraction+merge
+  UI, pinned facts, rolling summaries, budgeter v2, memory browser/edit/delete, isolation audit tests.
+  *Gate:* cross-contact leak test suite (seeded A/B contacts — impossible-by-construction assertions);
+  reply quality review by owner.
 - **P5 — Memory layer: style (2 S):** style profiling from samples, per-contact overrides, language per
   contact. *Gate:* owner blind-rates 20 drafts "sounds like me" ≥ 8/10 average.
 - **P6 — Hardening (2 S):** SQLCipher decision implementation, biometric lock, FLAG_SECURE, export/import,

@@ -51,6 +51,16 @@ public final class SettingsActivity extends Activity {
         root.addView(profileRow);
         root.addView(Ui.divider(this));
 
+        LinearLayout voiceRow = Ui.row(this, "My voice (global style)",
+            "tone, length, emoji, humor… the base style for every chat");
+        voiceRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, VoiceActivity.class));
+            }
+        });
+        root.addView(voiceRow);
+        root.addView(Ui.divider(this));
+
         providerRow = Ui.row(this, "AI provider (Gemini)", "");
         providerRow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {

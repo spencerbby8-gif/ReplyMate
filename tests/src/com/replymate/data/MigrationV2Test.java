@@ -41,12 +41,12 @@ public class MigrationV2Test {
         return db;
     }
 
-    @Test public void v1DataSurvivesMigrationToV2() throws Exception {
+    @Test public void v1DataSurvivesMigrationToLatest() throws Exception {
         try (Connection c = memoryDb()) {
             MigrationTest.JdbcExecSql db = v1DeviceDb(c);
             Migrations.migrate(db);
             assertEquals(Migrations.LATEST, db.getUserVersion());
-            assertEquals(2, db.getUserVersion());
+            assertEquals(3, db.getUserVersion());
 
             try (Statement st = c.createStatement();
                  ResultSet rs = st.executeQuery(
@@ -119,11 +119,11 @@ public class MigrationV2Test {
         }
     }
 
-    @Test public void freshInstallLandsDirectlyOnV2() throws Exception {
+    @Test public void freshInstallLandsDirectlyOnLatest() throws Exception {
         try (Connection c = memoryDb()) {
             MigrationTest.JdbcExecSql db = new MigrationTest.JdbcExecSql(c);
             Migrations.migrate(db);
-            assertEquals(2, db.getUserVersion());
+            assertEquals(Migrations.LATEST, db.getUserVersion());
             try (Statement st = c.createStatement()) {
                 st.executeUpdate("INSERT INTO contact(display_name,created_at,updated_at) VALUES('N',1,1)");
                 st.executeUpdate("INSERT INTO contact_channel(contact_id,channel,remote_key,last_seen_at)"

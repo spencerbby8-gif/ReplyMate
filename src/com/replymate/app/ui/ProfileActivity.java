@@ -18,6 +18,7 @@ import com.replymate.core.usecase.ProfileService;
 public final class ProfileActivity extends Activity {
     private EditText bio;
     private AppContainer c;
+    private EditText extra;
     private EditText languages;
     private EditText name;
     private EditText topics;
@@ -60,6 +61,11 @@ public final class ProfileActivity extends Activity {
         this.topics = field4;
         field4.setText(load.topics);
         linearLayout.addView(this.topics);
+        // P4: private free-text "About me" extra — saved with the profile below.
+        linearLayout.addView(Ui.label(this, "More about you (private)"));
+        this.extra = Ui.field(this, "Anything else the AI should know — how you greet close friends, things you never say…", true);
+        this.extra.setText(this.c.profiles().extra());
+        linearLayout.addView(this.extra);
         Button btn = Ui.btn(this, "Save");
         LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
         layoutParams.topMargin = Ui.dp(this, 16);
@@ -68,9 +74,39 @@ public final class ProfileActivity extends Activity {
             @Override // android.view.View.OnClickListener
             public void onClick(View view) {
                 ProfileActivity.this.c.profiles().save(new ProfileService.Profile(ProfileActivity.this.name.getText().toString(), ProfileActivity.this.languages.getText().toString(), ProfileActivity.this.bio.getText().toString(), ProfileActivity.this.topics.getText().toString()));
+                ProfileActivity.this.c.profiles().saveExtra(ProfileActivity.this.extra.getText().toString());
                 Toast.makeText(ProfileActivity.this, "Saved", 0).show();
                 ProfileActivity.this.finish();
             }
         });
+        // P4: per-section use toggles — the user controls what the AI may use.
+        linearLayout.addView(Ui.divider(this));
+        linearLayout.addView(Ui.label(this, "WHAT THE AI MAY USE"));
+        linearLayout.addView(Ui.sub(this, "Turn a section off and it's removed from every future reply — it stays saved here, never sent."));
+        addUseToggle(linearLayout, ProfileService.USE_NAME, "Your name");
+        addUseToggle(linearLayout, ProfileService.USE_LANGUAGES, "Languages");
+        addUseToggle(linearLayout, ProfileService.USE_BIO, "Short bio");
+        addUseToggle(linearLayout, ProfileService.USE_TOPICS, "Things you talk about");
+        addUseToggle(linearLayout, ProfileService.USE_EXTRA, "More about you (private)");
+    }
+
+    private void addUseToggle(LinearLayout parent, final String useKey, String title) {
+        final LinearLayout row = Ui.row(this, title, useText(useKey));
+        Ui.setRowSub(row, useText(useKey));
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override // android.view.View.OnClickListener
+            public void onClick(View view) {
+                boolean on = !ProfileActivity.this.c.profiles().use(useKey);
+                ProfileActivity.this.c.profiles().setUse(useKey, on);
+                Ui.setRowSub(row, useText(useKey));
+            }
+        });
+        parent.addView(row);
+        parent.addView(Ui.divider(this));
+    }
+
+    private String useText(String useKey) {
+        return this.c.profiles().use(useKey)
+            ? "on — the AI may use this" : "off — kept from the AI";
     }
 }

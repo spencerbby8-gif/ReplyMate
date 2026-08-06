@@ -103,4 +103,52 @@ public class IsolationSuite {
         assertEquals(1, store.allFacts(B).size());
         assertTrue(store.allFacts(B).get(0).text.contains("B-SECRET"));
     }
+
+    /* ------------------------------------------------ P4 style + learning gates */
+
+    @Test public void styleRowsForBNeverShapeAVoice() {
+        Fakes.StyleSettingStoreFake settings = new Fakes.StyleSettingStoreFake();
+        Fakes.LearningStoreFake learningStore = new Fakes.LearningStoreFake();
+        com.replymate.core.learning.LearningService learning =
+            Fakes.learningService(learningStore, new Fakes.KvStoreFake());
+        com.replymate.core.style.StyleService styles =
+            Fakes.styleService(settings, learning);
+
+        settings.put(B, "tone", "2");
+        settings.put(B, "custom.prompt", "B-SECRET custom prompt");
+
+        com.replymate.core.model.Contact aContact = new com.replymate.core.model.Contact();
+        aContact.id = A;
+        aContact.displayName = "Amara";
+        com.replymate.core.style.StyleService.ComposedVoice v = styles.compose(aContact);
+        String all = v.voiceLine + v.extraLines + v.why.toString();
+        assertFalse("B's custom prompt leaked into A", all.contains("B-SECRET"));
+        assertFalse("B's tone override leaked into A", v.voiceLine.contains("direct and to the point"));
+    }
+
+    @Test public void learningSignalsNeverCrossContacts() {
+        Fakes.LearningStoreFake learningStore = new Fakes.LearningStoreFake();
+        Fakes.KvStoreFake kv = new Fakes.KvStoreFake();
+        com.replymate.core.learning.LearningService learning =
+            Fakes.learningService(learningStore, kv);
+
+        com.replymate.core.model.Contact aContact = new com.replymate.core.model.Contact();
+        aContact.id = A;
+        aContact.displayName = "Amara";
+        com.replymate.core.model.Contact bContact = new com.replymate.core.model.Contact();
+        bContact.id = B;
+        bContact.displayName = "Bode";
+
+        for (int i = 0; i < 5; i++) {
+            learning.record(aContact, com.replymate.core.model.StyleSignal.Kind.EDITED, "shorter", null);
+        }
+        assertEquals(5, learning.counters(A).total());
+        assertEquals("A's signals must not count for B", 0, learning.counters(B).total());
+        assertTrue("B gets no hints derived from A", learning.hintsFor(bContact).isEmpty());
+
+        // per-contact switches are independent too
+        learning.setOff(A, true);
+        assertTrue(learning.isOff(A));
+        assertFalse(learning.isOff(B));
+    }
 }

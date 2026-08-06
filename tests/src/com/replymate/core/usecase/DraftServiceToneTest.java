@@ -52,8 +52,13 @@ public class DraftServiceToneTest {
     }
 
     private DraftService service(Fakes.GatewayFake gateway) {
+        Fakes.StyleSettingStoreFake styleSettings = new Fakes.StyleSettingStoreFake();
+        Fakes.LearningStoreFake learningStore = new Fakes.LearningStoreFake();
+        com.replymate.core.learning.LearningService learning =
+            Fakes.learningService(learningStore, new Fakes.KvStoreFake());
         return new DraftService(contacts, messages, styles, profiles,
-            drafts, usage, gateway, Fakes.IDS, Fakes.FIXED_CLOCK, Fakes.NOOP_LOG);
+            drafts, usage, gateway, Fakes.IDS, Fakes.FIXED_CLOCK, Fakes.NOOP_LOG,
+            Fakes.styleService(styleSettings, learning), learning);
     }
 
     @Test public void happyPathSavesNewAuditedVariantAndMetersUsage() {

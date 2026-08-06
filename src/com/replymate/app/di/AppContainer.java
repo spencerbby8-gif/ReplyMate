@@ -11,7 +11,9 @@ import com.replymate.core.ports.KvStore;
 import com.replymate.core.ports.MessageStore;
 import com.replymate.core.ports.ProviderGateway;
 import com.replymate.core.ports.ProviderStore;
+import com.replymate.core.ports.LearningStore;
 import com.replymate.core.ports.SecretVault;
+import com.replymate.core.ports.StyleSettingStore;
 import com.replymate.core.ports.StyleStore;
 import com.replymate.core.ports.UsageStore;
 import com.replymate.core.usecase.ContactService;
@@ -29,13 +31,17 @@ import com.replymate.data.dao.KvDao;
 import com.replymate.data.dao.MessageDao;
 import com.replymate.data.dao.ProviderDao;
 import com.replymate.data.dao.StyleDao;
+import com.replymate.data.dao.StyleSettingDao;
+import com.replymate.data.dao.StyleSignalDao;
 import com.replymate.data.dao.UsageDao;
 import com.replymate.data.db.DbHelper;
 import com.replymate.data.store.SqlContactStore;
 import com.replymate.data.store.SqlDraftStore;
 import com.replymate.data.store.SqlKvStore;
+import com.replymate.data.store.SqlLearningStore;
 import com.replymate.data.store.SqlMessageStore;
 import com.replymate.data.store.SqlProviderStore;
+import com.replymate.data.store.SqlStyleSettingStore;
 import com.replymate.data.store.SqlStyleStore;
 import com.replymate.data.store.SqlUsageStore;
 import com.replymate.provider.gemini.GeminiProvider;
@@ -56,12 +62,16 @@ public final class AppContainer {
     private final ProviderGateway gateway;
     private final IdGen ids;
     private final KvStore kvStore;
+    private final com.replymate.core.learning.LearningService learningService;
+    private final LearningStore learningStore;
     private final Logger logger;
     private final MessageStore messageStore;
     private final ProfileService profileService;
     private final ProviderStore providerStore;
     private final ScrubLogger scrubLogger;
     private final SecretVault secretVault;
+    private final StyleSettingStore styleSettingStore;
+    private final com.replymate.core.style.StyleService styleService;
     private final StyleStore styleStore;
     private final UsageStore usageStore;
 
@@ -90,6 +100,19 @@ public final class AppContainer {
         this.usageStore = sqlUsageStore;
         SqlStyleStore sqlStyleStore = new SqlStyleStore(new StyleDao(dbHelper));
         this.styleStore = sqlStyleStore;
+        // P4: customization + learning storage/services (schema v3 tables).
+        SqlStyleSettingStore sqlStyleSettingStore =
+            new SqlStyleSettingStore(new StyleSettingDao(dbHelper), systemClock);
+        this.styleSettingStore = sqlStyleSettingStore;
+        SqlLearningStore sqlLearningStore = new SqlLearningStore(new StyleSignalDao(dbHelper));
+        this.learningStore = sqlLearningStore;
+        com.replymate.core.learning.LearningService learningService =
+            new com.replymate.core.learning.LearningService(
+                sqlLearningStore, sqlKvStore, systemClock);
+        this.learningService = learningService;
+        com.replymate.core.style.StyleService styleService =
+            new com.replymate.core.style.StyleService(sqlStyleSettingStore, learningService);
+        this.styleService = styleService;
         this.providerStore = new SqlProviderStore(new ProviderDao(dbHelper));
         ProfileService profileService = new ProfileService(sqlKvStore);
         this.profileService = profileService;
@@ -106,7 +129,7 @@ public final class AppContainer {
             }
         };
         this.gateway = providerGateway;
-        this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap);
+        this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap, styleService, learningService);
     }
 
     public AiProvider providerOrNull() {
@@ -199,6 +222,26 @@ public final class AppContainer {
 
     public StyleStore styles() {
         return this.styleStore;
+    }
+
+    /** P4: raw style setting rows (global voice + per-contact overrides + custom prompts). */
+    public StyleSettingStore styleSettings() {
+        return this.styleSettingStore;
+    }
+
+    /** P4: learning signal storage. */
+    public LearningStore learningStore() {
+        return this.learningStore;
+    }
+
+    /** P4: voice composition (voice line + extras + audit "why"). */
+    public com.replymate.core.style.StyleService styleService() {
+        return this.styleService;
+    }
+
+    /** P4: learning gate + record/controls (reset, pause, disable, export). */
+    public com.replymate.core.learning.LearningService learningService() {
+        return this.learningService;
     }
 
     public ProviderStore providers() {

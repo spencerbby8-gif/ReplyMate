@@ -38,9 +38,19 @@ public class DraftServiceTest {
         messages.add(Fakes.msg(2, Direction.INCOMING, "B-SECRET: invoice is overdue"));
     }
 
+    private Fakes.StyleSettingStoreFake styleSettings;
+    private Fakes.LearningStoreFake learningStore;
+    private Fakes.KvStoreFake learnKv;
+
     private DraftService service(Fakes.GatewayFake gateway) {
+        styleSettings = new Fakes.StyleSettingStoreFake();
+        learningStore = new Fakes.LearningStoreFake();
+        learnKv = new Fakes.KvStoreFake();
+        com.replymate.core.learning.LearningService learning =
+            Fakes.learningService(learningStore, learnKv);
         return new DraftService(contacts, messages, styles, profiles,
-            drafts, usage, gateway, Fakes.IDS, Fakes.FIXED_CLOCK, Fakes.NOOP_LOG);
+            drafts, usage, gateway, Fakes.IDS, Fakes.FIXED_CLOCK, Fakes.NOOP_LOG,
+            Fakes.styleService(styleSettings, learning), learning);
     }
 
     @Test public void happyPathGeneratesPersistsVariantsAndUsage() {
@@ -64,6 +74,26 @@ public class DraftServiceTest {
         assertFalse("isolation breach", snap.contains("B-SECRET"));  // B never leaks in
         assertTrue(provider.lastRequest.system.contains("Amara"));
         assertFalse(provider.lastRequest.system.contains("Bank Client"));
+    }
+
+    @Test public void p4VoiceAndWhyFlowIntoPromptAndAudit() {
+        DraftService svc = service(new Fakes.GatewayFake(
+            Fakes.FakeProvider.returning("nice one!")));
+        // global: direct tone + plenty emoji; contact override: no emoji + custom prompt
+        styleSettings.put(null, "tone", "2");
+        styleSettings.put(null, "emoji", "2");
+        styleSettings.put(1L, "emoji", "0");
+        styleSettings.put(1L, "custom.prompt", "B-SECRET custom line only for Amara");
+
+        com.replymate.core.util.Result<DraftOutcome> r = svc.generateForContact(1);
+        assertTrue(r.ok);
+        String sys = drafts.saved.get(0).promptSnapshotJson;
+        assertTrue(sys.contains("direct and to the point"));       // global base voice
+        assertTrue(sys.contains("no emoji"));                      // contact override won
+        assertFalse(sys.contains("plenty of emoji"));
+        assertTrue(sys.contains("B-SECRET custom line"));
+        assertTrue(sys.contains("\"why\":["));                      // audit trail stored
+        assertTrue(sys.contains("contact override"));
     }
 
     @Test public void blocksWithoutConfiguredProvider() {

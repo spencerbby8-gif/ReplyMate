@@ -44,10 +44,14 @@ public final class DraftService {
     private final IdGen ids;
     private final Clock clock;
     private final Logger log;
+    private final com.replymate.core.style.StyleService styleService;
+    private final com.replymate.core.learning.LearningService learningService;
 
     public DraftService(ContactStore contacts, MessageStore messages, StyleStore styles,
                         ProfileService profiles, DraftStore drafts, UsageStore usage,
-                        ProviderGateway gateway, IdGen ids, Clock clock, Logger log) {
+                        ProviderGateway gateway, IdGen ids, Clock clock, Logger log,
+                        com.replymate.core.style.StyleService styleService,
+                        com.replymate.core.learning.LearningService learningService) {
         this.contacts = contacts;
         this.messages = messages;
         this.styles = styles;
@@ -58,6 +62,8 @@ public final class DraftService {
         this.ids = ids;
         this.clock = clock;
         this.log = log;
+        this.styleService = styleService;
+        this.learningService = learningService;
     }
 
     public Result<DraftOutcome> generateForContact(long contactId) {
@@ -88,8 +94,18 @@ public final class DraftService {
         StyleProfile global = styles.get(Scope.GLOBAL, null);
         if (global != null && global.derivedRules != null) styleRules = global.derivedRules;
 
-        ChatRequest request = PromptBuilder.build(
-            new PromptBundle(profiles.load(), c, styleRules, thread));
+        // P4: global user voice + per-contact overrides + custom prompt + learned hints.
+        com.replymate.core.style.StyleService.ComposedVoice voice =
+            styleService == null ? null : styleService.compose(c);
+        java.util.List<String> why = new java.util.ArrayList<String>();
+        why.addAll(profiles.excludedSections());
+        if (voice != null) why.addAll(voice.why);
+
+        ChatRequest request = PromptBuilder.build(new PromptBundle(
+            profiles.loadFiltered(), c, styleRules, thread,
+            voice == null ? "" : voice.voiceLine,
+            voice == null ? null : voice.extraLines,
+            profiles.extraFiltered()));
 
         long t0 = clock.now();
         Result<ChatReply> reply = provider.generate(request);
@@ -105,7 +121,7 @@ public final class DraftService {
         long now = clock.now();
         String group = ids.next();
         String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
-        String snapshot = PromptBuilder.snapshot(request, model);
+        String snapshot = PromptBuilder.snapshot(request, model, "reply", why);
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
 
         List<Draft> saved = new ArrayList<Draft>();
@@ -194,7 +210,10 @@ public final class DraftService {
         long now = clock.now();
         String group = ids.next();
         String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
-        String snapshot = PromptBuilder.snapshot(request, model, "tone:" + tone.wire);
+        java.util.List<String> why = new java.util.ArrayList<String>();
+        why.add("tone transform: " + tone.label);
+        why.add("rewrite-only request — no profile, style rules or thread history was sent");
+        String snapshot = PromptBuilder.snapshot(request, model, "tone:" + tone.wire, why);
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
 
         List<Draft> saved = new ArrayList<Draft>();

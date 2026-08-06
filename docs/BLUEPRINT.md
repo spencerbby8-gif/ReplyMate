@@ -299,16 +299,19 @@ int tokensIn, tokensOut; RateLimitInfo limits}`. Provider also exposes `validate
 candidateCount:n, maxOutputTokens:220}`. No streaming in v1. Payloads built by `GeminiPayloads`
 (unit-tested against golden JSON) — base_url & model overridable in Settings (free Flash default, per research).
 
-### 5.3 Prompt assembly (P1 scope: L0+L1+L3+L4; L2 arrives in P4)
+### 5.3 Prompt assembly (P1 scope: L0+L1+L3+L4; P4 added voice/custom/learned lines + toggled profile; L1/L2 arrive in P4b)
 
 ```
 L0 SYSTEM  = Identity("You are <profile.name> writing your own chat messages; output only the reply text")
-           + MyProfile digest (name·languages·bio·topics)
+           + MyProfile digest (name·languages·bio·topics — sections removed when toggled off [P4])
+           + More-about-me extra when set + toggled on [P4]
            + Global style rules (GLOBAL StyleProfile.derived_rules  [P5; preset fallback P1])
+           + Voice line: the 9 style controls rendered as rules [P4; global base → contact overrides]
            + Contact block (relationship_type, relationship_notes, tone_override, language_pref)
+           + Contact extras: custom prompt line + learned-hints line (gated) [P4]
            + Boundaries (reply length target, never invent facts, match their language)
-L1 SUMMARY = latest contact_summary           [P4]
-L2 FACTS   = top active memory_facts (pinned→importance5→recency, ≤30)   [P4]
+L1 SUMMARY = latest contact_summary           [P4b]
+L2 FACTS   = top active memory_facts (pinned→importance5→recency, ≤30)   [P4b]
 L3 THREAD  = last 30 messages, incoming→user "Name: text", mine→model    [ThreadMapper]
 L4 TASK    = new incoming message(s) + instruction (default: natural reply, 1–3 sentences)
              transformed for tone actions: shorter|softer|funnier|more-formal|regenerate(seed++)
@@ -327,7 +330,7 @@ Output cap 220 tokens default (variants share one call via candidateCount).
 - Every attempt outcome → `usage_event` + draft row saved on partial failure with empty reply (status
   generated only on success). Daily budget guard warns at 80% of user-set `budget.daily_tokens`.
 
-### 5.6 Background memory jobs — P4/P5 only (decision #7)
+### 5.6 Background memory jobs — P4b/P5 only (decision #7)
 `FactExtractionJob`: every K=12 new msgs or 30 min per contact (whichever first) → AI JSON extraction
 `{facts:[{category,text,importance,confidence}]}` → `FactNormalizer` → upsert by `(contact_id,text_norm)`,
 supersede=disable-old unless pinned. `SummaryJob`: when uncovered span > ~2k tokens → new versioned summary.
@@ -406,7 +409,8 @@ builds+signs+verifies via apk-engine · owner smoke pass · version logged in `r
 | **P1 Manual MVP** (≈3–4 S) | **0.1.0 / vc2** | P1a S07+S13+S09 Keystore key vault + validate; P1b contacts CRUD + channels(manual) + messages + S03/S04(msg tab)/S02; P1c prompt pipeline L0+L3+L4 + GeminiProvider http/retry + S05 draft flow + copy/edit + draft history + usage log (S11 basic); P1d transforms + variants + audit screen S06 + error UX | paste→draft ≤10 s on mobile data; key survives lock/rotate; suites (incl. golden payloads) green; owner uses it a day |
 | **P2 Listener** (2–3 S) | 0.2.0 / vc3 | manifest+`NotificationListenerService`; permission onboarding screen (optional); MessagingStyle parser+fixtures; dedupe/batch (5 s window); contact auto-discovery+remote_key; app notifications w/ action → S05; health chip | 3-day soak, real WA+TG: 0 duplicate texts, 0 unlogged text msgs, listener survives reboot |
 | **P3 Draft UX** (1–2 S) | 0.3.0 / vc4 | prefetch-on-notification; S02 search; WA/TG open-chat deep-links; copy polish; contact merge UI; empty/edge-state pass | owner daily-drives 1 week |
-| **P4 Memory layers** (3–4 S) | 0.4.0 / vc5 | facts job+merge UI (S12, S04 tabs), pinned facts, summaries+budgeter v2, prompt L1+L2, `IsolationSuite` release gate, memory audit views | leak suite green; owner rates drafts for 3 contacts "context-aware" ≥8/10 |
+| **P4 Personalization & learning** (3–4 S) | **0.5.0 / vc10** | **scope REDEFINED by owner (was "Memory layers"):** global user voice = 9 controls (tone·length·emoji·formality·humor·confidence·slang·flirting·follow-ups, 3 levels each, S14) as base style → per-contact overrides + custom prompt box (S04 edit) → private "About me" extra + per-section use-toggles (S07) → learning from approved/edited/regenerated/rejected drafts (`style_signal`, schema v3) with per-contact reset/pause/export/disable + privacy gates (private-mode & memory-off contacts can neither feed nor consume learning) → prompt-audit "why it sounded this way" (S06) from per-draft snapshot `why`; all local-first + contact-isolated | customization suites green (style/learning/migration-v3/isolation); owner: voice audible in drafts, audit explains each reply, toggles verifiably remove sections |
+| **P4b Memory layers** (planned, awaits owner approval) | 0.6.0 / vc11+ | original P4 scope, groundwork committed (`core.memory` + `memory_fact` store): facts job+merge UI (S12, S04 tabs), pinned facts, summaries+budgeter v2, prompt L1+L2, `IsolationSuite` release gate, memory audit views | leak suite green; owner rates drafts for 3 contacts "context-aware" ≥8/10 |
 | **P5 Style engine** (2 S) | 0.5.0 / vc6 | sample→rules job (S08 real), per-contact style overrides, per-contact language | blind-rating "sounds like me" ≥8/10 |
 | **P6 Hardening** (2 S) | 0.6.0→**1.0.0** / vc7–8 | biometric gate/PIN polish, redaction, export/import (JSON, schema-versioned), budget dashboards, perf pass (200 msgs/contact ×10), secure-delete, SQLCipher evaluation (decision #2 reopening possible w/ approval) | security checklist 100%; owner acceptance → tag 1.0.0 |
 | **P7 Optional** (per item, only on request) | 0.7.x+ | RemoteInput direct-send pilot (per-device validation, opt-in per contact, never auto-send) · provider #2 · embeddings recall · history import | per-item owner approval |
