@@ -279,9 +279,6 @@ public final class Fakes {
         @Override public void remove(Long contactId, String key) {
             scope(contactId).remove(key);
         }
-        @Override public void deleteForContact(long contactId) {
-            rows.remove(contactId);
-        }
     }
 
     public static final class LearningStoreFake implements com.replymate.core.ports.LearningStore {

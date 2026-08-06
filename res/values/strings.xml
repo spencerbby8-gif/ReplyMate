@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ReplyMate</string>
-    <string name="home_sub">Private AI reply assistant — manual mode</string>
+    <string name="home_sub">Private AI reply assistant — on-device only</string>
     <string name="home_status_loading">Initializing database…</string>
     <string name="home_empty">No contacts yet.\nAdd someone to start drafting replies.</string>
     <string name="home_new_contact">＋ New contact</string>

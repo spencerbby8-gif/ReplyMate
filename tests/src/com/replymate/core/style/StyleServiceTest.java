@@ -120,4 +120,25 @@ public class StyleServiceTest {
         assertFalse(joined(v).contains("OTHER-CONTACT-SECRET"));
         assertFalse(v.voiceLine.contains("direct and to the point"));
     }
+
+    @Test public void globalCustomInstructionAppliesToEveryContact() {
+        settings.put(null, StyleSettings.CUSTOM_PROMPT_KEY, "I never use full stops");
+        StyleService.ComposedVoice v = styles.compose(contact());
+        assertEquals(1, v.extraLines.size());
+        assertTrue(v.extraLines.get(0).contains("standing style instruction"));
+        assertTrue(v.extraLines.get(0).contains("I never use full stops"));
+        assertTrue(joined(v).contains("global custom instruction applied (22 chars)"));
+    }
+
+    @Test public void contactCustomPromptStacksAfterTheGlobalInstruction() {
+        settings.put(null, StyleSettings.CUSTOM_PROMPT_KEY, "global rule");
+        settings.put(7L, StyleSettings.CUSTOM_PROMPT_KEY, "contact rule");
+        StyleService.ComposedVoice v = styles.compose(contact());
+        assertEquals(2, v.extraLines.size());
+        // global first (base), contact-specific later (closer to the contact block)
+        assertTrue(v.extraLines.get(0).contains("global rule"));
+        assertTrue(v.extraLines.get(1).contains("contact rule"));
+        assertTrue(joined(v).contains("global custom instruction applied"));
+        assertTrue(joined(v).contains("custom prompt for Amara applied"));
+    }
 }

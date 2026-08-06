@@ -78,11 +78,9 @@ public final class DraftService {
         }
 
         List<Message> thread = messages.lastMessages(contactId, 30);
+        // lastMessages is OLDEST-first → the loop ends at the LATEST incoming message.
         Message lastIncoming = null;
         for (Message m : thread) {
-            if (m.direction == Direction.INCOMING && lastIncoming == null) {
-                // find the LATEST incoming: iterate to end
-            }
             if (m.direction == Direction.INCOMING) lastIncoming = m;
         }
         if (lastIncoming == null) {
@@ -156,11 +154,6 @@ public final class DraftService {
         log.i("DraftService", "generated " + saved.size() + " variants for contact " + contactId
             + " in " + latency + "ms");
         return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
-    }
-
-    /** P3: explicit regenerate — same pipeline, fresh variants for the contact. */
-    public Result<DraftOutcome> regenerateForContact(long contactId) {
-        return generateForContact(contactId);
     }
 
     /** P3: tone-transform ONE existing draft into new variant(s).

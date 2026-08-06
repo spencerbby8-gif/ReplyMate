@@ -23,10 +23,14 @@ public final class ContactEditActivity extends Activity {
     private AppContainer c;
     private long contactId = -1;
     private Contact existing;
+    private android.widget.LinearLayout aiRow;
     private java.util.Map<String, String> contactRows;
     private EditText customPrompt;
+    private boolean deleteArmed;
     private java.util.Map<String, String> globalRows;
     private EditText language;
+    private LinearLayout learningContent;
+    private android.widget.TextView learningGateNote;
     private android.widget.TextView learningStats;
     private EditText name;
     private EditText notes;
@@ -119,6 +123,29 @@ public final class ContactEditActivity extends Activity {
                 ContactEditActivity.this.finish();
             }
         });
+
+        // P4-stabilization: contact deletion completes the P1 CRUD scope (the store
+        // method + FK cascade existed but nothing reachable called them). Two-tap
+        // inline confirm — no dialog framework needed.
+        if (this.existing != null) {
+            final Button delete = Ui.btn(this, "Delete contact");
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
+            dlp.topMargin = Ui.dp(this, 8);
+            linearLayout.addView(delete, dlp);
+            delete.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (!ContactEditActivity.this.deleteArmed) {
+                        ContactEditActivity.this.deleteArmed = true;
+                        delete.setText("Really delete " + ContactEditActivity.this.existing.displayName
+                            + "? Messages, drafts, voice settings and learning for them are wiped. Tap again to confirm.");
+                        return;
+                    }
+                    ContactEditActivity.this.c.contacts().delete(ContactEditActivity.this.contactId);
+                    Toast.makeText(ContactEditActivity.this, "Contact deleted", 0).show();
+                    ContactEditActivity.this.finish();
+                }
+            });
+        }
     }
 
     @Override // android.app.Activity
@@ -131,6 +158,8 @@ public final class ContactEditActivity extends Activity {
 
     private void buildCustomization(LinearLayout root) {
         root.addView(Ui.divider(this));
+        buildPrivacyAi(root);
+
         root.addView(Ui.label(this, "VOICE FOR THIS CONTACT"));
         TextView why = Ui.sub(this,
             "Override your global voice for " + this.existing.displayName
@@ -207,20 +236,95 @@ public final class ContactEditActivity extends Activity {
 
     /* ---------------------------------------------------------- P4: learning */
 
+    /** AI & privacy toggles (P4-stabilization): these flags existed in the model since P1
+     *  and gate generation + learning, but no screen set them — they were unreachable.
+     *  Every row writes through immediately and the learning section below reacts live. */
+    private void buildPrivacyAi(LinearLayout root) {
+        root.addView(Ui.label(this, "AI & PRIVACY FOR THIS CONTACT"));
+
+        final LinearLayout priv = Ui.row(this, "Private mode", "");
+        Ui.setRowSub(priv, privacyText());
+        root.addView(priv);
+        root.addView(Ui.divider(this));
+
+        final LinearLayout mem = Ui.row(this, "Memory for this contact", "");
+        Ui.setRowSub(mem, memoryText());
+        root.addView(mem);
+        root.addView(Ui.divider(this));
+
+        this.aiRow = Ui.row(this, "AI replies for this contact", "");
+        Ui.setRowSub(this.aiRow, aiText());
+        root.addView(this.aiRow);
+        root.addView(Ui.divider(this));
+
+        priv.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                ContactEditActivity.this.existing.privateMode =
+                    !ContactEditActivity.this.existing.privateMode;
+                // model contract (core Contact): privateMode == true ⇒ aiEnabled == false
+                if (ContactEditActivity.this.existing.privateMode) {
+                    ContactEditActivity.this.existing.aiEnabled = false;
+                } else {
+                    ContactEditActivity.this.existing.aiEnabled = true;
+                }
+                ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
+                Ui.setRowSub(priv, privacyText());
+                Ui.setRowSub(ContactEditActivity.this.aiRow, aiText());
+                refreshLearningState();
+            }
+        });
+        mem.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                ContactEditActivity.this.existing.memoryEnabled =
+                    !ContactEditActivity.this.existing.memoryEnabled;
+                ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
+                Ui.setRowSub(mem, memoryText());
+                refreshLearningState();
+            }
+        });
+        this.aiRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (ContactEditActivity.this.existing.privateMode) {
+                    Toast.makeText(ContactEditActivity.this,
+                        "Private mode is on — turn it off to allow AI replies", 0).show();
+                    return;
+                }
+                ContactEditActivity.this.existing.aiEnabled =
+                    !ContactEditActivity.this.existing.aiEnabled;
+                ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
+                Ui.setRowSub(ContactEditActivity.this.aiRow, aiText());
+            }
+        });
+    }
+
+    private String privacyText() {
+        return this.existing.privateMode
+            ? "on — this chat is never sent to any AI (generation + learning off)"
+            : "off — AI replies allowed (the settings below apply)";
+    }
+
+    private String memoryText() {
+        return this.existing.memoryEnabled
+            ? "on — ReplyMate may keep context + learn for this chat"
+            : "off — no memory and no learning for this chat";
+    }
+
+    private String aiText() {
+        if (this.existing.privateMode) return "off — private mode is on";
+        return this.existing.aiEnabled
+            ? "on — ✨ Generate works in this chat" : "off — Generate refuses this chat";
+    }
+
     private void buildLearning(LinearLayout root) {
         root.addView(Ui.divider(this));
         root.addView(Ui.label(this, "LEARNING FROM YOUR CHOICES"));
         final com.replymate.core.learning.LearningService learning = this.c.learningService();
 
-        if (this.existing.privateMode) {
-            root.addView(Ui.sub(this,
-                "learning off — private contact (learning can never run for private contacts)"));
-            return;
-        }
-        if (!this.existing.memoryEnabled) {
-            root.addView(Ui.sub(this, "learning off — memory is disabled for this contact"));
-            return;
-        }
+        this.learningGateNote = Ui.sub(this, "");
+        root.addView(this.learningGateNote);
+        this.learningContent = new LinearLayout(this);
+        this.learningContent.setOrientation(1);
+        root.addView(this.learningContent);
 
         final LinearLayout toggle = Ui.row(this, "Learning for this contact", "");
         Ui.setRowSub(toggle, learningToggleText(learning));
@@ -232,8 +336,8 @@ public final class ContactEditActivity extends Activity {
                 refreshLearningStats();
             }
         });
-        root.addView(toggle);
-        root.addView(Ui.divider(this));
+        this.learningContent.addView(toggle);
+        this.learningContent.addView(Ui.divider(this));
 
         final LinearLayout pause = Ui.row(this, "Pause learning", "");
         Ui.setRowSub(pause, pauseText(learning));
@@ -245,13 +349,12 @@ public final class ContactEditActivity extends Activity {
                 refreshLearningStats();
             }
         });
-        root.addView(pause);
-        root.addView(Ui.divider(this));
+        this.learningContent.addView(pause);
+        this.learningContent.addView(Ui.divider(this));
 
         this.learningStats = Ui.sub(this, "");
         this.learningStats.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 4));
-        root.addView(this.learningStats);
-        refreshLearningStats();
+        this.learningContent.addView(this.learningStats);
 
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(0);
@@ -262,7 +365,7 @@ public final class ContactEditActivity extends Activity {
         buttons.addView(reset, blp);
         Button export = Ui.btn(this, "Export (copy)");
         buttons.addView(export, new LinearLayout.LayoutParams(blp));
-        root.addView(buttons);
+        this.learningContent.addView(buttons);
 
         reset.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -284,6 +387,30 @@ public final class ContactEditActivity extends Activity {
                     "Learning data copied to clipboard (stays on this phone)", 1).show();
             }
         });
+        refreshLearningState();
+    }
+
+    /** Gate-driven learning panel state: contact-level privacy flags (private mode,
+     *  memory off) close the gate no matter what the switches below say — say so
+     *  honestly and hide the controls; otherwise show controls + live stats. */
+    private void refreshLearningState() {
+        if (this.learningGateNote == null || this.learningContent == null) return;
+        if (this.existing.privateMode) {
+            this.learningGateNote.setText(
+                "learning off — private mode is on (learning can never run for private contacts)");
+            this.learningGateNote.setVisibility(View.VISIBLE);
+            this.learningContent.setVisibility(View.GONE);
+            return;
+        }
+        if (!this.existing.memoryEnabled) {
+            this.learningGateNote.setText("learning off — memory is disabled for this contact");
+            this.learningGateNote.setVisibility(View.VISIBLE);
+            this.learningContent.setVisibility(View.GONE);
+            return;
+        }
+        this.learningGateNote.setVisibility(View.GONE);
+        this.learningContent.setVisibility(View.VISIBLE);
+        refreshLearningStats();
     }
 
     private String learningToggleText(com.replymate.core.learning.LearningService learning) {

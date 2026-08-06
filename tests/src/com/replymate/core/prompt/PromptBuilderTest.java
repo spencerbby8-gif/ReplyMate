@@ -44,6 +44,17 @@ public class PromptBuilderTest {
         assertTrue(req.system.contains("natural, human"));
     }
 
+    @Test public void naturalTextingRulesGuardRepliesFromAiTells() {
+        // P4-stabilization: the anti-"AI-written" rule block must stay wired into
+        // every generated reply prompt (and defer to the user's own chat habits).
+        ChatRequest req = PromptBuilder.build(new PromptBundle(
+            profile("K"), Fakes.contact(1, "Bo"), "", new ArrayList<Message>()));
+        assertTrue(req.system.contains("real person texting"));
+        assertTrue(req.system.contains("no bullet points"));
+        assertTrue(req.system.contains("visible in K's own side"));
+        assertTrue(req.system.contains("short answer is enough"));
+    }
+
     @Test public void turnsAreNamePrefixedAndRoleMapped() {
         Contact c = Fakes.contact(1, "Amara");
         List<Message> thread = new ArrayList<Message>();

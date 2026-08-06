@@ -54,6 +54,21 @@ public class P4PromptTest {
         assertFalse(off.system.contains("More about me:"));
     }
 
+    @Test public void globalCustomInstructionReachesTheSystemPrompt() {
+        // end-to-end: global style_setting row → StyleService.compose → system prompt
+        Fakes.StyleSettingStoreFake settings = new Fakes.StyleSettingStoreFake();
+        settings.put(null, com.replymate.core.style.StyleSettings.CUSTOM_PROMPT_KEY,
+            "sign off with x");
+        com.replymate.core.style.StyleService svc = Fakes.styleService(settings,
+            Fakes.learningService(new Fakes.LearningStoreFake(), new Fakes.KvStoreFake()));
+        com.replymate.core.style.StyleService.ComposedVoice voice =
+            svc.compose(Fakes.contact(1, "Amara"));
+        ChatRequest req = buildWithVoice(voice.voiceLine, voice.extraLines, "");
+        assertTrue(req.system.contains("standing style instruction"));
+        assertTrue(req.system.contains("sign off with x"));
+        assertTrue(voice.why.toString().contains("global custom instruction applied"));
+    }
+
     @Test public void profileTogglesFilterSectionsAndAreAudited() {
         Fakes.KvStoreFake kv = new Fakes.KvStoreFake();
         ProfileService svc = new ProfileService(kv);

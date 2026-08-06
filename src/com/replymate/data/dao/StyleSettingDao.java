@@ -64,9 +64,4 @@ public final class StyleSettingDao {
             ? new String[] {key} : new String[] {String.valueOf(contactId), key};
         helper.getWritableDatabase().delete("style_setting", where, args);
     }
-
-    public void deleteForContact(long contactId) {
-        helper.getWritableDatabase().delete("style_setting", "contact_id=?",
-            new String[] {String.valueOf(contactId)});
-    }
 }

@@ -129,10 +129,9 @@ public final class ConversationActivity extends Activity {
         super.onResume();
         if (contact != null && c != null) {
             Contact fresh = c.contacts().get(contact.id);
-            if (fresh != null) {
-                contact = fresh;
-                ((TextView) findViewById(R.id.conv_name)).setText(contact.displayName);
-            }
+            if (fresh == null) { finish(); return; }   // contact deleted meanwhile
+            contact = fresh;
+            ((TextView) findViewById(R.id.conv_name)).setText(contact.displayName);
         }
     }
 

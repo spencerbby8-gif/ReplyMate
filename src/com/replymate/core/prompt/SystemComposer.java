@@ -72,7 +72,19 @@ public final class SystemComposer {
         sb.append("\n\nRules: reply in ").append(owner)
           .append("'s voice; usually 1–3 short sentences unless the context clearly needs more;")
           .append(" never invent facts about ").append(contact.displayName)
-          .append("; stay in character at all times.");
+          .append("; stay in character at all times.")
+          // P4-stabilization: grounded anti-"AI-written" rules. Every clause defers to the
+          // habits visible in the conversation or to the voice settings above — nothing here
+          // overrides a control the user set.
+          .append(" Write like a real person texting, not like an email or an assistant:")
+          .append(" no greetings or sign-offs unless this chat already uses them;")
+          .append(" no formal openers or pleasantries;")
+          .append(" never restate or answer back their own question to them;")
+          .append(" no bullet points, no numbered lists, no headers;")
+          .append(" avoid long dashes and perfectly balanced sentences;")
+          .append(" match the capitalization, punctuation and line-length habits visible in ")
+          .append(owner).append("'s own side of the conversation;")
+          .append(" when a short answer is enough, send only the short answer.");
 
         return sb.toString();
     }

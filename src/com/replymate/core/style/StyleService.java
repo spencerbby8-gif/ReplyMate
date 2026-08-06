@@ -47,6 +47,11 @@ public final class StyleService {
         return settings.all(null);
     }
 
+    /** The owner's global custom style instruction ("" when unset). */
+    public String globalCustomInstruction() {
+        return StyleSettings.customPrompt(settings.all(null));
+    }
+
     public Map<String, String> contactRows(long contactId) {
         return settings.all(contactId);
     }
@@ -77,7 +82,14 @@ public final class StyleService {
         }
         why.addAll(overrides);
 
-        // 2) custom prompt box (this contact only).
+        // 2) owner's own standing style instruction (global, applies to every chat),
+        //    then the custom prompt box (this contact only).
+        String globalCustom = StyleSettings.customPrompt(global);
+        if (!globalCustom.isEmpty()) {
+            extra.add("The owner's own standing style instruction (applies to every chat): "
+                + globalCustom);
+            why.add("global custom instruction applied (" + globalCustom.length() + " chars)");
+        }
         String custom = StyleSettings.customPrompt(contactRows);
         if (!custom.isEmpty()) {
             extra.add("Special instruction for this chat: " + custom);
