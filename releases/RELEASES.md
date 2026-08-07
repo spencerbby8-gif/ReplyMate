@@ -1,5 +1,10 @@
 # ReplyMate release log
 
+> 2026-08-07 prune (owner-ordered workspace cleanup): pre-1.2.0 APK binaries were
+> removed from the working tree — only the latest verified release is kept on disk.
+> Their sha256/size records stay below, and the binaries themselves remain
+> recoverable from git history on GitHub (`spencerbby8-gif/ReplyMate`).
+
 | date (UTC) | versionName | versionCode | sha256 | size | notes |
 |---|---|---|---|---|---|
 | 2026-07-17 | 0.0.1 | 1 | `cb3d20136da1005badceeafbd8a9033e426bc47cf8064528d4fd9f79f950300d` | 33313 | P0 foundations: layers, DI, DB+migrations, theme/shell, test+release harness |
