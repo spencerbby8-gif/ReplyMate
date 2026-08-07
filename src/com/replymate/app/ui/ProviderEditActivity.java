@@ -35,7 +35,7 @@ public final class ProviderEditActivity extends Activity {
     private ProviderType type = ProviderType.GEMINI;
     private ProviderDef existing;
     private EditText label, baseUrl, model, keyInput;
-    private TextView status, keyHint;
+    private TextView status, keyHint, urlHint, testBtn;
     private LinearLayout modelList;
     private final Map<ProviderType, TextView> chips =
         new HashMap<ProviderType, TextView>();
@@ -85,14 +85,14 @@ public final class ProviderEditActivity extends Activity {
         root.addView(Ui.label(this, "Base URL"));
         baseUrl = Ui.field(this, "https://…", false);
         root.addView(baseUrl);
-        TextView urlHint = Ui.sub(this, "Pre-filled from the provider's official docs — edit only for self-hosted or gateway setups.");
+        urlHint = Ui.sub(this, "");
         urlHint.setPadding(0, Ui.dp(this, 2), 0, 0);
         root.addView(urlHint);
 
         root.addView(Ui.label(this, "Model"));
         model = Ui.field(this, "pick below or type a model id", false);
         root.addView(model);
-        Button discover = Ui.btn(this, "Discover models (live)");
+        Button discover = Ui.btn(this, "Discover & test models (live)");
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
         dlp.topMargin = Ui.dp(this, 8);
         root.addView(discover, dlp);
@@ -153,6 +153,8 @@ public final class ProviderEditActivity extends Activity {
             selectChip(type);
             refreshKeyHint();
         }
+        applyBaseUrlRule();
+        renderCachedStatuses();   // cached model badges (with "tested <when>") survive restarts
     }
 
     /* ------------------------------------------------------------------ chips */
@@ -173,10 +175,7 @@ public final class ProviderEditActivity extends Activity {
             @Override public void onClick(View v) {
                 type = t;
                 selectChip(t);
-                if (existing == null && baseUrl.getText().toString().isEmpty()
-                        && !t.defaultBaseUrl.isEmpty()) {
-                    baseUrl.setText(t.defaultBaseUrl);
-                }
+                applyBaseUrlRule();
                 if (label.getText().toString().isEmpty()) label.setText(t.label);
                 refreshKeyHint();
             }
@@ -188,16 +187,28 @@ public final class ProviderEditActivity extends Activity {
         for (Map.Entry<ProviderType, TextView> e : chips.entrySet()) {
             e.getValue().setTextColor(e.getKey() == t ? Ui.ACCENT : Ui.DIM);
         }
-        if (existing == null && !type.defaultBaseUrl.isEmpty()
-                && baseUrl.getText().toString().trim().isEmpty()) {
-            baseUrl.setText(type.defaultBaseUrl);
-        }
         if (existing == null && label.getText().toString().trim().isEmpty()) {
             label.setText(type.label);
         }
+        applyBaseUrlRule();
         keyInput.setHint(type.needsKey
             ? "Paste key here (never shown again after saving)" : "No key needed for this provider");
         keyInput.setEnabled(type.needsKey);
+    }
+
+    /** P-editor-url: known providers keep their official endpoint (auto-filled, field
+     *  locked) — never the previous provider's URL. Only "Other (OpenAI-compatible)"
+     *  edits the base URL by hand. Enforced on chip select, screen load and save. */
+    private void applyBaseUrlRule() {
+        if (existing == null || !type.baseUrlEditable()) {
+            baseUrl.setText(ProviderType.resolveBaseUrlForUi(type,
+                baseUrl.getText().toString()));
+        }
+        baseUrl.setEnabled(type.baseUrlEditable());
+        baseUrl.setFocusable(type.baseUrlEditable());
+        urlHint.setText(type.baseUrlEditable()
+            ? "Any OpenAI-compatible endpoint: local servers, gateways, or providers not in the list."
+            : "Official endpoint from the provider's docs — fixed automatically.");
     }
 
     private void setChipsEnabled(boolean enabled) {
@@ -221,7 +232,9 @@ public final class ProviderEditActivity extends Activity {
     private AiProvider formProvider(String key) {
         ProviderDef d = new ProviderDef();
         d.type = type;
-        d.baseUrl = baseUrl.getText().toString().trim();
+        d.baseUrl = type.baseUrlEditable()
+            ? baseUrl.getText().toString().trim()
+            : type.defaultBaseUrl;
         d.modelName = model.getText().toString().trim();
         return ProviderFactory.build(d, key, new HttpClient(), new RetryPolicy(), c.logger());
     }
@@ -254,22 +267,127 @@ public final class ProviderEditActivity extends Activity {
                     showStatus("Couldn't list models:\n" + r.error, Ui.RED);
                     return;
                 }
-                showStatus(r.value.size() + " models — tap one to use it:", Ui.GREEN);
-                for (final String id : r.value) {
-                    TextView m = Ui.tv(ProviderEditActivity.this, id, 13, Ui.ACCENT);
-                    int hp = Ui.dp(ProviderEditActivity.this, 8);
-                    m.setPadding(hp, Ui.dp(ProviderEditActivity.this, 6), hp,
-                        Ui.dp(ProviderEditActivity.this, 6));
-                    modelList.addView(m);
-                    m.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) {
-                            model.setText(id);
-                            showStatus("Model set: " + id, Ui.GREEN);
-                        }
-                    });
-                }
+                classifyAndRender(r.value);
             }
         });
+    }
+
+    /* ------------------------------------------------ model classification (live) */
+
+    private String cacheKey() {
+        return "modelstatus." + type.wire + "."
+            + Integer.toHexString(baseUrl.getText().toString().trim().hashCode());
+    }
+
+    /** Discover → actively test EVERY model with a tiny live request, badge each from
+     *  the real response, cache results locally (kv), and never list a known-fail
+     *  model above a working one (classifier sorts). */
+    private void classifyAndRender(final java.util.List<String> models) {
+        if (models.isEmpty()) {
+            showStatus("Provider returned no models.", Ui.RED);
+            return;
+        }
+        showStatus("Discovered " + models.size() + " models — testing each one live…", Ui.DIM);
+        final String key = effectiveKey();
+        final String base = baseUrl.getText().toString().trim();
+        Tasks.call(new Tasks.Job<java.util.List<com.replymate.provider.discovery.ModelClassifier.ModelStatus>>() {
+            @Override public java.util.List<com.replymate.provider.discovery.ModelClassifier.ModelStatus> run() {
+                return com.replymate.provider.discovery.ModelClassifier.classify(
+                    type.wire, base, models, key, new HttpClient());
+            }
+        }, new Tasks.Done<java.util.List<com.replymate.provider.discovery.ModelClassifier.ModelStatus>>() {
+            @Override public void accept(java.util.List<com.replymate.provider.discovery.ModelClassifier.ModelStatus> statuses) {
+                saveStatusCache(statuses);
+                renderStatuses(statuses, "tested just now");
+            }
+        });
+    }
+
+    private void saveStatusCache(java.util.List<com.replymate.provider.discovery.ModelClassifier.ModelStatus> statuses) {
+        com.replymate.core.json.JsonArr items = com.replymate.core.json.JsonArr.create();
+        for (com.replymate.provider.discovery.ModelClassifier.ModelStatus st : statuses) {
+            items.add(com.replymate.core.json.JsonObj.create()
+                .put("m", st.model).put("b", st.badge.name()).put("n", st.note));
+        }
+        c.kv().put(cacheKey(), com.replymate.core.json.JsonObj.create()
+            .put("checked", System.currentTimeMillis()).put("items", items).toJson());
+    }
+
+    /** Cached badges survive restarts; they always say when they were last tested. */
+    private void renderCachedStatuses() {
+        String raw = c.kv().get(cacheKey(), "");
+        if (raw.isEmpty()) return;
+        try {
+            com.replymate.core.json.JsonObj root = com.replymate.core.json.Json.parseObj(raw);
+            Object items = root.raw("items");
+            if (!(items instanceof java.util.List)) return;
+            java.util.List<com.replymate.provider.discovery.ModelClassifier.ModelStatus> out =
+                new java.util.ArrayList<com.replymate.provider.discovery.ModelClassifier.ModelStatus>();
+            for (Object o : (java.util.List<?>) items) {
+                if (!(o instanceof java.util.Map)) continue;
+                java.util.Map<?, ?> m = (java.util.Map<?, ?>) o;
+                out.add(new com.replymate.provider.discovery.ModelClassifier.ModelStatus(
+                    String.valueOf(m.get("m")),
+                    com.replymate.provider.discovery.ModelClassifier.Badge.valueOf(String.valueOf(m.get("b"))),
+                    m.get("n") == null ? "" : String.valueOf(m.get("n"))));
+            }
+            if (!out.isEmpty()) {
+                renderStatuses(out, "tested " + com.replymate.core.util.TimeFmt.dayTime(
+                    (long) root.lng("checked", 0)));
+            }
+        } catch (RuntimeException ignored) { }
+    }
+
+    private void renderStatuses(java.util.List<com.replymate.provider.discovery.ModelClassifier.ModelStatus> statuses,
+                                String when) {
+        modelList.removeAllViews();
+        int working = 0;
+        for (com.replymate.provider.discovery.ModelClassifier.ModelStatus st : statuses) {
+            if (com.replymate.provider.discovery.ModelClassifier.rank(st.badge) == 0) working++;
+        }
+        showStatus(statuses.size() + " models — " + working + " working on this key ("
+            + when + "). Tap one to use it:", working > 0 ? Ui.GREEN : Ui.RED);
+        final int hp = Ui.dp(this, 8), vp = Ui.dp(this, 6);
+        for (final com.replymate.provider.discovery.ModelClassifier.ModelStatus st : statuses) {
+            final int badgeColor = badgeColor(st.badge);
+            // row 1: model id + badge; row 2 (note, only when it adds info)
+            LinearLayout rowv = new LinearLayout(this);
+            rowv.setOrientation(LinearLayout.VERTICAL);
+            rowv.setPadding(hp, vp, hp, vp);
+            LinearLayout top = new LinearLayout(this);
+            top.setOrientation(LinearLayout.HORIZONTAL);
+            TextView id = Ui.tv(this, st.model, 13,
+                com.replymate.provider.discovery.ModelClassifier.rank(st.badge) <= 2 ? Ui.ACCENT : Ui.DIM);
+            top.addView(id, new LinearLayout.LayoutParams(0, -2, 1f));
+            final TextView badge = Ui.tv(this,
+                com.replymate.provider.discovery.ModelClassifier.labelFor(st.badge), 11, badgeColor);
+            badge.setTypeface(Typeface.DEFAULT_BOLD);
+            top.addView(badge);
+            rowv.addView(top);
+            if (!st.note.isEmpty() && com.replymate.provider.discovery.ModelClassifier.rank(st.badge) > 0) {
+                TextView note = Ui.tv(this, st.note, 10, Ui.DIM);
+                note.setPadding(0, Ui.dp(this, 2), 0, 0);
+                rowv.addView(note);
+            }
+            modelList.addView(rowv);
+            rowv.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    model.setText(st.model);
+                    showStatus("Model set: " + st.model + " ("
+                        + com.replymate.provider.discovery.ModelClassifier.labelFor(st.badge) + ")",
+                        badgeColor);
+                }
+            });
+        }
+    }
+
+    private static int badgeColor(com.replymate.provider.discovery.ModelClassifier.Badge b) {
+        switch (b) {
+            case WORKING: case FREE_TIER: return Ui.GREEN;
+            case PAID: return Ui.ACCENT;
+            case UNKNOWN: return Ui.DIM;
+            default: return Ui.RED;
+        }
     }
 
     private void testConnection() {
@@ -308,7 +426,9 @@ public final class ProviderEditActivity extends Activity {
         ProviderDef d = existing != null ? existing : new ProviderDef();
         d.type = type;
         d.label = label.getText().toString().trim();
-        d.baseUrl = baseUrl.getText().toString().trim();
+        d.baseUrl = type.baseUrlEditable()
+            ? baseUrl.getText().toString().trim()
+            : type.defaultBaseUrl;
         d.modelName = model.getText().toString().trim();
         String typed = keyInput.getText().toString().trim();
         if (!typed.isEmpty() || type.needsKey) {

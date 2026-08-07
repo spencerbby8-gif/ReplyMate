@@ -127,6 +127,16 @@ public final class AppContainer {
             public String activeModel() {
                 return AppContainer.this.activeModelOrNull();
             }
+
+            @Override // com.replymate.core.ports.ProviderGateway
+            public com.replymate.core.model.ProviderRef activeMeta() {
+                try {
+                    ProviderDef active = AppContainer.this.providerStore.active();
+                    return active == null ? null : com.replymate.core.model.ProviderRef.from(active);
+                } catch (RuntimeException e) {
+                    return null;
+                }
+            }
         };
         this.gateway = providerGateway;
         this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap, styleService, learningService);

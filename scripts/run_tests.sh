@@ -89,6 +89,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.provider.GeminiDiscoveryTest \
     com.replymate.provider.DiagnosticsTest \
     com.replymate.provider.GeminiCandidatesFallbackTest \
+    com.replymate.provider.ModelClassifierTest \
+    com.replymate.core.usecase.ReplyContextHonestyTest \
     com.replymate.data.MigrationTest \
     com.replymate.data.MigrationV2Test \
     com.replymate.data.MigrationV3Test \

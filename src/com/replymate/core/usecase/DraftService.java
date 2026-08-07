@@ -88,6 +88,21 @@ public final class DraftService {
                 + " first, so I know what to reply to.");
         }
 
+        // P-context-honesty: the reply MUST answer the latest incoming message, so it has
+        // to be readable text. Media-only notifications (photo/video/sticker/voice/call)
+        // get an honest explanation + safe fallback — never a hallucinated reply.
+        if (!PromptBuilder.usableText(lastIncoming.body)) {
+            String app = com.replymate.core.listener.WatchedApps.labelFor(lastIncoming.channel);
+            boolean media = com.replymate.core.listener.ListenerFilter.MEDIA_PLACEHOLDER
+                .equals(lastIncoming.body == null ? "" : lastIncoming.body.trim());
+            return Result.err("The latest " + app + " message from " + c.displayName
+                + (media
+                    ? " is media (a photo, video, sticker, voice note or a call) — ReplyMate can't read its content."
+                    : " has no readable text.")
+                + " I won't invent a reply without their actual words. Open " + app
+                + " to read it, or type their message into this chat and generate again.");
+        }
+
         String styleRules = "";
         StyleProfile global = styles.get(Scope.GLOBAL, null);
         if (global != null && global.derivedRules != null) styleRules = global.derivedRules;
@@ -119,7 +134,11 @@ public final class DraftService {
         long now = clock.now();
         String group = ids.next();
         String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
-        String snapshot = PromptBuilder.snapshot(request, model, "reply", why);
+        String snapshot = PromptBuilder.snapshot(request, model, "reply", why,
+            com.replymate.core.prompt.AuditContext.of(gateway.activeMeta(),
+                lastIncoming.body,
+                com.replymate.core.listener.WatchedApps.labelFor(lastIncoming.channel),
+                lastIncoming.sentAt));
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
 
         List<Draft> saved = new ArrayList<Draft>();
@@ -264,7 +283,8 @@ public final class DraftService {
         java.util.List<String> why = new java.util.ArrayList<String>();
         why.add("tone transform: " + tone.label);
         why.add("rewrite-only request — no profile, style rules or thread history was sent");
-        String snapshot = PromptBuilder.snapshot(request, model, "tone:" + tone.wire, why);
+        String snapshot = PromptBuilder.snapshot(request, model, "tone:" + tone.wire, why,
+            com.replymate.core.prompt.AuditContext.of(gateway.activeMeta(), "", "", 0));
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
 
         List<Draft> saved = new ArrayList<Draft>();

@@ -85,6 +85,20 @@ public final class PromptAuditActivity extends Activity {
         meta2.setPadding(0, Ui.dp(this, 2), 0, Ui.dp(this, 6));
         card.addView(meta2);
 
+        // P-context-honesty: the request provenance + the exact message that was
+        // answered — read from the SAME snapshot the provider call was made with.
+        String prov = requestSummary(d.promptSnapshotJson);
+        if (prov != null) {
+            TextView reqHeader = Ui.tv(this, "What was sent", 12, Ui.ACCENT);
+            reqHeader.setTypeface(Typeface.DEFAULT_BOLD);
+            reqHeader.setPadding(0, 0, 0, Ui.dp(this, 2));
+            card.addView(reqHeader);
+            TextView reqBody = Ui.tv(this, prov, 12, Ui.DIM);
+            reqBody.setTextIsSelectable(true);
+            reqBody.setPadding(0, 0, 0, Ui.dp(this, 6));
+            card.addView(reqBody);
+        }
+
         // "Why a reply sounded the way it did" (recorded with the snapshot at
         // generation time — voice decisions, toggles, learning state).
         java.util.List<String> why = WhyLines.from(d.promptSnapshotJson);
@@ -131,6 +145,51 @@ public final class PromptAuditActivity extends Activity {
             }
         });
         return card;
+    }
+
+    /** Human summary of a draft's stored request snapshot: provider · endpoint · model ·
+     *  request settings · the exact latest incoming message that was answered · context
+     *  size. Returns null for pre-0.8.0 snapshots (fields simply absent). */
+    private static String requestSummary(String json) {
+        if (json == null || json.isEmpty()) return null;
+        try {
+            com.replymate.core.json.JsonObj root = com.replymate.core.json.Json.parseObj(json);
+            com.replymate.core.json.JsonObj provider = root.obj("provider");
+            com.replymate.core.json.JsonObj latest = root.obj("latestIncoming");
+            if (provider == null && latest == null) return null;
+            StringBuilder sb = new StringBuilder();
+            if (provider != null) {
+                sb.append("Provider: ").append(str(provider, "label"))
+                  .append("  ·  model: ").append(str(provider, "model")).append('\n');
+                sb.append("Endpoint: ").append(str(provider, "endpoint")).append('\n');
+            }
+            sb.append("Request settings: temperature ").append(root.raw("temperature"))
+              .append(" · candidates ").append(root.raw("candidateCount"))
+              .append(" · max output tokens ").append(root.raw("maxOutputTokens"))
+              .append(" · max input tokens ").append(root.raw("maxInputTokens"))
+              .append(" · kind ").append(str(root, "kind")).append('\n');
+            if (latest != null) {
+                String text = str(latest, "text");
+                if (text.length() > 300) text = text.substring(0, 300) + "…";
+                sb.append("Latest incoming answered (").append(str(latest, "channel"));
+                long at = latest.lng("at", 0);
+                if (at > 0) sb.append(" · ").append(TimeFmt.dayTime(at));
+                sb.append("): \"").append(text).append("\"\n");
+            }
+            Long turns = root.lng("contextTurns", -1);
+            if (turns != null && turns > 0) {
+                sb.append("Conversation context used: ").append(turns)
+                  .append(" turn(s) from the thread (plus the full system prompt below)");
+            }
+            return sb.toString().trim();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static String str(com.replymate.core.json.JsonObj o, String k) {
+        String v = o.str(k);
+        return v == null ? "" : v;
     }
 
     /** Display-only light formatting of the stored JSON snapshot; content unchanged. */

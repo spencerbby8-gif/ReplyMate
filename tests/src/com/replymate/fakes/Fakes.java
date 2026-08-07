@@ -377,9 +377,13 @@ public final class Fakes {
     public static final class GatewayFake implements ProviderGateway {
         public AiProvider provider;
         public String model = "test-model";
+        public com.replymate.core.model.ProviderRef meta =
+            new com.replymate.core.model.ProviderRef("gemini", "Google Gemini",
+                "https://generativelanguage.googleapis.com", "test-model");
         public GatewayFake(AiProvider provider) { this.provider = provider; }
         @Override public AiProvider active() { return provider; }
         @Override public String activeModel() { return model; }
+        @Override public com.replymate.core.model.ProviderRef activeMeta() { return provider == null ? null : meta; }
     }
 
     public static final Clock FIXED_CLOCK = new Clock() {

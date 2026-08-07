@@ -68,4 +68,27 @@ public class ProviderTypeTest {
         assertEquals("", new ProviderDef().modelName);
         assertEquals("", new ProviderDef().baseUrl);
     }
+
+    /* -------------------- P-editor-url: base URL policy for the provider editor -------------------- */
+
+    @Test public void baseUrlEditableOnlyForCustomProvider() {
+        for (ProviderType t : ProviderType.values()) {
+            assertEquals(t.wire + " must have a locked base URL",
+                t == ProviderType.OPENAI_COMPAT, t.baseUrlEditable());
+        }
+    }
+
+    @Test public void switchingProvidersAlwaysYieldsTheOfficialBaseUrl() {
+        // leaving a previous provider's URL in the field is the exact bug this fixes
+        String lastProvidersUrl = "https://api.openai.com/v1";
+        assertEquals("https://api.anthropic.com",
+            ProviderType.resolveBaseUrlForUi(ProviderType.ANTHROPIC, lastProvidersUrl));
+        assertEquals("https://generativelanguage.googleapis.com",
+            ProviderType.resolveBaseUrlForUi(ProviderType.GEMINI, lastProvidersUrl));
+        assertEquals("https://api.x.ai/v1",
+            ProviderType.resolveBaseUrlForUi(ProviderType.GROK, "   "));
+        // custom keeps the user's own endpoint, falling back to default only when empty
+        assertEquals(lastProvidersUrl,
+            ProviderType.resolveBaseUrlForUi(ProviderType.OPENAI_COMPAT, lastProvidersUrl));
+    }
 }

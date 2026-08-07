@@ -5,4 +5,7 @@ package com.replymate.core.ports;
 public interface ProviderGateway {
     AiProvider active();        // null when no working provider+key
     String activeModel();       // null when not configured
+    /** Secret-free description of the active provider for prompt-audit snapshots
+     *  (null when nothing is configured). */
+    com.replymate.core.model.ProviderRef activeMeta();
 }

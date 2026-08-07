@@ -54,4 +54,22 @@ public enum ProviderType {
         for (ProviderType t : values()) if (t.wire.equals(w)) return t;
         return OPENAI_COMPAT;
     }
+
+    /** P-editor-url: only the generic "Other (OpenAI-compatible)" provider allows manual
+     *  Base URL editing. Every known provider uses its official, docs-verified endpoint,
+     *  auto-filled and locked — the user should never type one by hand. */
+    public boolean baseUrlEditable() {
+        return this == OPENAI_COMPAT;
+    }
+
+    /** The base URL the editor must show/keep for a selected provider type:
+     *  known providers ALWAYS get their official endpoint (replacing whatever a
+     *  previous provider left in the field); custom keeps the user's input
+     *  (or its empty default when nothing was typed yet). */
+    public static String resolveBaseUrlForUi(ProviderType t, String currentText) {
+        if (t == null) return "";
+        if (!t.baseUrlEditable()) return t.defaultBaseUrl;
+        String current = currentText == null ? "" : currentText.trim();
+        return current.isEmpty() ? t.defaultBaseUrl : current;
+    }
 }
