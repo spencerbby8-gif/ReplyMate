@@ -371,6 +371,20 @@ public final class SettingsActivity extends Activity {
                   .append(text).append('\n');
             }
         }
+        // P-background-2: structured assistant ledger — every assistant failure with
+        // conversation / provider / model / alert id / stage / reason / action / fix.
+        sb.append("\nAssistant ledger (newest first):\n");
+        sb.append("  assistant switch: ")
+          .append(com.replymate.app.assistant.AssistantRunner.enabled(c) ? "ON" : "OFF")
+          .append('\n');
+        List<String> aLines = com.replymate.app.assistant.AssistantDiag.lines(c.kv(), 8);
+        if (aLines.isEmpty()) {
+            sb.append("  (no assistant events recorded)");
+        } else {
+            for (String l : aLines) {
+                sb.append("  ").append(l).append('\n');
+            }
+        }
         return sb.toString();
     }
 

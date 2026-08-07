@@ -4,10 +4,11 @@ import android.os.Handler;
 import android.os.Looper;
 import com.replymate.app.di.AppContainer;
 import com.replymate.app.listener.ListenerStatus;
+import com.replymate.app.platform.Tasks;
+import com.replymate.core.assistant.AssistantEvent;
 import com.replymate.core.assistant.AssistantPlanner;
+import com.replymate.core.assistant.JobCoalescer;
 import com.replymate.core.listener.BatchWindow;
-import com.replymate.core.listener.DiagnosticsRing;
-import com.replymate.core.listener.IngestCoordinator;
 import com.replymate.core.listener.IngestReport;
 import com.replymate.core.listener.WatchedApps;
 import com.replymate.core.model.Direction;
@@ -20,22 +21,32 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** P-background: debounced, deduped BACKGROUND generation. When a watched chat's
- *  burst settles (same BatchWindow as pings), this generates ONE draft via the
- *  regular DraftService.generateForContact — which enforces every existing rule
- *  (private contact ⇒ no AI ever, per-contact AI off ⇒ skip, no provider / no
- *  readable latest incoming ⇒ honest error) — and posts the assistant alert.
+/** P-background-2 (fixed): debounced, coalesced BACKGROUND generation.
  *
- *  It sends NOTHING by itself; a human Approve tap is the only send path.
- *  Battery rules: zero polling, zero wake-locks, one provider call per NEW
- *  incoming burst per contact (content-hash dedupe), failures logged to the
- *  Diagnostics ring instead of fake alerts. */
+ *  ROOT-CAUSE FIX (real-device failure in 1.4.0): the 1.4.0 runner executed the
+ *  scheduled work on a main-looper Handler — i.e. ON THE UI THREAD — where the
+ *  provider's blocking HttpURLConnection throws NetworkOnMainThreadException,
+ *  which was swallowed into a log line. Every background generation died there.
+ *  The main Handler is now ONLY a delay timer: the fire callback hops to
+ *  Tasks.bg before any work.
+ *
+ *  Reliability pinning (owner's P-background-2 mandates):
+ *   - ONE job per conversation: JobCoalescer supersedes tokens; an obsolete
+ *     runnable is a no-op, and an in-flight older job re-checks its token BEFORE
+ *     the provider call and aborts instead of burning a request.
+ *   - Only the NEWEST message is used (state read at fire time, not schedule).
+ *   - Never regenerate stale drafts: content-hash dedupe persisted in kv.
+ *   - Never duplicate alerts: AssistantNotifier posts under a stable per-contact tag.
+ *   - Never sends by itself: the only send path is a human Approve tap.
+ *   - Every silent failure records a structured AssistantEvent (see AssistantDiag). */
 public final class AssistantRunner {
 
     public static final String KV_ENABLED = "assistant.enabled";
 
-    private static final Handler HANDLER = new Handler(Looper.getMainLooper());
+    /** Delay timer ONLY — work never runs on this thread. */
+    private static final Handler TIMER = new Handler(Looper.getMainLooper());
     private static final Map<Long, Runnable> PENDING = new HashMap<Long, Runnable>();
+    private static final JobCoalescer JOBS = new JobCoalescer();
 
     private AssistantRunner() {
     }
@@ -44,47 +55,80 @@ public final class AssistantRunner {
         return "1".equals(c.kv().get(KV_ENABLED, "1"));
     }
 
-    /** Debounced schedule alongside the message ping (burst ⇒ one run per contact). */
+    /** Debounced schedule alongside the message ping (burst ⇒ one run per contact).
+     *  Every new schedule CANCELS the older one (same key ⇒ superseded token). */
     public static void schedule(final AppContainer c, final IngestReport.PingRequest ping) {
         if (ping == null) return;
         final long contactId = ping.contactId;
+        final long token = JOBS.begin(contactId);
+
         Runnable previous;
         synchronized (PENDING) {
             previous = PENDING.remove(contactId);
         }
-        if (previous != null) HANDLER.removeCallbacks(previous);
+        if (previous != null) TIMER.removeCallbacks(previous);
 
-        Runnable run = new Runnable() {
+        Runnable fire = new Runnable() {
             @Override public void run() {
                 synchronized (PENDING) {
                     PENDING.remove(contactId);
                 }
-                generateAndNotify(c, contactId, ping.displayName, false);
+                // RC1 FIX: leave the timer thread BEFORE touching the pipeline.
+                Tasks.bg(new Runnable() {
+                    @Override public void run() {
+                        if (!JOBS.isCurrent(contactId, token)) return;   // superseded
+                        try {
+                            generateAndNotify(c, contactId, ping.displayName, false, token);
+                        } finally {
+                            JOBS.finish(contactId, token);
+                        }
+                    }
+                });
             }
         };
         synchronized (PENDING) {
-            PENDING.put(contactId, run);
+            PENDING.put(contactId, fire);
         }
         long due = BatchWindow.dueAt(ping.latestTs);
         long delay = BatchWindow.delayFrom(System.currentTimeMillis(), due) + 300;
-        HANDLER.postDelayed(run, delay);
+        TIMER.postDelayed(fire, delay);
     }
 
-    /** The Regenerate button: force a fresh draft and REPLACE the alert in place. */
+    /** The Regenerate button: force a fresh draft and REPLACE the alert in place.
+     *  Supersedes any pending auto-job for the same conversation. */
     public static void regenerateNow(AppContainer c, long contactId, String name) {
-        generateAndNotify(c, contactId, name, true);
+        final long token = JOBS.begin(contactId);
+        final long cid = contactId;
+        Tasks.bg(new Runnable() {
+            @Override public void run() {
+                if (!JOBS.isCurrent(cid, token)) return;
+                try {
+                    generateAndNotify(c, cid, name, true, token);
+                } finally {
+                    JOBS.finish(cid, token);
+                }
+            }
+        });
     }
 
-    /** Core flow — safe to call from any bg thread. Never throws. */
-    static void generateAndNotify(AppContainer c, long contactId, String name, boolean force) {
+    /** Core flow — background thread only. Never throws. */
+    static void generateAndNotify(AppContainer c, long contactId, String name,
+                                  boolean force, long token) {
+        String who = name == null || name.trim().isEmpty() ? "#" + contactId : name;
+        String tag = AssistantPlanner.notifTag(contactId);
         try {
-            if (!enabled(c)) return;
+            if (!enabled(c) && !force) return;
             if (!ListenerStatus.canPostNotifications(c.app())) {
-                // Without the permission we can't even show the result honestly.
-                ring(c, "assistant skipped · notifications permission missing");
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.GATES,
+                    "notification permission not granted",
+                    "skipped generation (no way to show the result honestly)",
+                    "allow ReplyMate notifications (Settings → ReplyMate notifications)");
                 return;
             }
 
+            // State is read AT FIRE TIME — a newer message during the debounce is
+            // always the one answered, never the stale one.
             List<Message> recent = c.messages().lastMessages(contactId, 30);
             Message lastIncoming = null;
             for (Message m : recent) {
@@ -97,12 +141,24 @@ public final class AssistantRunner {
             String doneHash = c.kv().get(AssistantPlanner.hashKvKey(contactId), "");
             if (!AssistantPlanner.shouldGenerate(incomingHash, doneHash, force)) return;
 
+            // Last obsolete-job gate BEFORE the paid provider call: if a newer job
+            // superseded this one while we were reading state, stop here.
+            if (!JOBS.isCurrent(contactId, token)) {
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.SCHEDULE,
+                    "superseded by a newer job for this conversation",
+                    "aborted before the provider call",
+                    "");
+                return;
+            }
+
             DraftService svc = c.draftService();
             Result<DraftOutcome> r = svc.generateForContact(contactId);
             if (r == null || !r.ok || r.value == null || r.value.drafts.isEmpty()) {
-                // Honest by design: gates (private/AI-off/no-provider/unreadable)
-                // land in the diagnostics ring, never as a fake "reply ready" alert.
-                ring(c, "assistant gen skip · " + safe(r == null ? "null" : r.error, 60));
+                String reason = safe(r == null ? "no result" : r.error, 90);
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.GENERATE, reason,
+                    "nothing generated, no alert posted", fixFor(reason));
                 return;
             }
             c.kv().put(AssistantPlanner.hashKvKey(contactId), incomingHash);
@@ -112,25 +168,53 @@ public final class AssistantRunner {
             AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
             AssistantPlanner.Capability cap = t.usable()
                 ? AssistantPlanner.Capability.DIRECT : AssistantPlanner.Capability.NONE;
+            if (cap == AssistantPlanner.Capability.NONE) {
+                AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                    AssistantEvent.Stage.NOTIFY,
+                    "no free-form quick-reply on the source notification",
+                    "posted alert with honest Copy/Regenerate/Open fallback",
+                    "");
+            }
 
             AssistantNotifier.ensureChannels(c.app());
-            AssistantNotifier.post(c.app(), contactId,
-                name == null || name.trim().isEmpty() ? "this chat" : name,
-                appLabel, d.replyText, d.id, cap);
+            AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap);
         } catch (RuntimeException e) {
-            ring(c, "assistant error · " + e.getClass().getSimpleName());
+            AssistantDiag.record(c, contactId, who, tag, "",
+                AssistantEvent.Stage.GENERATE,
+                e.getClass().getSimpleName() + ": " + safe(e.getMessage(), 70),
+                "pipeline aborted safely", "re-open Settings → Diagnostics if it repeats");
         }
     }
 
-    private static void ring(AppContainer c, String line) {
-        try {
-            c.kv().put(IngestCoordinator.KV_RING, DiagnosticsRing.append(
-                c.kv().get(IngestCoordinator.KV_RING, ""), c.clock().now(), line));
-        } catch (RuntimeException ignored) { }
+    /** Map known honest gate errors to a human next-step. Unknowns stay generic. */
+    private static String fixFor(String reason) {
+        String r = reason == null ? "" : reason.toLowerCase(java.util.Locale.US);
+        if (r.contains("private")) {
+            return "expected — private contacts never use AI";
+        }
+        if (r.contains("ai replies are disabled")) {
+            return "enable AI replies for this contact (contact → edit)";
+        }
+        if (r.contains("provider")) {
+            return "check Settings → AI providers (key/model/state)";
+        }
+        if (r.contains("readable text") || r.contains("won't invent")
+                || r.contains("no readable")) {
+            return "expected — can't answer media/empty messages; open the app to read it";
+        }
+        if (r.contains("network") || r.contains("timeout") || r.contains("unable to resolve")) {
+            return "network was down — it retries on the next message";
+        }
+        return "";
     }
 
     private static String safe(String s, int max) {
         if (s == null) return "?";
         return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    /** Test/diagnostic seam: how many coalesced jobs are currently tracked. */
+    static int pendingJobs() {
+        return JOBS.pendingCount();
     }
 }

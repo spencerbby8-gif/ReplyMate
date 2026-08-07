@@ -14,15 +14,19 @@ import com.replymate.app.ReplyMateApp;
 import com.replymate.app.di.AppContainer;
 import com.replymate.app.listener.RmNotificationListener;
 import com.replymate.app.platform.Tasks;
+import com.replymate.core.assistant.AssistantEvent;
 import com.replymate.core.assistant.AssistantPlanner;
+import com.replymate.core.model.Contact;
 import com.replymate.core.model.DraftStatus;
 
-/** P-background: the three notification buttons. Approve is the ONLY send path —
+/** P-background-2: the three notification buttons. Approve is the ONLY send path —
  *  it delivers the draft through the source app's own quick-reply contract
  *  (RemoteInput results → the action's PendingIntent), re-resolved LIVE from the
- *  status bar at tap time. If the reply target is gone (dismissed notification,
- *  dead listener, OEM weirdness) we never pretend: the draft is copied instead
- *  and the alert says exactly what happened. */
+ *  status bar at tap time. Every failure leaves a structured AssistantEvent record
+ *  (conversation / provider / model / alert id / stage / reason / action / fix).
+ *  If the reply target is gone (dismissed notification, dead listener, deleted
+ *  conversation, OEM weirdness) we never pretend: the draft is copied instead and
+ *  the alert says exactly what happened. */
 public final class AssistantReceiver extends BroadcastReceiver {
 
     public static final String ACTION_SEND = "com.replymate.app.assistant.SEND";
@@ -62,8 +66,7 @@ public final class AssistantReceiver extends BroadcastReceiver {
                     if (ACTION_REGEN.equals(action)) {
                         AssistantRunner.regenerateNow(c, contactId, name);
                     } else if (ACTION_COPY.equals(action)) {
-                        copyAndSettle(ctx, c, contactId, name, appLabel, text, draftId,
-                            null);
+                        copyAndSettle(ctx, c, contactId, name, appLabel, text, draftId, null);
                     } else if (ACTION_SEND.equals(action)) {
                         approveAndSend(ctx, c, contactId, name, appLabel, text, draftId);
                     }
@@ -84,10 +87,27 @@ public final class AssistantReceiver extends BroadcastReceiver {
     private void approveAndSend(Context ctx, AppContainer c, long contactId, String name,
                                 String appLabel, String text, long draftId) {
         String app = empty(appLabel) ? "the app" : appLabel;
+        String who = empty(name) ? "#" + contactId : name;
+        String tag = AssistantPlanner.notifTag(contactId);
         String why = null;
+        String sbnKey = "";
+
+        // Conversation deleted since the alert was posted? Nothing to reply into.
+        Contact contact = c.contacts().get(contactId);
+        if (contact == null) {
+            AssistantDiag.record(c, contactId, who, tag, "",
+                AssistantEvent.Stage.APPROVE_RESOLVE,
+                "the conversation was deleted after this draft",
+                "dropped the send, nothing copied", "re-add the contact if it was a mistake");
+            AssistantNotifier.settled(ctx, contactId, "Can't send",
+                "That conversation was removed from ReplyMate — the draft is gone with it.", false);
+            AssistantNotifier.cancel(ctx, contactId);
+            return;
+        }
 
         RmNotificationListener listener = RmNotificationListener.active();
         AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
+        sbnKey = t.sbnKey;
         if (listener == null) {
             why = "ReplyMate's link to the notification shade was recycled";
         } else if (!t.usable()) {
@@ -103,11 +123,17 @@ public final class AssistantReceiver extends BroadcastReceiver {
 
         if (why == null) {
             if (draftId > 0) c.drafts().updateStatus(draftId, DraftStatus.SENT);
+            AssistantDiag.record(c, contactId, who, tag, sbnKey,
+                AssistantEvent.Stage.REMOTE_SEND, "—",
+                "approved text delivered through " + app + "'s quick-reply", "");
             AssistantNotifier.settled(ctx, contactId, "Sent ✓",
                 "Delivered through " + app + "'s quick-reply as you approved:\n" + text,
                 false);
         } else {
-            // Honest fallback: hand the text to the clipboard, keep everything open.
+            AssistantDiag.record(c, contactId, who, tag, sbnKey,
+                AssistantEvent.Stage.REMOTE_SEND, why,
+                "fell back to clipboard copy (nothing was sent)",
+                "open " + app + " and paste it, or wait for a new message");
             copyAndSettle(ctx, c, contactId, name, appLabel, text, draftId, why);
         }
     }
@@ -154,9 +180,16 @@ public final class AssistantReceiver extends BroadcastReceiver {
         }
         if (draftId > 0) c.drafts().updateStatus(draftId, DraftStatus.COPIED);
         String app = empty(appLabel) ? "the app" : appLabel;
+        String who = empty(name) ? "#" + contactId : name;
         String line = (why == null)
             ? "Copied ✓ — paste it in " + app + " when you're ready."
             : "Couldn't quick-send (" + why + "). Copied instead ✓ — paste it in " + app + ".";
+        if (why == null) {
+            AssistantDiag.record(c, contactId, who, AssistantPlanner.notifTag(contactId), "",
+                AssistantEvent.Stage.COPY_FALLBACK,
+                "this app exposes no quick-reply box (by evidence)",
+                "draft copied for manual paste", "");
+        }
         AssistantNotifier.settled(ctx, contactId, "ReplyMate", line + "\n\n" + text, true);
     }
 

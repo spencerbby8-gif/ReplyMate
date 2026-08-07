@@ -55,6 +55,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.util.ResultTest \
     com.replymate.core.ui.SplashChoreoTest \
     com.replymate.core.assistant.AssistantPlannerTest \
+    com.replymate.core.assistant.JobCoalescerTest \
+    com.replymate.core.assistant.AssistantEventTest \
     com.replymate.core.model.ToneTransformTest \
     com.replymate.core.model.ProviderTypeTest \
     com.replymate.core.model.ContentKindTest \
