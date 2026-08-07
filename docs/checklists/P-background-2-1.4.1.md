@@ -77,7 +77,7 @@ resolve failures, remote-send failures/fallbacks, copy fallback, plus sent recor
 
 - GitHub: sandbox had rolled back AGAIN; restored local from remote `main`
   (`reset --hard`), suite re-verified 450/440-era green at that point, then this
-  phase pushed. Final: **remote main = local HEAD = `727d687`** (see below) —
+  phase pushed. Final: remote `main` equals local HEAD at this phase's closing commit (hashes are verified in the final report; a self-reference would be circular). Remote file parity was byte-proven via raw fetches in the previous phase —
   remote file parity already byte-proven last phase via raw fetches.
 - Workspace: kept production source + latest APK + toolchain + vault + test infra;
   removed `releases/ReplyMate-1.4.0.apk` (superseded) + build intermediates.
