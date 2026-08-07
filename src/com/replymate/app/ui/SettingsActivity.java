@@ -27,6 +27,7 @@ public final class SettingsActivity extends Activity {
     private AppContainer c;
     private LinearLayout root;
     private LinearLayout providerRow, listenRow, notifRow, accountRow;
+    private Ui.ToggleRow assistantRow;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -118,6 +119,23 @@ public final class SettingsActivity extends Activity {
         root.addView(notifRow);
         root.addView(Ui.divider(this));
 
+        // P-background: master switch for the assistant. Real switch, live state,
+        // honest subtitle (permission prerequisite + human-approval contract).
+        assistantRow = Ui.toggleRow(this, "Background reply assistant",
+            "drafts a reply when a watched chat pings — you approve every send");
+        assistantRow.sw.setChecked(
+            com.replymate.app.assistant.AssistantRunner.enabled(c));
+        assistantRow.sw.setOnCheckedChangeListener(
+            new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
+                    c.kv().put(
+                        com.replymate.app.assistant.AssistantRunner.KV_ENABLED, on ? "1" : "0");
+                    refreshRows();
+                }
+            });
+        root.addView(assistantRow.row);
+        root.addView(Ui.divider(this));
+
         LinearLayout usageRow = Ui.row(this, "Usage dashboard",
             "local metering of every AI call (count + tokens)");
         usageRow.setOnClickListener(new View.OnClickListener() {
@@ -168,7 +186,7 @@ public final class SettingsActivity extends Activity {
         });
         root.addView(Ui.divider(this));
 
-        TextView footer = Ui.sub(this, "\nReplyMate only READS notifications you allow. It never sends,\nauto-replies, or syncs anything off this phone.");
+        TextView footer = Ui.sub(this, "\nReplyMate only READS notifications you allow. With the reply assistant,\na draft is sent only when YOU tap Approve — nothing auto-sends,\nand nothing syncs off this phone.");
         root.addView(footer);
     }
 
@@ -288,6 +306,15 @@ public final class SettingsActivity extends Activity {
         Ui.setRowSub(notifRow, ListenerStatus.canPostNotifications(this)
             ? "allowed ✓ — ReplyMate can alert you about new messages"
             : "blocked — tap to allow (alerts stay silent otherwise)");
+        if (assistantRow != null) {
+            boolean canPost = ListenerStatus.canPostNotifications(this);
+            assistantRow.sw.setEnabled(canPost);
+            Ui.setRowSub(assistantRow.row, !canPost
+                ? "needs the notification permission above first"
+                : com.replymate.app.assistant.AssistantRunner.enabled(c)
+                    ? "on ✓ — drafts on new pings; you approve every send"
+                    : "off — new pings only alert, nothing is drafted");
+        }
         com.replymate.core.auth.AuthSession s = c.sessions().get();
         Ui.setRowSub(accountRow, s == null
             ? "not signed in — Google / email code / guest"

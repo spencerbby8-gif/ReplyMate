@@ -20,6 +20,25 @@ public final class RawNotif {
         public String dataUri;         // attachment content reference (local only)
     }
 
+    /** P-background: a platform-neutral copy of one notification action, so the
+     *  quick-reply capability check is pure JVM and unit-testable. We NEVER copy
+     *  the PendingIntent (long-lived refs are resolved live at send time). */
+    public static final class ActionRef {
+        public String title;           // visible label, e.g. "Reply" (nullable)
+        public int index;              // position inside Notification.actions
+        public boolean remoteFreeForm; // has a RemoteInput with allowFreeFormInput
+        public String resultKey;       // first free-form RemoteInput result key (nullable)
+
+        public ActionRef copy() {
+            ActionRef a = new ActionRef();
+            a.title = title;
+            a.index = index;
+            a.remoteFreeForm = remoteFreeForm;
+            a.resultKey = resultKey;
+            return a;
+        }
+    }
+
     public String packageName;
     public String title;               // EXTRA_TITLE (nullable)
     public String text;                // EXTRA_TEXT (nullable)
@@ -33,6 +52,8 @@ public final class RawNotif {
     public String ownerKey;            // messagingUser Person key (nullable)
     public Boolean group;              // isGroupConversation tri-state: null = not provided
     public long postTimeMs;
+    public String sbnKey;              // StatusBarNotification.getKey() (P-background, nullable)
+    public final List<ActionRef> actions = new ArrayList<ActionRef>();  // P-background capability
     public boolean ongoing;            // ongoing-event/foreground-service flags (P-ux-fix status gate)
     public int progressMax;            // EXTRA_PROGRESS_MAX (>0 ⇒ progress housekeeping)
     public final List<Entry> messages = new ArrayList<Entry>();   // android.messages contents

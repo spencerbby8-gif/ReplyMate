@@ -91,5 +91,11 @@
             </intent-filter>
         </service>
 
+        <!-- P-background: assistant notification buttons. Internal explicit
+             broadcasts only — non-exported, no filters, nothing from outside. -->
+        <receiver
+            android:name=".assistant.AssistantReceiver"
+            android:exported="false" />
+
     </application>
 </manifest>

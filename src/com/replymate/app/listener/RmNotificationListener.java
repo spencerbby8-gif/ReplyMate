@@ -37,8 +37,35 @@ public final class RmNotificationListener extends NotificationListenerService {
     private static final String KV_PARSE_ERRORS = "listener.parse_errors";
     private static final String KV_UNPARSED = "listener.unparsed_total";
 
+    /** P-background: the live, system-bound listener instance — the ONLY API that
+     *  can see other apps' active notifications (NotificationManager's own
+     *  getActiveNotifications returns ours only). Used by the assistant to
+     *  re-resolve a quick-reply target at approve time. Null whenever the system
+     *  isn't bound to us; every caller falls back honestly. */
+    private static volatile RmNotificationListener ACTIVE;
+
+    public static RmNotificationListener active() {
+        return ACTIVE;
+    }
+
+    /** Live lookup of a still-posted notification by its sbn key; null if gone. */
+    public StatusBarNotification findActive(String sbnKey) {
+        if (sbnKey == null || sbnKey.isEmpty()) return null;
+        try {
+            StatusBarNotification[] all = getActiveNotifications();
+            if (all == null) return null;
+            for (StatusBarNotification s : all) {
+                if (s != null && sbnKey.equals(s.getKey())) return s;
+            }
+        } catch (RuntimeException e) {
+            // SecurityException if access was pulled mid-tap → honest fallback
+        }
+        return null;
+    }
+
     @Override public void onListenerConnected() {
         super.onListenerConnected();
+        ACTIVE = this;
         AppContainer c = ReplyMateApp.containerOf(this);
         if (c != null) {
             c.kv().put("listener.connected_at", String.valueOf(c.clock().now()));
@@ -48,11 +75,17 @@ public final class RmNotificationListener extends NotificationListenerService {
 
     @Override public void onListenerDisconnected() {
         super.onListenerDisconnected();
+        if (ACTIVE == this) ACTIVE = null;
         AppContainer c = ReplyMateApp.containerOf(this);
         if (c != null) {
             c.kv().put("listener.disconnected_at", String.valueOf(c.clock().now()));
             c.logger().w("NLS", "listener disconnected");
         }
+    }
+
+    @Override public void onDestroy() {
+        if (ACTIVE == this) ACTIVE = null;
+        super.onDestroy();
     }
 
     @Override public void onNotificationPosted(final StatusBarNotification sbn) {
@@ -110,6 +143,12 @@ public final class RmNotificationListener extends NotificationListenerService {
                 IngestReport rep = engine.handle(out.events, enabled);
                 for (IngestReport.PingRequest ping : rep.pings) {
                     NotifierPings.schedule(c.app(), ping);
+                    // P-background: remember where this conversation's quick-reply
+                    // target lives, then debounce ONE background generation. The
+                    // assistant never sends by itself — a human Approve is required.
+                    com.replymate.app.assistant.AssistantTargetStore.save(
+                        c.kv(), ping.contactId, raw, c.clock().now());
+                    com.replymate.app.assistant.AssistantRunner.schedule(c, ping);
                 }
             } catch (RuntimeException e) {
                 bump(c, KV_PARSE_ERRORS);

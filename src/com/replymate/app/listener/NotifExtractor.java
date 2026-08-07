@@ -88,7 +88,56 @@ public final class NotifExtractor {
                 if (e != null) raw.messages.add(e);
             }
         }
+        extractActions(n, raw);
+        raw.sbnKey = keyOf(sbn);
         return raw;
+    }
+
+    /** P-background: dumb copy of notification actions for the capability check.
+     *  Reads ONLY shape (title / index / free-form RemoteInput + result key) —
+     *  never the PendingIntent, which the assistant re-resolves live at send time.
+     *  One malformed action degrades that action only. */
+    private static void extractActions(Notification n, RawNotif raw) {
+        Notification.Action[] acts;
+        try {
+            acts = n.actions;
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (acts == null) return;
+        for (int i = 0; i < acts.length; i++) {
+            try {
+                Notification.Action a = acts[i];
+                if (a == null) continue;
+                RawNotif.ActionRef ref = new RawNotif.ActionRef();
+                ref.title = chars(a.title);
+                ref.index = i;
+                android.app.RemoteInput[] ris = a.getRemoteInputs();
+                if (ris != null) {
+                    for (android.app.RemoteInput ri : ris) {
+                        if (ri != null && ri.getAllowFreeFormInput()
+                                && ri.getResultKey() != null
+                                && !ri.getResultKey().trim().isEmpty()) {
+                            ref.remoteFreeForm = true;
+                            ref.resultKey = ri.getResultKey();
+                            break;
+                        }
+                    }
+                }
+                raw.actions.add(ref);
+            } catch (RuntimeException ignored) {
+                // keep scanning the remaining actions
+            }
+        }
+    }
+
+    private static String keyOf(StatusBarNotification sbn) {
+        try {
+            String k = sbn.getKey();   // API 20+
+            return k == null ? "" : k;
+        } catch (RuntimeException e) {
+            return "";
+        }
     }
 
     /** One message entry; a malformed bundle degrades to null (skipped), never throws. */

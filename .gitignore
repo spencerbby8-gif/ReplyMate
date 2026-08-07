@@ -1,1 +1,7 @@
 build/
+dev-secrets/
+*.keystore
+*.jks
+*.key
+.env
+*.pem
