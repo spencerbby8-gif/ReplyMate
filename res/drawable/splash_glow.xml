@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- P-splash-auth-polish: soft radial brand glow behind the hero icon. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:type="radial"
+        android:gradientRadius="50%p"
+        android:startColor="#380A84FF"
+        android:centerColor="#1A0A84FF"
+        android:endColor="#000A84FF" />
+</shape>

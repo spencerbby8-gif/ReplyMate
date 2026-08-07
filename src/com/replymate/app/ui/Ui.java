@@ -213,4 +213,83 @@ public final class Ui {
     private static String capitalize(String s) {
         return s == null || s.isEmpty() ? "" : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
+
+    /* ================= P-splash-auth-polish (1.3.0): serious auth buttons ================= */
+
+    private static void styleAction(Button b, int minHeightDp) {
+        b.setAllCaps(false);
+        b.setTextSize(2, 16.0f);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        android.content.Context c = b.getContext();
+        b.setPadding(dp(c, 16), 0, dp(c, 16), 0);
+        b.setGravity(android.view.Gravity.CENTER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(c, minHeightDp));
+        b.setLayoutParams(lp);
+    }
+
+    /** Primary filled action (brand accent, white bold label). */
+    public static Button primaryBtn(Context ctx, String text) {
+        Button b = new Button(ctx);
+        b.setText(text);
+        b.setTextColor(Color.WHITE);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setBackgroundResource(R.drawable.btn_primary);
+        styleAction(b, 52);
+        return b;
+    }
+
+    /** Quiet secondary action (hairline border, primary-colored label). */
+    public static Button ghostBtn(Context ctx, String text) {
+        Button b = new Button(ctx);
+        b.setText(text);
+        b.setTextColor(PRIMARY);
+        b.setBackgroundResource(R.drawable.btn_ghost);
+        styleAction(b, 52);
+        return b;
+    }
+
+    /** Google sign-in: white pill, official four-color G + label (brand guidance
+     *  on dark surfaces). A LinearLayout because a framework Button cannot center
+     *  an icon+label pair; behaves like a button (clickable/focusable/enabled). */
+    public static LinearLayout googleBtn(Context ctx) {
+        LinearLayout b = new LinearLayout(ctx);
+        b.setOrientation(LinearLayout.HORIZONTAL);
+        b.setGravity(android.view.Gravity.CENTER);
+        b.setBackgroundResource(R.drawable.btn_google);
+        b.setClickable(true);
+        b.setFocusable(true);
+        LinearLayout.LayoutParams lp =
+            new LinearLayout.LayoutParams(-1, dp(ctx, 52));
+        b.setLayoutParams(lp);
+
+        android.widget.ImageView g = new android.widget.ImageView(ctx);
+        g.setImageResource(R.drawable.ic_google_g);
+        int s = dp(ctx, 20);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(s, s);
+        glp.rightMargin = dp(ctx, 12);
+        b.addView(g, glp);
+
+        TextView label = tv(ctx, "Continue with Google", 16.0f, Color.rgb(0x1F, 0x1F, 0x1F));
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        b.addView(label);
+        return b;
+    }
+
+    /** A section divider with a centered label: —— OR CONTINUE WITH EMAIL —— */
+    public static LinearLayout orDivider(Context ctx, String text) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(ctx, 18), 0, dp(ctx, 10));
+        View left = divider(ctx);
+        row.addView(left, new LinearLayout.LayoutParams(0, 1, 1.0f));
+        TextView label = tv(ctx, text.toUpperCase(java.util.Locale.US), 11.0f, DIM);
+        label.setLetterSpacing(0.08f);
+        label.setPadding(dp(ctx, 12), 0, dp(ctx, 12), 0);
+        row.addView(label);
+        View right = divider(ctx);
+        row.addView(right, new LinearLayout.LayoutParams(0, 1, 1.0f));
+        return row;
+    }
 }

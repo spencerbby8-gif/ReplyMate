@@ -42,7 +42,8 @@ public final class AuthActivity extends Activity {
 
     private TextView status;
     private TextView error;
-    private Button googleBtn, sendBtn, verifyBtn, guestBtn;
+    private View googleBtn;                      // white pill w/ official G logo (1.3.0)
+    private Button sendBtn, verifyBtn, guestBtn;
     private LinearLayout codeBlock;
     private TextView resend;
     private EditText emailField, codeField;
@@ -97,22 +98,36 @@ public final class AuthActivity extends Activity {
             LinearLayout header = new LinearLayout(this);
             header.setOrientation(LinearLayout.VERTICAL);
             header.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+            header.setPadding(0, Ui.dp(this, 12), 0, Ui.dp(this, 6));
+
+            // hero mark — rounded-clipped like the splash
+            final int is = Ui.dp(this, 68);
+            final int corner = Ui.dp(this, 16);
+            android.widget.FrameLayout iconFrame = new android.widget.FrameLayout(this);
+            iconFrame.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(android.view.View v, android.graphics.Outline o) {
+                    o.setRoundRect(0, 0, is, is, corner);
+                }
+            });
+            iconFrame.setClipToOutline(true);
             android.widget.ImageView icon = new android.widget.ImageView(this);
             icon.setImageResource(R.drawable.ic_launcher);
-            int is = Ui.dp(this, 72);
-            header.addView(icon, new LinearLayout.LayoutParams(is, is));
-            TextView title = Ui.tv(this, "Welcome to ReplyMate", 22.0f, Ui.PRIMARY);
+            icon.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+            iconFrame.addView(icon, new android.widget.FrameLayout.LayoutParams(is, is));
+            header.addView(iconFrame, new LinearLayout.LayoutParams(is, is));
+
+            TextView title = Ui.tv(this, "Welcome to ReplyMate", 24.0f, Ui.PRIMARY);
             title.setTypeface(Typeface.DEFAULT_BOLD);
+            LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-2, -2);
+            hlp.topMargin = Ui.dp(this, 16);
+            header.addView(title, hlp);
             TextView why = Ui.sub(this,
                 "Sign in to tie your profile and avatar to an account — or continue as a"
                     + " guest: every chat feature stays local on this phone either way.");
             why.setGravity(android.view.Gravity.CENTER);
-            LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-1, -2);
-            hlp.topMargin = Ui.dp(this, 10);
-            header.addView(title, hlp);
             LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(-1, -2);
-            wlp.topMargin = Ui.dp(this, 4);
-            wlp.bottomMargin = Ui.dp(this, 10);
+            wlp.topMargin = Ui.dp(this, 8);
+            wlp.bottomMargin = Ui.dp(this, 12);
             header.addView(why, wlp);
             root.addView(header);
         }
@@ -150,9 +165,9 @@ public final class AuthActivity extends Activity {
             : "none yet"));
         root.addView(av);
 
-        Button profile = Ui.btn(this, "Edit profile & avatar");
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-1, -2);
-        plp.topMargin = Ui.dp(this, 10);
+        Button profile = Ui.ghostBtn(this, "Edit profile & avatar");
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-1, Ui.dp(this, 52));
+        plp.topMargin = Ui.dp(this, 12);
         root.addView(profile, plp);
         profile.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -161,9 +176,10 @@ public final class AuthActivity extends Activity {
         });
 
         if (!s.isGuest()) {
-            Button out = Ui.btn(this, "Sign out");
-            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(-1, -2);
-            olp.topMargin = Ui.dp(this, 8);
+            Button out = Ui.ghostBtn(this, "Sign out");
+            out.setTextColor(Ui.RED);
+            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(-1, Ui.dp(this, 52));
+            olp.topMargin = Ui.dp(this, 10);
             root.addView(out, olp);
             out.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { confirmSignOut(s); }
@@ -188,7 +204,8 @@ public final class AuthActivity extends Activity {
             root.addView(Ui.label(this, "LINK A SIGN-IN METHOD (guest → full account)"));
         }
 
-        googleBtn = Ui.btn(this, "Continue with Google");
+        googleBtn = Ui.googleBtn(this);
+        ((LinearLayout.LayoutParams) googleBtn.getLayoutParams()).topMargin = Ui.dp(this, 6);
         root.addView(googleBtn);
         googleBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { startGoogle(); }
@@ -196,15 +213,15 @@ public final class AuthActivity extends Activity {
 
         passkeyRow(root);
 
-        root.addView(Ui.label(this, "or with email (6-digit code — no links)"));
+        root.addView(Ui.orDivider(this, "or continue with email · 6-digit code, no links"));
         emailField = Ui.field(this, "you@example.com", false);
         emailField.setInputType(android.text.InputType.TYPE_CLASS_TEXT
             | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         root.addView(emailField);
 
-        sendBtn = Ui.btn(this, "Send verification code");
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, -2);
-        slp.topMargin = Ui.dp(this, 8);
+        sendBtn = Ui.primaryBtn(this, "Send verification code");
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, Ui.dp(this, 52));
+        slp.topMargin = Ui.dp(this, 10);
         root.addView(sendBtn, slp);
         sendBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { sendCode(); }
@@ -214,17 +231,19 @@ public final class AuthActivity extends Activity {
         codeBlock.setOrientation(LinearLayout.VERTICAL);
         codeBlock.setVisibility(View.GONE);
         root.addView(codeBlock);
-        codeField = Ui.field(this, "6-digit code", false);
+        codeField = Ui.field(this, "· · · · · ·", false);
         codeField.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         codeField.setFilters(new android.text.InputFilter[] {
             new android.text.InputFilter.LengthFilter(6)});
         codeField.setGravity(android.view.Gravity.CENTER);
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
-        clp.topMargin = Ui.dp(this, 10);
+        codeField.setTextSize(2, 22.0f);
+        codeField.setLetterSpacing(0.3f);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, Ui.dp(this, 56));
+        clp.topMargin = Ui.dp(this, 12);
         codeBlock.addView(codeField, clp);
-        verifyBtn = Ui.btn(this, "Verify & sign in");
-        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(-1, -2);
-        vlp.topMargin = Ui.dp(this, 8);
+        verifyBtn = Ui.primaryBtn(this, "Verify & sign in");
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(-1, Ui.dp(this, 52));
+        vlp.topMargin = Ui.dp(this, 10);
         codeBlock.addView(verifyBtn, vlp);
         verifyBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { verifyCode(); }
@@ -234,9 +253,9 @@ public final class AuthActivity extends Activity {
         codeBlock.addView(resend);
 
         if (!upgradeMode) {
-            guestBtn = Ui.btn(this, "Continue as guest");
-            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-1, -2);
-            glp.topMargin = Ui.dp(this, 14);
+            guestBtn = Ui.ghostBtn(this, "Continue as guest");
+            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-1, Ui.dp(this, 52));
+            glp.topMargin = Ui.dp(this, 16);
             root.addView(guestBtn, glp);
             guestBtn.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { startGuest(); }
@@ -245,7 +264,9 @@ public final class AuthActivity extends Activity {
                 "Guest = a real anonymous session. Nothing leaves this phone unless you"
                     + " later sign in (Settings → Account).");
             guestNote.setGravity(android.view.Gravity.CENTER);
-            root.addView(guestNote);
+            LinearLayout.LayoutParams gnlp = new LinearLayout.LayoutParams(-1, -2);
+            gnlp.topMargin = Ui.dp(this, 10);
+            root.addView(guestNote, gnlp);
         }
     }
 
@@ -486,7 +507,10 @@ public final class AuthActivity extends Activity {
 
     private void setBusy(boolean on, String msg) {
         busy = on;
-        if (googleBtn != null) googleBtn.setEnabled(!on);
+        if (googleBtn != null) {
+            googleBtn.setEnabled(!on);
+            googleBtn.setAlpha(on ? 0.55f : 1f);   // pill stays honest while busy
+        }
         if (sendBtn != null) sendBtn.setEnabled(!on);
         if (verifyBtn != null) verifyBtn.setEnabled(!on);
         if (guestBtn != null) guestBtn.setEnabled(!on);
