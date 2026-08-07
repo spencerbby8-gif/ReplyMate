@@ -48,9 +48,12 @@ public class DraftServiceTest {
         learnKv = new Fakes.KvStoreFake();
         com.replymate.core.learning.LearningService learning =
             Fakes.learningService(learningStore, learnKv);
+        // P-memory-audit: a real (empty-seeded) memory service over fakes.
         return new DraftService(contacts, messages, styles, profiles,
             drafts, usage, gateway, Fakes.IDS, Fakes.FIXED_CLOCK, Fakes.NOOP_LOG,
-            Fakes.styleService(styleSettings, learning), learning);
+            Fakes.styleService(styleSettings, learning), learning,
+            new com.replymate.core.memory.MemoryService(
+                new Fakes.MemoryStoreFake(), messages, kv, Fakes.FIXED_CLOCK));
     }
 
     @Test public void happyPathGeneratesPersistsVariantsAndUsage() {
@@ -137,5 +140,57 @@ public class DraftServiceTest {
     @Test public void unknownContactErrors() {
         assertFalse(service(new Fakes.GatewayFake(
             Fakes.FakeProvider.returning("x"))).generateForContact(999).ok);
+    }
+
+    /* ----------------- P-ux-fix: regenerate REPLACES unsaved drafts ----------------- */
+
+    @Test public void regenerateReplacesUnsavedDrafts_KeepsStarredAndUsed() {
+        Fakes.FakeProvider provider = Fakes.FakeProvider.returning("take one");
+        DraftService svc = service(new Fakes.GatewayFake(provider));
+        Result<DraftOutcome> r1 = svc.generateForContact(1);
+        assertTrue(r1.ok);
+        assertEquals(1, drafts.saved.size());
+        long firstId = drafts.saved.get(0).id;
+
+        // regenerate → the untouched draft is REPLACED, not duplicated
+        Result<DraftOutcome> r2 = svc.generateForContact(1);
+        assertTrue(r2.ok);
+        assertEquals("old card replaced, new card in place", 1, drafts.saved.size());
+        assertNotEquals(firstId, drafts.saved.get(0).id);
+
+        // star the current draft + copy-mark another → both survive the next regen
+        drafts.saved.get(0).favorite = true;
+        com.replymate.core.model.Draft used = new com.replymate.core.model.Draft();
+        used.contactId = 1;
+        used.replyText = "already copied one";
+        used.status = com.replymate.core.model.DraftStatus.COPIED;
+        drafts.insert(used);
+
+        Result<DraftOutcome> r3 = svc.generateForContact(1);
+        assertTrue(r3.ok);
+        assertEquals("starred + used survive, fresh draft added", 3, drafts.saved.size());
+        int favs = 0, copied = 0, untagged = 0;
+        for (com.replymate.core.model.Draft d : drafts.saved) {
+            if (d.favorite) favs++;
+            if (d.status == com.replymate.core.model.DraftStatus.COPIED) copied++;
+            if (d.status == com.replymate.core.model.DraftStatus.GENERATED && !d.favorite) untagged++;
+        }
+        assertEquals(1, favs);
+        assertEquals(1, copied);
+        assertEquals(1, untagged);
+    }
+
+    @Test public void failedRegenerateNeverWipesExistingDraft() {
+        Fakes.FakeProvider good = Fakes.FakeProvider.returning("keep me");
+        DraftService svc = service(new Fakes.GatewayFake(good));
+        assertTrue(svc.generateForContact(1).ok);
+        assertEquals(1, drafts.saved.size());
+
+        Fakes.FakeProvider broken = Fakes.FakeProvider.failing("HTTP 500 boom");
+        DraftService failing = service(new Fakes.GatewayFake(broken));
+        Result<DraftOutcome> r = failing.generateForContact(1);
+        assertFalse(r.ok);
+        assertEquals("a failed regen leaves the current draft alone", 1, drafts.saved.size());
+        assertEquals("keep me", drafts.saved.get(0).replyText);
     }
 }

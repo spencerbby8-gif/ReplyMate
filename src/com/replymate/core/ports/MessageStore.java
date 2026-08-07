@@ -17,6 +17,10 @@ public interface MessageStore {
     Message getByNotifKey(Channel channel, String notifKey);      // dedupe, null if absent
     List<Message> lastMessages(long contactId, int limit);        // oldest-first within the window
 
+    /** Everything OLDER than a message id (rolling-summary boundary, P-memory-audit):
+     *  strictly this contact's rows, oldest-first, most recent {@code limit} of them. */
+    List<Message> olderThanId(long contactId, long beforeId, int limit);
+
     /** UI inbox search (P3): newest-first messages whose body contains the query.
      *  STRICTLY for the Home screen's "find a conversation" box — results are rendered
      *  as a pick-list only and are NEVER used to assemble AI prompt context (isolation). */
@@ -24,4 +28,6 @@ public interface MessageStore {
 
     int countByContact(long contactId);
     void deleteByContact(long contactId);
+    /** Fork-heal (P-ux-fix): move ALL rows from a duplicate contact into the kept one. */
+    default void reassignContact(long fromContactId, long toContactId) { }
 }

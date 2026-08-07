@@ -181,6 +181,15 @@ public final class PromptAuditActivity extends Activity {
                 if (!kind.isEmpty()) {
                     sb.append("Content type detected: ").append(kind).append('\n');
                 }
+                String sender = str(latest, "sender");
+                if (!sender.isEmpty()) {
+                    sb.append("Actual sender: ").append(sender).append('\n');
+                }
+                String mime = str(latest, "mediaMime");
+                if (!mime.isEmpty()) {
+                    sb.append("Captured media type: ").append(mime)
+                      .append(" (reference only — never opened, never uploaded)\n");
+                }
                 String mediaRef = str(latest, "mediaRef");
                 if (!mediaRef.isEmpty() && !"none".equals(mediaRef)) {
                     sb.append("Media reference: ").append(mediaRef).append('\n');
@@ -196,10 +205,50 @@ public final class PromptAuditActivity extends Activity {
             if (!reason.isEmpty()) {
                 sb.append("Reason: ").append(reason).append('\n');
             }
-            Long turns = root.lng("contextTurns", -1);
-            if (turns != null && turns > 0) {
-                sb.append("Conversation context used: ").append(turns)
-                  .append(" turn(s) from the thread (plus the full system prompt below)");
+            // P-memory-audit: recent thread history used (newest 6 turns shown;
+            // the FULL history stays viewable in the payload below).
+            com.replymate.core.json.JsonArr turns = root.arr("turns");
+            Long turnCount = root.lng("contextTurns", -1);
+            if (turns != null && turnCount != null && turnCount > 0) {
+                sb.append("Recent thread history used (").append(turnCount)
+                  .append(" turn(s), newest last):\n");
+                int start = Math.max(0, turns.size() - 6);
+                for (int i = start; i < turns.size(); i++) {
+                    com.replymate.core.json.JsonObj t = turns.obj(i);
+                    if (t == null) continue;
+                    String who = "user".equals(str(t, "role")) ? "them" : "you";
+                    String text = str(t, "text");
+                    if (text.length() > 120) text = text.substring(0, 120) + "…";
+                    sb.append("  · ").append(who).append(": ").append(text).append('\n');
+                }
+            }
+            // P-memory-audit: the long-term memory layers this reply leaned on.
+            com.replymate.core.json.JsonObj mem = root.obj("memory");
+            if (mem != null) {
+                String summary = str(mem, "summary");
+                com.replymate.core.json.JsonArr facts = mem.arr("facts");
+                com.replymate.core.json.JsonArr style = mem.arr("learnedStyle");
+                if (!summary.isEmpty() || (facts != null && facts.size() > 0)
+                        || (style != null && style.size() > 0)) {
+                    sb.append("Long-term memory used:\n");
+                    if (!summary.isEmpty()) {
+                        String s = summary.length() > 400
+                            ? summary.substring(0, 400) + "…" : summary;
+                        sb.append("  · Rolling summary (")
+                          .append(str(mem, "summaryMeta")).append("): ")
+                          .append(s).append('\n');
+                    }
+                    if (facts != null) {
+                        for (int i = 0; i < facts.size(); i++) {
+                            sb.append("  · Fact: ").append(facts.str(i)).append('\n');
+                        }
+                    }
+                    if (style != null) {
+                        for (int i = 0; i < style.size(); i++) {
+                            sb.append("  · Learned style: ").append(style.str(i)).append('\n');
+                        }
+                    }
+                }
             }
             return sb.toString().trim();
         } catch (RuntimeException e) {

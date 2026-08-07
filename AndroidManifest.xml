@@ -40,13 +40,32 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".ui.HomeActivity"
-            android:exported="true">
+            android:name=".ui.SplashActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.HomeActivity"
+            android:exported="true" />
+
+        <activity
+            android:name=".ui.AuthActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="replymate" android:host="auth" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".ui.OnboardingActivity" android:exported="false" />
 
         <activity android:name=".ui.SettingsActivity" android:exported="false" />
         <activity android:name=".ui.ProfileActivity" android:exported="false" />

@@ -27,4 +27,8 @@ public final class SqlContactStore implements ContactStore {
     @Override public void touchChannel(long channelId, long lastSeenAt) {
         dao.touchChannel(channelId, lastSeenAt);
     }
+
+    @Override public void reassignContact(long fromContactId, long toContactId) {
+        dao.reassignContact(fromContactId, toContactId);
+    }
 }

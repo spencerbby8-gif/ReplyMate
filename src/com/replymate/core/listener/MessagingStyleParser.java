@@ -35,6 +35,11 @@ public final class MessagingStyleParser implements NotifParser {
             }
             boolean group = raw.group != null && raw.group.booleanValue();
             if (raw.messages.isEmpty()) {
+                // P-ux-fix: app self-status (backup/sync/checking/progress cards) is
+                // never a chat message — ignore before it can touch a conversation.
+                if (StatusFilter.isSelfStatus(raw, WatchedApps.labelFor(channel))) {
+                    return Result.ignore("app self-status (backup/sync/progress)");
+                }
                 // single-shot notification (no MessagingStyle history) — the classic fallback
                 String text = trim(raw.text);
                 if (text.isEmpty()) text = trim(raw.bigText);

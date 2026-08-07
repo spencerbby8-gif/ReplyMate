@@ -23,4 +23,8 @@ public interface MemoryStore extends com.replymate.core.memory.MemoryEngine.Fact
 
     // isolation housekeeping
     void deleteAllForContact(long contactId);
+    /** Fork-heal (P-ux-fix): facts move to the kept contact (text_norm collisions keep
+     *  the KEPT contact's row); the duplicate's summaries are DROPPED (the merged
+     *  thread rebuilds a fresh rolling summary at the next generation). */
+    default void reassignContact(long fromContactId, long toContactId) { }
 }

@@ -18,4 +18,8 @@ public final class SqlStyleSettingStore implements StyleSettingStore {
         dao.put(contactId, key, value, clock.now());
     }
     @Override public void remove(Long contactId, String key) { dao.remove(contactId, key); }
+
+    @Override public void reassignContact(long fromContactId, long toContactId) {
+        dao.reassignContact(fromContactId, toContactId);
+    }
 }

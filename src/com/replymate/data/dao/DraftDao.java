@@ -106,4 +106,12 @@ public final class DraftDao {
         o.createdAt = c.getLong(c.getColumnIndexOrThrow("created_at"));
         return o;
     }
+
+    /** P-ux-fix fork-heal: move all rows from a merged-away duplicate contact. */
+    public void reassignContact(long fromContactId, long toContactId) {
+        android.content.ContentValues v = new android.content.ContentValues();
+        v.put("contact_id", toContactId);
+        helper.getWritableDatabase().update("draft", v, "contact_id=?",
+            new String[] {String.valueOf(fromContactId)});
+    }
 }

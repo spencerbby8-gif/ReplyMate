@@ -156,28 +156,19 @@
             android:layout_marginTop="8dp">
 
             <Button
-                android:id="@+id/btn_them"
+                android:id="@+id/btn_manual"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginRight="4dp"
-                android:text="＋them"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btn_me"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginRight="4dp"
-                android:text="＋me"
+                android:text="✍ Manual"
                 android:textSize="12sp" />
 
             <Button
                 android:id="@+id/btn_gen"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1.4"
+                android:layout_weight="1"
                 android:text="✨ Generate"
                 android:textSize="12sp" />
         </LinearLayout>

@@ -22,10 +22,18 @@ public final class SystemComposer {
 
     /** P4: voiceLine = resolved 9-control "Voice: …" rule; voiceExtra = global custom
      *  instruction + contact custom prompt + learned hints; aboutExtra = filtered
-     *  free-text about-me. P-polish: foundation is the owner's charter verbatim. */
+     *  free-text about-me. P-polish: foundation is the owner's charter verbatim.
+     *  P-memory-audit: memoryLines = this contact's recalled long-term memory
+     *  (pinned facts, rolling summary, learned style) — one bullet per line. */
     public static String compose(ProfileService.Profile profile, Contact contact, String styleRules,
                                  String voiceLine, java.util.List<String> voiceExtra,
                                  String aboutExtra) {
+        return compose(profile, contact, styleRules, voiceLine, voiceExtra, aboutExtra, null);
+    }
+
+    public static String compose(ProfileService.Profile profile, Contact contact, String styleRules,
+                                 String voiceLine, java.util.List<String> voiceExtra,
+                                 String aboutExtra, java.util.List<String> memoryLines) {
         String owner = profile == null ? "the owner of this phone" : profile.displayName();
         StringBuilder sb = new StringBuilder();
 
@@ -69,6 +77,22 @@ public final class SystemComposer {
             sb.append("\nReply language: ").append(contact.languagePref).append('.');
         } else {
             sb.append("\nReply language: match the language of their latest message.");
+        }
+
+        // 4.5) Long-term memory for THIS chat (P-memory-audit): pinned facts,
+        //      rolling summary, learned style — framed as the owner's own memory so
+        //      the reply never mentions notes, summaries or an app.
+        if (memoryLines != null && !memoryLines.isEmpty()) {
+            StringBuilder mem = new StringBuilder("\n\nWhat you remember about ")
+                .append(contact.displayName)
+                .append(" (your own memory — never mention that anything was noted,"
+                    + " summarized or learned; never say you re-read the chat):");
+            for (String line : memoryLines) {
+                if (line != null && !line.trim().isEmpty()) {
+                    mem.append('\n').append(line.trim());
+                }
+            }
+            sb.append(mem);
         }
 
         // 5) Global custom instruction, contact custom prompt, learned hints (gated).

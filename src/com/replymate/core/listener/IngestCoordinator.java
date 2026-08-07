@@ -125,6 +125,11 @@ public final class IngestCoordinator {
                 m.mediaMime = e.mediaMime == null ? "" : e.mediaMime;
                 m.mediaUri = e.mediaUri == null ? "" : e.mediaUri;
             }
+            // P-memory-audit (schema v6): keep WHO actually sent each incoming item —
+            // 1:1 chats this equals the contact name; in groups it's the member, so
+            // prompts/audit attribute words to the right person.
+            m.senderName = dir == Direction.INCOMING && e.senderName != null
+                ? e.senderName.trim() : "";
             messages.insertIgnore(m);
             rep.stored++;
 

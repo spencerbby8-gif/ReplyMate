@@ -24,6 +24,40 @@ public final class AuditContext {
     public final String sourceIdentity; // resolved remote key, e.g. "cid:234…@s.whatsapp.net"
     public final String sourceConfidence; // high | medium | low
     public final String reason;         // why this reply was generated (may be "")
+    /* P-memory-audit extras (set via withLatestExtras / withMemory — never ctor-longer): */
+    public String latestSender = "";    // actual sender of the answered message (groups)
+    public String latestMediaMime = ""; // attachment MIME captured at ingest (local-only)
+    public Memory memory;               // the LTM layers used (null = none / memory off)
+
+    /** The long-term memory layers rendered into this request (P-memory-audit). */
+    public static final class Memory {
+        public final String summaryText;
+        public final String summaryMeta;    // "summary v3 · covers history through Tue 14:02"
+        public final java.util.List<String> facts;
+        public final java.util.List<String> learnedStyle;
+        public Memory(String summaryText, String summaryMeta,
+                      java.util.List<String> facts, java.util.List<String> learnedStyle) {
+            this.summaryText = summaryText == null ? "" : summaryText;
+            this.summaryMeta = summaryMeta == null ? "" : summaryMeta;
+            this.facts = facts == null ? java.util.Collections.<String>emptyList() : facts;
+            this.learnedStyle = learnedStyle == null
+                ? java.util.Collections.<String>emptyList() : learnedStyle;
+        }
+        public boolean isEmpty() {
+            return summaryText.isEmpty() && facts.isEmpty() && learnedStyle.isEmpty();
+        }
+    }
+
+    public AuditContext withLatestExtras(String sender, String mediaMime) {
+        this.latestSender = sender == null ? "" : sender;
+        this.latestMediaMime = mediaMime == null ? "" : mediaMime;
+        return this;
+    }
+
+    public AuditContext withMemory(Memory m) {
+        this.memory = m;
+        return this;
+    }
 
     public AuditContext(String providerWire, String providerLabel, String baseUrl,
                         String providerModel, String endpoint, String latestText,
@@ -51,6 +85,7 @@ public final class AuditContext {
         this.sourceIdentity = empty(sourceIdentity);
         this.sourceConfidence = empty(sourceConfidence);
         this.reason = empty(reason);
+        this.memory = null;
     }
 
     public static AuditContext of(ProviderRef ref, String latestText,

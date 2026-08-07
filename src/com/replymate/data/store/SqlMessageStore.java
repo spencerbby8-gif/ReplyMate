@@ -19,9 +19,16 @@ public final class SqlMessageStore implements MessageStore {
     @Override public List<Message> lastMessages(long contactId, int limit) {
         return dao.lastMessages(contactId, limit);
     }
+    @Override public List<Message> olderThanId(long contactId, long beforeId, int limit) {
+        return dao.olderThanId(contactId, beforeId, limit);
+    }
     @Override public List<Message> searchByBody(String query, int limit) {
         return dao.searchByBody(query, limit);
     }
     @Override public int countByContact(long contactId) { return dao.countByContact(contactId); }
     @Override public void deleteByContact(long contactId) { dao.deleteByContact(contactId); }
+
+    @Override public void reassignContact(long fromContactId, long toContactId) {
+        dao.reassignContact(fromContactId, toContactId);
+    }
 }

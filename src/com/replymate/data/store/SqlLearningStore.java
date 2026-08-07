@@ -15,4 +15,8 @@ public final class SqlLearningStore implements LearningStore {
         return dao.byContact(contactId, limit);
     }
     @Override public void deleteForContact(long contactId) { dao.deleteForContact(contactId); }
+
+    @Override public void reassignContact(long fromContactId, long toContactId) {
+        dao.reassignContact(fromContactId, toContactId);
+    }
 }

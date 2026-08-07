@@ -18,4 +18,7 @@ public interface ContactStore {
     ContactChannel findChannel(Channel channel, String remoteKey);
     long upsertChannel(ContactChannel ch);
     void touchChannel(long channelId, long lastSeenAt);
+    /** Fork-heal (P-ux-fix): re-point the duplicate's channel rows at the kept
+     *  contact; rows that would collide on UNIQUE(channel, remote_key) are dropped. */
+    default void reassignContact(long fromContactId, long toContactId) { }
 }

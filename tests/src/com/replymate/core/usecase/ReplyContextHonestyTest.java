@@ -42,7 +42,7 @@ public class ReplyContextHonestyTest {
         return new DraftService(contacts, messages, new Fakes.StyleStoreFake(), profiles,
             drafts, new Fakes.UsageStoreFake(), gateway, Fakes.IDS, Fakes.FIXED_CLOCK,
             Fakes.NOOP_LOG, Fakes.styleService(new Fakes.StyleSettingStoreFake(), learning),
-            learning);
+            learning, null);
     }
 
     private void seed(String... incomingThenOutgoing) {
@@ -175,8 +175,15 @@ public class ReplyContextHonestyTest {
         for (com.replymate.core.ai.Turn t : provider.lastRequest.turns) allTurns.append(t.text).append('\n');
         assertTrue("the task answers the latest TEXT message",
             provider.lastRequest.task.text.contains("did you see it? what do you think"));
+        // P-memory-audit: the media row arrives as STRUCTURED context — honestly
+        // labeled, explicitly not readable, and never as invented message text.
+        String turns = allTurns.toString();
         assertTrue("older media stays honestly labeled in history (no invented content)",
-            allTurns.toString().contains(ListenerFilter.MEDIA_PLACEHOLDER));
+            turns.contains("[sent media — its content is not readable"));
+        assertTrue("the model is told not to describe or guess media", 
+            turns.contains("do not describe or guess"));
+        assertFalse("the raw placeholder wording is not what the model sees",
+            turns.contains("open in chat app]"));
     }
 
     // ---------- (d) the gate vs contact name only ----------

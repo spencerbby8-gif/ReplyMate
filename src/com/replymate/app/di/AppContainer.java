@@ -65,6 +65,8 @@ public final class AppContainer {
     private final com.replymate.core.learning.LearningService learningService;
     private final LearningStore learningStore;
     private final Logger logger;
+    private final com.replymate.core.ports.MemoryStore memoryStore;
+    private final com.replymate.core.memory.MemoryService memoryService;
     private final MessageStore messageStore;
     private final ProfileService profileService;
     private final ProviderStore providerStore;
@@ -74,6 +76,8 @@ public final class AppContainer {
     private final com.replymate.core.style.StyleService styleService;
     private final StyleStore styleStore;
     private final UsageStore usageStore;
+    private com.replymate.core.auth.SessionStore sessionStore;      // lazy (P-auth)
+    private com.replymate.core.auth.SupabaseAuth supabaseAuth;      // lazy (P-auth)
 
     public AppContainer(Context context) {
         Context applicationContext = context.getApplicationContext();
@@ -106,6 +110,16 @@ public final class AppContainer {
         this.styleSettingStore = sqlStyleSettingStore;
         SqlLearningStore sqlLearningStore = new SqlLearningStore(new StyleSignalDao(dbHelper));
         this.learningStore = sqlLearningStore;
+        // P-memory-audit: long-term memory continuity (facts + rolling summaries,
+        // schema v1 tables finally wired; learned-style cache in kv).
+        com.replymate.data.store.SqlMemoryStore sqlMemoryStore =
+            new com.replymate.data.store.SqlMemoryStore(
+                new com.replymate.data.dao.MemoryDao(dbHelper));
+        this.memoryStore = sqlMemoryStore;
+        com.replymate.core.memory.MemoryService memoryService =
+            new com.replymate.core.memory.MemoryService(
+                sqlMemoryStore, sqlMessageStore, sqlKvStore, systemClock);
+        this.memoryService = memoryService;
         com.replymate.core.learning.LearningService learningService =
             new com.replymate.core.learning.LearningService(
                 sqlLearningStore, sqlKvStore, systemClock);
@@ -116,7 +130,13 @@ public final class AppContainer {
         this.providerStore = new SqlProviderStore(new ProviderDao(dbHelper));
         ProfileService profileService = new ProfileService(sqlKvStore);
         this.profileService = profileService;
-        this.contactService = new ContactService(sqlContactStore, systemClock);
+        ContactService contactSvc = new ContactService(sqlContactStore, systemClock);
+        // P-ux-fix: fork-healer — duplicate contacts for the same chat (different
+        // remote keys / manual vs app) merge back into one on sight.
+        contactSvc.setMerger(new com.replymate.core.usecase.ContactMerger(
+            sqlContactStore, sqlMessageStore, sqlDraftStore, sqlLearningStore,
+            sqlStyleSettingStore, sqlMemoryStore, sqlKvStore, systemClock));
+        this.contactService = contactSvc;
         ProviderGateway providerGateway = new ProviderGateway() { // from class: com.replymate.app.di.AppContainer.1
             @Override // com.replymate.core.ports.ProviderGateway
             public AiProvider active() {
@@ -139,7 +159,7 @@ public final class AppContainer {
             }
         };
         this.gateway = providerGateway;
-        this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap, styleService, learningService);
+        this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap, styleService, learningService, memoryService);
     }
 
     public AiProvider providerOrNull() {
@@ -215,6 +235,30 @@ public final class AppContainer {
         return this.kvStore;
     }
 
+    /** P-auth: local auth session persistence (guest or signed-in). */
+    public com.replymate.core.auth.SessionStore sessions() {
+        if (sessionStore == null) {
+            sessionStore = new com.replymate.core.auth.KvSessionStore(kvStore);
+        }
+        return sessionStore;
+    }
+
+    /** P-auth: Supabase Auth via official REST (no SDK), lazy-built from
+     *  auth_config.xml (publishable key is public-by-design). */
+    public com.replymate.core.auth.SupabaseAuth auth() {
+        if (supabaseAuth == null) {
+            supabaseAuth = new com.replymate.core.auth.SupabaseAuth(
+                new com.replymate.app.auth.HttpAuthTransport(supabaseBaseUrl(),
+                    app.getString(com.replymate.app.R.string.supabase_publishable_key)),
+                clock);
+        }
+        return supabaseAuth;
+    }
+
+    public String supabaseBaseUrl() {
+        return app.getString(com.replymate.app.R.string.supabase_url);
+    }
+
     public SecretVault vault() {
         return this.secretVault;
     }
@@ -273,5 +317,14 @@ public final class AppContainer {
 
     public DraftService draftService() {
         return this.draftService;
+    }
+
+    /** P-memory-audit: long-term memory continuity (facts/summaries/learned style). */
+    public com.replymate.core.memory.MemoryService memoryService() {
+        return this.memoryService;
+    }
+
+    public com.replymate.core.ports.MemoryStore memoryStore() {
+        return this.memoryStore;
     }
 }

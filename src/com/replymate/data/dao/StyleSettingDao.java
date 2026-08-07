@@ -64,4 +64,17 @@ public final class StyleSettingDao {
             ? new String[] {key} : new String[] {String.valueOf(contactId), key};
         helper.getWritableDatabase().delete("style_setting", where, args);
     }
+
+    /** P-ux-fix fork-heal: move the duplicate's per-contact style rows over; on a key
+     *  collision the KEPT contact's value wins and the duplicate's row is dropped. */
+    public void reassignContact(long fromContactId, long toContactId) {
+        android.database.sqlite.SQLiteDatabase db = helper.getWritableDatabase();
+        db.delete("style_setting",
+            "contact_id=? AND key IN (SELECT key FROM style_setting WHERE contact_id=?)",
+            new String[] {String.valueOf(fromContactId), String.valueOf(toContactId)});
+        android.content.ContentValues v = new android.content.ContentValues();
+        v.put("contact_id", toContactId);
+        db.update("style_setting", v, "contact_id=?",
+            new String[] {String.valueOf(fromContactId)});
+    }
 }

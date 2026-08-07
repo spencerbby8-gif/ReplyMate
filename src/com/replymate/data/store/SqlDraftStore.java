@@ -27,4 +27,8 @@ public final class SqlDraftStore implements DraftStore {
     }
     @Override public void delete(long draftId) { dao.delete(draftId); }
     @Override public void deleteByContact(long contactId) { dao.deleteByContact(contactId); }
+
+    @Override public void reassignContact(long fromContactId, long toContactId) {
+        dao.reassignContact(fromContactId, toContactId);
+    }
 }

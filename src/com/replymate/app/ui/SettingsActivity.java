@@ -26,7 +26,7 @@ public final class SettingsActivity extends Activity {
 
     private AppContainer c;
     private LinearLayout root;
-    private LinearLayout providerRow, listenRow, notifRow;
+    private LinearLayout providerRow, listenRow, notifRow, accountRow;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -49,6 +49,17 @@ public final class SettingsActivity extends Activity {
             }
         });
         root.addView(profileRow);
+        root.addView(Ui.divider(this));
+
+        accountRow = Ui.row(this, "Account", "");
+        accountRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Intent i = new Intent(SettingsActivity.this, AuthActivity.class);
+                i.putExtra(AuthActivity.EXTRA_MODE, "link");
+                startActivity(i);
+            }
+        });
+        root.addView(accountRow);
         root.addView(Ui.divider(this));
 
         LinearLayout voiceRow = Ui.row(this, "My voice (global style)",
@@ -264,6 +275,8 @@ public final class SettingsActivity extends Activity {
         if (requestCode == REQ_POST_NOTIF) refreshRows();
     }
 
+
+
     private void refreshRows() {
         if (c == null) return;
         com.replymate.core.model.ProviderDef active = c.providers().active();
@@ -275,6 +288,12 @@ public final class SettingsActivity extends Activity {
         Ui.setRowSub(notifRow, ListenerStatus.canPostNotifications(this)
             ? "allowed ✓ — ReplyMate can alert you about new messages"
             : "blocked — tap to allow (alerts stay silent otherwise)");
+        com.replymate.core.auth.AuthSession s = c.sessions().get();
+        Ui.setRowSub(accountRow, s == null
+            ? "not signed in — Google / email code / guest"
+            : s.isGuest()
+                ? "guest session (local-only) — tap to sign in"
+                : s.email + " · " + (s.provider.isEmpty() ? "email" : s.provider));
     }
 
     /** Active provider line for the Settings hub (friendly diagnostics, no secrets). */

@@ -35,4 +35,8 @@ public final class SqlMemoryStore implements MemoryStore {
         dao.deleteFactsForContact(contactId);
         dao.deleteSummariesForContact(contactId);
     }
+
+    @Override public void reassignContact(long fromContactId, long toContactId) {
+        dao.reassignContact(fromContactId, toContactId);
+    }
 }

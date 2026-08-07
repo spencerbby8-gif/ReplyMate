@@ -20,7 +20,8 @@ import java.util.Map;
 /** P4 — "My voice": the GLOBAL user voice, base style for every chat.
  *  Two ways to shape it, both local and instant:
  *    1) PRESET CONTROLS — the 9 controls (tone, length, emoji, formality, humor,
- *       confidence, slang, flirting, follow-ups), three levels each, tap to cycle.
+ *       confidence, slang, flirting, follow-ups), three levels each — tapping a
+ *       control opens a real picker with per-level explanations and examples (P-ux-fix).
  *    2) CUSTOM INSTRUCTIONS — the owner's own free-text style instructions, added
  *       to every generated reply (capped at 400 chars).
  *  Storing rule: tapping a control back to the shipped default REMOVES the stored
@@ -147,17 +148,23 @@ public final class VoiceActivity extends Activity {
         Ui.setRowSub(row, levelText(control));
         row.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                int current = effective(control);
-                int next = (current + 1) % 3;
-                if (next == StyleControls.defaultLevel(control.key)) {
-                    rows.remove(control.key);
-                    c.styleSettings().remove(null, control.key);
-                } else {
-                    rows.put(control.key, String.valueOf(next));
-                    c.styleSettings().put(null, control.key, String.valueOf(next));
-                }
-                Ui.setRowSub(row, levelText(control));
-                refreshPreview();
+                // P-ux-fix: a REAL selection screen — every level with what it does +
+                // an example reply, ✓ on the current choice. No tap-to-cycle guessing.
+                Ui.showLevelPicker(VoiceActivity.this,
+                    control.label + " — pick one", control, effective(control), null,
+                    new Ui.LevelPick() {
+                        @Override public void onPick(int level) {
+                            if (level == StyleControls.defaultLevel(control.key)) {
+                                rows.remove(control.key);
+                                c.styleSettings().remove(null, control.key);
+                            } else {
+                                rows.put(control.key, String.valueOf(level));
+                                c.styleSettings().put(null, control.key, String.valueOf(level));
+                            }
+                            Ui.setRowSub(row, levelText(control));
+                            refreshPreview();
+                        }
+                    });
             }
         });
         return row;
@@ -170,7 +177,8 @@ public final class VoiceActivity extends Activity {
 
     private String levelText(StyleControls.Control control) {
         boolean isDefault = StyleSettings.level(rows, control.key) == null;
-        return control.levelLabel(effective(control)) + (isDefault ? "  (default)" : "");
+        return "current: " + control.levelLabel(effective(control))
+            + (isDefault ? " (default)" : "");
     }
 
     /** Custom instructions → global style_setting row (empty removes the row). */

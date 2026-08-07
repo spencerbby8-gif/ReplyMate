@@ -25,7 +25,6 @@ public final class ContactEditActivity extends Activity {
     private AppContainer c;
     private long contactId = -1;
     private Contact existing;
-    private android.widget.LinearLayout aiRow;
     private java.util.Map<String, String> contactRows;
     private EditText customPrompt;
     private boolean deleteArmed;
@@ -36,6 +35,7 @@ public final class ContactEditActivity extends Activity {
     private android.widget.TextView learningStats;
     private EditText name;
     private EditText notes;
+    private EditText pinnedFacts;
     private boolean previewBusy;
     private android.widget.Button previewBtn;
     private android.widget.TextView previewOut;
@@ -139,6 +139,11 @@ public final class ContactEditActivity extends Activity {
                     ContactEditActivity.this.existing.languagePref = ContactEditActivity.this.language.getText().toString().trim();
                     ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
                     ContactEditActivity.this.persistCustomPrompt();
+                    // P-memory-audit: replace this contact's pinned facts exactly.
+                    ContactEditActivity.this.c.memoryService().replacePinnedFacts(
+                        ContactEditActivity.this.contactId,
+                        ContactEditActivity.this.pinnedFacts == null
+                            ? "" : ContactEditActivity.this.pinnedFacts.getText().toString());
                 } else {
                     Result<Contact> createManualContact = ContactEditActivity.this.c.contactService().createManualContact(ContactEditActivity.this.name.getText().toString(), ContactEditActivity.this.relationshipValue(), ContactEditActivity.this.notes.getText().toString(), ContactEditActivity.this.tone.getText().toString(), ContactEditActivity.this.language.getText().toString());
                     if (!createManualContact.ok) {
@@ -237,7 +242,7 @@ public final class ContactEditActivity extends Activity {
         root.addView(Ui.label(this, "VOICE FOR THIS CONTACT"));
         TextView why = Ui.sub(this,
             "Override your global voice for " + this.existing.displayName
-                + " only. Tap a control to cycle through its levels — \"Inherit\" follows your global voice.");
+                + " only. Tap a control to see every option with examples — pick \"Inherit global voice\" to follow your global voice.");
         root.addView(why);
         for (StyleControls.Control control : StyleControls.all()) {
             root.addView(overrideRow(control));
@@ -265,7 +270,27 @@ public final class ContactEditActivity extends Activity {
         root.addView(this.customPrompt);
         root.addView(Ui.sub(this, "Saved with the contact. Max 400 characters."));
 
+        buildPinnedFacts(root);
         buildLearning(root);
+    }
+
+    /* ------------------------------------------- P-memory-audit: pinned facts */
+
+    /** Owner-authored pinned facts — the M3 stable-details memory layer. One per
+     *  line; the AI may READ them for this contact only and can never edit them.
+     *  Persisted in memory_fact (pinned=1) so they survive restarts; replacing is
+     *  exact (the box is the whole pinned set for this contact). */
+    private void buildPinnedFacts(LinearLayout root) {
+        root.addView(Ui.label(this, "Pinned facts about them (your own notes — one per line)"));
+        this.pinnedFacts = Ui.field(this,
+            "e.g. her mum's shop is in Wuse 2\nshe's allergic to peanuts\nprefers voice notes after 9pm",
+            true);
+        this.pinnedFacts.setText(this.c.memoryService().pinnedFactsText(this.contactId));
+        root.addView(this.pinnedFacts);
+        boolean memOn = this.existing == null || this.existing.memoryEnabled;
+        root.addView(Ui.sub(this, memOn
+            ? "Stable facts stay saved on this phone, never leave it, and shape replies for this contact only."
+            : "Memory is OFF for this contact — pinned facts are saved but never used until memory is back on."));
     }
 
     private View overrideRow(final StyleControls.Control control) {
@@ -273,18 +298,28 @@ public final class ContactEditActivity extends Activity {
         Ui.setRowSub(row, overrideText(control));
         row.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                Integer current = StyleSettings.level(ContactEditActivity.this.contactRows,
+                // P-ux-fix: real picker — inherit row on top, then every level with
+                // what it does + an example, ✓ on the current choice.
+                Integer cur = StyleSettings.level(ContactEditActivity.this.contactRows,
                     control.key);
-                if (current == null) {
-                    setOverride(control.key, 0);
-                } else if (current.intValue() < 2) {
-                    setOverride(control.key, current.intValue() + 1);
-                } else {
-                    ContactEditActivity.this.contactRows.remove(control.key);
-                    ContactEditActivity.this.c.styleSettings().remove(
-                        ContactEditActivity.this.contactId, control.key);
-                }
-                Ui.setRowSub(row, overrideText(control));
+                String who = ContactEditActivity.this.existing == null
+                    ? "this contact" : ContactEditActivity.this.existing.displayName;
+                Ui.showLevelPicker(ContactEditActivity.this,
+                    control.label + " for " + who, control,
+                    cur == null ? -1 : cur.intValue(),
+                    "Inherit global voice",
+                    new Ui.LevelPick() {
+                        @Override public void onPick(int level) {
+                            if (level < 0) {
+                                ContactEditActivity.this.contactRows.remove(control.key);
+                                ContactEditActivity.this.c.styleSettings().remove(
+                                    ContactEditActivity.this.contactId, control.key);
+                            } else {
+                                setOverride(control.key, level);
+                            }
+                            Ui.setRowSub(row, overrideText(control));
+                        }
+                    });
             }
         });
         return row;
@@ -298,11 +333,11 @@ public final class ContactEditActivity extends Activity {
     private String overrideText(StyleControls.Control control) {
         Integer ov = StyleSettings.level(this.contactRows, control.key);
         if (ov != null) {
-            return "Override: " + control.levelLabel(ov.intValue());
+            return "current: " + control.levelLabel(ov.intValue()) + " (overrides global)";
         }
         Integer g = StyleSettings.level(this.globalRows, control.key);
         int base = g != null ? g.intValue() : StyleControls.defaultLevel(control.key);
-        return "Inherit: " + control.levelLabel(base);
+        return "inheriting global: " + control.levelLabel(base);
     }
 
     private void runVoicePreview() {
@@ -365,58 +400,73 @@ public final class ContactEditActivity extends Activity {
      *  Every row writes through immediately and the learning section below reacts live. */
     private void buildPrivacyAi(LinearLayout root) {
         root.addView(Ui.label(this, "AI & PRIVACY FOR THIS CONTACT"));
+        root.addView(Ui.sub(this,
+            "These are real switches — they save instantly and show the live state."));
 
-        final LinearLayout priv = Ui.row(this, "Private mode", "");
-        Ui.setRowSub(priv, privacyText());
-        root.addView(priv);
+        final Ui.ToggleRow priv = Ui.toggleRow(this, "Private mode", privacyText());
+        root.addView(priv.row);
         root.addView(Ui.divider(this));
 
-        final LinearLayout mem = Ui.row(this, "Memory for this contact", "");
-        Ui.setRowSub(mem, memoryText());
-        root.addView(mem);
+        final Ui.ToggleRow mem = Ui.toggleRow(this, "Memory for this contact", memoryText());
+        root.addView(mem.row);
         root.addView(Ui.divider(this));
 
-        this.aiRow = Ui.row(this, "AI replies for this contact", "");
-        Ui.setRowSub(this.aiRow, aiText());
-        root.addView(this.aiRow);
+        final Ui.ToggleRow ai = Ui.toggleRow(this, "AI replies for this contact", aiText());
+        root.addView(ai.row);
         root.addView(Ui.divider(this));
 
-        priv.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                ContactEditActivity.this.existing.privateMode =
-                    !ContactEditActivity.this.existing.privateMode;
+        // initial states (listeners attach AFTER, so no echo writes)
+        priv.sw.setChecked(this.existing.privateMode);
+        mem.sw.setChecked(this.existing.memoryEnabled);
+        ai.sw.setChecked(this.existing.aiEnabled);
+        ai.sw.setEnabled(!this.existing.privateMode);
+
+        priv.sw.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
+                if (on == ContactEditActivity.this.existing.privateMode) return;   // no-op render
+                ContactEditActivity.this.existing.privateMode = on;
                 // model contract (core Contact): privateMode == true ⇒ aiEnabled == false
-                if (ContactEditActivity.this.existing.privateMode) {
-                    ContactEditActivity.this.existing.aiEnabled = false;
-                } else {
-                    ContactEditActivity.this.existing.aiEnabled = true;
-                }
+                ContactEditActivity.this.existing.aiEnabled = !on;
                 ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
-                Ui.setRowSub(priv, privacyText());
-                Ui.setRowSub(ContactEditActivity.this.aiRow, aiText());
+                Ui.setRowSub(priv.row, privacyText());
+                ai.sw.setEnabled(!on);
+                ai.sw.setChecked(ContactEditActivity.this.existing.aiEnabled);
+                Ui.setRowSub(ai.row, aiText());
                 refreshLearningState();
             }
         });
-        mem.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                ContactEditActivity.this.existing.memoryEnabled =
-                    !ContactEditActivity.this.existing.memoryEnabled;
+        mem.sw.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
+                if (on == ContactEditActivity.this.existing.memoryEnabled) return;
+                ContactEditActivity.this.existing.memoryEnabled = on;
                 ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
-                Ui.setRowSub(mem, memoryText());
+                Ui.setRowSub(mem.row, memoryText());
                 refreshLearningState();
             }
         });
-        this.aiRow.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
+        ai.sw.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
                 if (ContactEditActivity.this.existing.privateMode) {
+                    // private mode owns this switch — keep it off and say why
                     Toast.makeText(ContactEditActivity.this,
                         "Private mode is on — turn it off to allow AI replies", 0).show();
                     return;
                 }
-                ContactEditActivity.this.existing.aiEnabled =
-                    !ContactEditActivity.this.existing.aiEnabled;
+                if (on == ContactEditActivity.this.existing.aiEnabled) return;
+                ContactEditActivity.this.existing.aiEnabled = on;
                 ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
-                Ui.setRowSub(ContactEditActivity.this.aiRow, aiText());
+                Ui.setRowSub(ai.row, aiText());
+            }
+        });
+        // a disabled AI switch must still EXPLAIN itself when the row is tapped
+        ai.row.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (ContactEditActivity.this.existing.privateMode) {
+                    Toast.makeText(ContactEditActivity.this,
+                        "Private mode is on — turn it off above to allow AI replies", 0).show();
+                } else {
+                    ai.sw.toggle();
+                }
             }
         });
     }

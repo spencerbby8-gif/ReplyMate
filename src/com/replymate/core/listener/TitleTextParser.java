@@ -39,6 +39,12 @@ public class TitleTextParser implements NotifParser {
             boolean group = raw.group != null && raw.group.booleanValue();
             if (!group) group = looksLikeGroup(raw);
 
+            // P-ux-fix: app self-status (unread digests, sync/progress cards) is
+            // never a chat message — gated to self-titled, evidence-free items only.
+            if (StatusFilter.isSelfStatus(raw, WatchedApps.labelFor(channel))) {
+                return Result.ignore("app self-status (backup/sync/progress)");
+            }
+
             String text = MessagingStyleParser.trim(raw.text);
             if (text.isEmpty()) text = MessagingStyleParser.trim(raw.bigText);
             if (text.isEmpty()) {

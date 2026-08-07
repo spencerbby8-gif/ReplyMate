@@ -10,4 +10,6 @@ public interface LearningStore {
     List<StyleSignal> byContact(long contactId, int limit);
     /** Learning "reset" control: delete the contact's signal history. */
     void deleteForContact(long contactId);
+    /** Fork-heal (P-ux-fix): move ALL rows from a duplicate contact into the kept one. */
+    default void reassignContact(long fromContactId, long toContactId) { }
 }

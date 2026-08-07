@@ -13,10 +13,17 @@ public final class ContactService {
 
     private final ContactStore store;
     private final Clock clock;
+    /** P-ux-fix: optional fork-healer (wired by AppContainer) that merges duplicate
+     *  contacts the moment a name-match attach or alias hit proves they are one chat. */
+    private ContactMerger merger;
 
     public ContactService(ContactStore store, Clock clock) {
         this.store = store;
         this.clock = clock;
+    }
+
+    public void setMerger(ContactMerger merger) {
+        this.merger = merger;
     }
 
     public Result<Contact> createManualContact(String displayName, String relationshipType,
@@ -98,6 +105,7 @@ public final class ContactService {
                 alias.lastSeenAt = clock.now();
                 store.upsertChannel(alias);
             }
+            healQuietly(found.id, found.displayName, channel);
             return found;
         }
     }
@@ -108,10 +116,35 @@ public final class ContactService {
         if (existing != null) {
             store.touchChannel(existing.id, now);
             Contact c = store.get(existing.contactId);
-            if (c != null) return c;
+            if (c != null) {
+                // P-ux-fix: a direct hit can still pass by older forks of the same
+                // chat (created before name-matching existed) — merge them lazily.
+                healQuietly(c.id, c.displayName, channel);
+                return c;
+            }
         }
-        Contact c = new Contact();
         String name = displayName == null ? "" : displayName.trim();
+
+        // P-ux-fix: name-match attach. If this chat's display name matches an existing
+        // contact that already lives on this channel — or a MANUAL contact with no app
+        // channel yet — the chat belongs to that contact: link the new key to it
+        // instead of forking a duplicate conversation. Then heal any older forks of
+        // the same name so repeated notifications always land in ONE chat.
+        if (meaningfulName(name)) {
+            Contact match = matchByName(name, channel);
+            if (match != null) {
+                ContactChannel link = new ContactChannel();
+                link.contactId = match.id;
+                link.channel = channel;
+                link.remoteKey = remoteKey;
+                link.lastSeenAt = now;
+                store.upsertChannel(link);
+                healQuietly(match.id, match.displayName, channel);
+                return match;
+            }
+        }
+
+        Contact c = new Contact();
         c.displayName = name.isEmpty() ? "Unknown (" + channel.wire + ")" : name;
         c.createdAt = now;
         c.updatedAt = now;
@@ -124,6 +157,53 @@ public final class ContactService {
         ch.lastSeenAt = now;
         store.upsertChannel(ch);
         return c;
+    }
+
+    /** Name-based candidate for attach: same normalized display name AND either a
+     *  channel row on THIS app (same service ⇒ same person/group title) or a
+     *  manual-only contact (owner created it by hand, no app link yet). Prefers a
+     *  contact already on this channel; otherwise the oldest manual-only one.
+     *  Never matches across different apps (a "The Crew" group on WhatsApp is not
+     *  the same chat as "The Crew" on Discord). */
+    private Contact matchByName(String displayName, Channel channel) {
+        String norm = normalizeName(displayName);
+        Contact sameChannel = null;
+        Contact manualOnly = null;
+        for (Contact c : store.all()) {
+            if (!normalizeName(c.displayName).equals(norm)) continue;
+            boolean onChannel = false;
+            boolean onlyManual = true;
+            for (ContactChannel ch : store.channelsByContact(c.id)) {
+                if (ch.channel == channel) onChannel = true;
+                if (ch.channel != Channel.MANUAL) onlyManual = false;
+            }
+            if (onChannel && (sameChannel == null || c.id < sameChannel.id)) sameChannel = c;
+            if (onlyManual && manualOnly == null) manualOnly = c;
+        }
+        return sameChannel != null ? sameChannel : manualOnly;
+    }
+
+    private void healQuietly(long keepId, String displayName, Channel channel) {
+        if (merger == null) return;
+        try {
+            merger.healNameForks(keepId, displayName, channel);
+        } catch (RuntimeException ignored) {
+            // The listener path must never crash the app over housekeeping.
+        }
+    }
+
+    /** Normalized comparison key for display names. */
+    public static String normalizeName(String s) {
+        if (s == null) return "";
+        return s.trim().toLowerCase(java.util.Locale.US).replaceAll("\\s+", " ");
+    }
+
+    /** A name worth identity-matching on: not empty, not a generated placeholder,
+     *  and at least two characters (single-letter "names" are usually initials or
+     *  partial titles and must not glue chats together). */
+    public static boolean meaningfulName(String s) {
+        String n = normalizeName(s);
+        return n.length() >= 2 && !n.equals("unknown") && !n.startsWith("unknown (");
     }
 
     private void enforceInvariants(Contact c) {

@@ -94,6 +94,21 @@ public final class Fakes {
         @Override public void touchChannel(long channelId, long lastSeenAt) {
             for (ContactChannel ch : channels) if (ch.id == channelId) ch.lastSeenAt = lastSeenAt;
         }
+        /** Fork-heal: re-point the duplicate's channel rows; UNIQUE(channel, remote_key)
+         *  collisions with the kept contact's rows are dropped (kept contact wins). */
+        @Override public void reassignContact(long fromContactId, long toContactId) {
+            java.util.Set<String> keepKeys = new java.util.HashSet<String>();
+            for (ContactChannel ch : channels) {
+                if (ch.contactId == toContactId) keepKeys.add(ch.channel.wire + "\u0001" + ch.remoteKey);
+            }
+            java.util.Iterator<ContactChannel> it = channels.iterator();
+            while (it.hasNext()) {
+                ContactChannel ch = it.next();
+                if (ch.contactId != fromContactId) continue;
+                if (keepKeys.contains(ch.channel.wire + "\u0001" + ch.remoteKey)) it.remove();
+                else ch.contactId = toContactId;
+            }
+        }
     }
 
     public static final class MessageStoreFake implements MessageStore {
@@ -105,6 +120,14 @@ public final class Fakes {
             byContact.get(m.contactId).add(m);
         }
         @Override public long insert(Message m) { add(m); return m.id; }
+        /** Fork-heal: move all messages (preserving order) onto the kept contact. */
+        @Override public void reassignContact(long fromContactId, long toContactId) {
+            List<Message> from = byContact.remove(fromContactId);
+            if (from == null) return;
+            List<Message> to = byContact.get(toContactId);
+            if (to == null) { to = new ArrayList<Message>(); byContact.put(toContactId, to); }
+            for (Message m : from) { m.contactId = toContactId; to.add(m); }
+        }
         @Override public Message getByNotifKey(Channel channel, String notifKey) {
             if (notifKey == null) return null;
             for (List<Message> list : byContact.values()) {
@@ -119,6 +142,16 @@ public final class Fakes {
             if (all == null) return new ArrayList<Message>();
             int from = Math.max(0, all.size() - limit);
             return new ArrayList<Message>(all.subList(from, all.size()));
+        }
+        /** Rolling-summary boundary: strictly this contact's rows with id < beforeId,
+         *  newest {@code limit} of them, oldest-first (ids assigned in insert order). */
+        @Override public List<Message> olderThanId(long contactId, long beforeId, int limit) {
+            List<Message> all = byContact.get(contactId);
+            List<Message> out = new ArrayList<Message>();
+            if (all == null) return out;
+            for (Message m : all) if (m.id > 0 && m.id < beforeId) out.add(m);
+            int from = Math.max(0, out.size() - Math.max(1, limit));
+            return new ArrayList<Message>(out.subList(from, out.size()));
         }
         @Override public List<Message> searchByBody(String query, int limit) {
             List<Message> hits = new ArrayList<Message>();
@@ -155,9 +188,16 @@ public final class Fakes {
         public final List<Draft> saved = new ArrayList<Draft>();
         private long nextId = 1;
         @Override public long insert(Draft d) { d.id = nextId++; saved.add(d); return d.id; }
+        @Override public void reassignContact(long fromContactId, long toContactId) {
+            for (Draft d : saved) if (d.contactId == fromContactId) d.contactId = toContactId;
+        }
+        /** Contract honors the port: newest-first. */
         @Override public List<Draft> byContact(long contactId, int limit) {
             List<Draft> out = new ArrayList<Draft>();
-            for (Draft d : saved) if (d.contactId == contactId && out.size() < limit) out.add(d);
+            for (int i = saved.size() - 1; i >= 0 && out.size() < limit; i--) {
+                Draft d = saved.get(i);
+                if (d.contactId == contactId) out.add(d);
+            }
             return out;
         }
         @Override public List<Draft> byVariantGroup(String variantGroup) { return saved; }
@@ -203,6 +243,23 @@ public final class Fakes {
         }
         @Override public List<com.replymate.core.model.MemoryFact> allFacts(long contactId) {
             return new ArrayList<com.replymate.core.model.MemoryFact>(list(contactId));
+        }
+        /** Fork-heal: facts move (text_norm collision -> kept contact's fact wins);
+         *  the duplicate's rolling summaries are dropped (partial-history artifacts). */
+        @Override public void reassignContact(long fromContactId, long toContactId) {
+            List<com.replymate.core.model.MemoryFact> from = factsByContact.remove(fromContactId);
+            if (from != null) {
+                List<com.replymate.core.model.MemoryFact> to = list(toContactId);
+                java.util.Set<String> have = new java.util.HashSet<String>();
+                for (com.replymate.core.model.MemoryFact f : to) have.add(f.textNorm);
+                for (com.replymate.core.model.MemoryFact f : from) {
+                    if (have.contains(f.textNorm)) continue;
+                    f.contactId = toContactId;
+                    to.add(f);
+                    have.add(f.textNorm);
+                }
+            }
+            summariesByContact.remove(fromContactId);
         }
         /** Same merge key as SQLite: (contact_id, text_norm); id stable on update. */
         @Override public long upsertFact(com.replymate.core.model.MemoryFact f) {
@@ -279,6 +336,15 @@ public final class Fakes {
         @Override public void remove(Long contactId, String key) {
             scope(contactId).remove(key);
         }
+        /** Fork-heal: kept contact's value wins on key collision. */
+        @Override public void reassignContact(long fromContactId, long toContactId) {
+            Map<String, String> from = rows.remove(fromContactId);
+            if (from == null) return;
+            Map<String, String> to = scope(toContactId);
+            for (Map.Entry<String, String> e : from.entrySet()) {
+                if (!to.containsKey(e.getKey())) to.put(e.getKey(), e.getValue());
+            }
+        }
     }
 
     public static final class LearningStoreFake implements com.replymate.core.ports.LearningStore {
@@ -295,6 +361,13 @@ public final class Fakes {
             s.id = nextId++;
             l.add(s);
             return s.id;
+        }
+        @Override public void reassignContact(long fromContactId, long toContactId) {
+            List<StyleSignal> from = byContact.remove(fromContactId);
+            if (from == null) return;
+            List<StyleSignal> to = byContact.get(toContactId);
+            if (to == null) { to = new ArrayList<StyleSignal>(); byContact.put(toContactId, to); }
+            to.addAll(from);
         }
         @Override public List<StyleSignal> byContact(long contactId, int limit) {
             List<StyleSignal> l = byContact.get(contactId);

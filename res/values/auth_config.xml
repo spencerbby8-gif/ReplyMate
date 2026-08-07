@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Supabase connection (P-auth 1.2.0). The anon/publishable key is public-by-design —
+     client apps are SUPPOSED to embed it; security lives in Supabase Auth + RLS,
+     never in hiding this key. The service_role/secret keys must NEVER appear here. -->
+<resources>
+    <string name="supabase_url">https://xdcsxxwhvpiissetbrdr.supabase.co</string>
+    <string name="supabase_publishable_key">sb_publishable_bmOsVq4BeVTpQLLJl0J7yA_e4zf6_Lm</string>
+</resources>

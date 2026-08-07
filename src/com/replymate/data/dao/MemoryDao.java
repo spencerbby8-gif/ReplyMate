@@ -172,4 +172,20 @@ public final class MemoryDao {
         s.createdAt = c.getLong(c.getColumnIndexOrThrow("created_at"));
         return s;
     }
+
+    /** P-ux-fix fork-heal: facts move over (text_norm collision -> the KEPT contact's
+     *  fact wins, duplicate dropped); the duplicate's rolling summaries are DROPPED —
+     *  they were built from the fork's partial history and would mislead future recall. */
+    public void reassignContact(long fromContactId, long toContactId) {
+        android.database.sqlite.SQLiteDatabase db = helper.getWritableDatabase();
+        db.delete("memory_fact",
+            "contact_id=? AND text_norm IN (SELECT text_norm FROM memory_fact WHERE contact_id=?)",
+            new String[] {String.valueOf(fromContactId), String.valueOf(toContactId)});
+        android.content.ContentValues v = new android.content.ContentValues();
+        v.put("contact_id", toContactId);
+        db.update("memory_fact", v, "contact_id=?",
+            new String[] {String.valueOf(fromContactId)});
+        db.delete("contact_summary", "contact_id=?",
+            new String[] {String.valueOf(fromContactId)});
+    }
 }

@@ -51,7 +51,7 @@ public class MigrationV5Test {
             MigrationTest.JdbcExecSql db = v4DeviceDb(c);
             Migrations.migrate(db);
             assertEquals(Migrations.LATEST, db.getUserVersion());
-            assertEquals(5, Migrations.LATEST);
+            assertTrue("v5 must remain a shipped, immutable step", Migrations.LATEST >= 5);
 
             try (Statement st = c.createStatement();
                  ResultSet rs = st.executeQuery(
@@ -92,7 +92,7 @@ public class MigrationV5Test {
         try (Connection c = memoryDb()) {
             MigrationTest.JdbcExecSql db = new MigrationTest.JdbcExecSql(c);
             Migrations.migrate(db);
-            assertEquals(5, db.getUserVersion());
+            assertEquals(Migrations.LATEST, db.getUserVersion());
             try (Statement st = c.createStatement();
                  ResultSet rs = st.executeQuery("PRAGMA table_info(message)")) {
                 java.util.Set<String> cols = new java.util.HashSet<String>();

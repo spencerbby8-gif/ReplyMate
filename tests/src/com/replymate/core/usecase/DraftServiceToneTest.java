@@ -58,7 +58,7 @@ public class DraftServiceToneTest {
             Fakes.learningService(learningStore, new Fakes.KvStoreFake());
         return new DraftService(contacts, messages, styles, profiles,
             drafts, usage, gateway, Fakes.IDS, Fakes.FIXED_CLOCK, Fakes.NOOP_LOG,
-            Fakes.styleService(styleSettings, learning), learning);
+            Fakes.styleService(styleSettings, learning), learning, null);
     }
 
     @Test public void happyPathSavesNewAuditedVariantAndMetersUsage() {

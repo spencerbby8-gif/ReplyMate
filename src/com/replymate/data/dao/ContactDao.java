@@ -147,4 +147,19 @@ public final class ContactDao {
         o.lastSeenAt = c.getLong(c.getColumnIndexOrThrow("last_seen_at"));
         return o;
     }
+
+    /** P-ux-fix fork-heal: re-point the duplicate's channel rows at the kept contact;
+     *  rows that would collide on UNIQUE(channel, remote_key) are dropped first. */
+    public void reassignContact(long fromContactId, long toContactId) {
+        android.database.sqlite.SQLiteDatabase db = helper.getWritableDatabase();
+        db.delete("contact_channel",
+            "contact_id=? AND EXISTS (SELECT 1 FROM contact_channel keep"
+                + " WHERE keep.contact_id=? AND keep.channel=contact_channel.channel"
+                + " AND keep.remote_key=contact_channel.remote_key)",
+            new String[] {String.valueOf(fromContactId), String.valueOf(toContactId)});
+        android.content.ContentValues v = new android.content.ContentValues();
+        v.put("contact_id", toContactId);
+        db.update("contact_channel", v, "contact_id=?",
+            new String[] {String.valueOf(fromContactId)});
+    }
 }

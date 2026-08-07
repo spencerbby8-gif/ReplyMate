@@ -12,4 +12,7 @@ public interface StyleSettingStore {
      *  Bulk contact cleanup needs no method here: style_setting rows carry
      *  ON DELETE CASCADE, so deleting the contact wipes them. */
     void remove(Long contactId, String key);
+    /** Fork-heal (P-ux-fix): move contact rows to the kept contact; on key collision
+     *  the KEPT contact's own value wins (the duplicate's row is dropped). */
+    default void reassignContact(long fromContactId, long toContactId) { }
 }

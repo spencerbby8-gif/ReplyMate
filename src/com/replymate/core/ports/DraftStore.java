@@ -14,4 +14,6 @@ public interface DraftStore {
     void updateFavorite(long draftId, boolean favorite);
     void delete(long draftId);
     void deleteByContact(long contactId);
+    /** Fork-heal (P-ux-fix): move ALL rows from a duplicate contact into the kept one. */
+    default void reassignContact(long fromContactId, long toContactId) { }
 }

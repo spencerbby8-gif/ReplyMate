@@ -27,13 +27,27 @@ public final class TaskComposer {
     public static Turn defaultTask(String ownerName, String partnerName,
                                    String latestIncomingText, String appLabel,
                                    com.replymate.core.model.ContentKind latestKind) {
+        return defaultTask(ownerName, partnerName, latestIncomingText, appLabel, latestKind, null);
+    }
+
+    /** P-memory-audit overload: latestSenderLabel attributes the answered message to
+     *  its ACTUAL sender (group chats). null/empty/same-as-partner = 1:1, no change. */
+    public static Turn defaultTask(String ownerName, String partnerName,
+                                   String latestIncomingText, String appLabel,
+                                   com.replymate.core.model.ContentKind latestKind,
+                                   String latestSenderLabel) {
         StringBuilder t = new StringBuilder("Read the conversation above and write ")
             .append(ownerName).append("'s next reply to ").append(partnerName).append('.');
         if (latestIncomingText != null && !latestIncomingText.trim().isEmpty()) {
             String quoted = latestIncomingText.trim();
             if (quoted.length() > 400) quoted = quoted.substring(0, 400) + "…";
-            t.append("\nThe message you're replying to — ").append(partnerName)
-             .append("'s latest: \"").append(quoted)
+            String sender = latestSenderLabel == null || latestSenderLabel.trim().isEmpty()
+                ? partnerName : latestSenderLabel.trim();
+            t.append("\nThe message you're replying to — ").append(sender).append("'s latest");
+            if (!sender.equals(partnerName)) {
+                t.append(" in ").append(partnerName);   // group: member ≠ conversation
+            }
+            t.append(": \"").append(quoted)
              .append("\". Answer THAT message, not an older one.");
             if (latestKind != null && latestKind.isMedia()) {
                 t.append("\nThat text was sent together with ").append(latestKind.label())

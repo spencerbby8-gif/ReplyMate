@@ -56,6 +56,12 @@ public final class NotifExtractor {
         raw.packageName = safePackage(sbn);
         raw.postTimeMs = sbn.getPostTime();
         raw.category = n.category;              // public field since API 21
+        // P-ux-fix status gate evidence. Same semantics as StatusBarNotification.isOngoing()
+        // (ongoing-event || foreground-service) but read from the Notification's own
+        // flags field — that is where the system copies them from, and unlike the SBN
+        // field it survives Robolectric (its instrumented SBN never stores flags).
+        raw.ongoing = (n.flags & (Notification.FLAG_ONGOING_EVENT
+            | Notification.FLAG_FOREGROUND_SERVICE)) != 0;
 
         Bundle x = n.extras;
         if (x == null) return raw;              // still carries package/category/postTime
@@ -71,6 +77,7 @@ public final class NotifExtractor {
         raw.conversationId = shortcutIdOf(n);
         raw.group = x.containsKey(K_IS_GROUP)
             ? Boolean.valueOf(x.getBoolean(K_IS_GROUP, false)) : null;
+        raw.progressMax = x.getInt(Notification.EXTRA_PROGRESS_MAX, 0);
 
         Object msgs = x.get(K_MESSAGES);
         Parcelable[] arr = msgs instanceof Parcelable[] ? (Parcelable[]) msgs : null;

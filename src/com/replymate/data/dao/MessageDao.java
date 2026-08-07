@@ -42,6 +42,7 @@ public final class MessageDao {
         v.put("content_type", m.contentKind == null ? "" : m.contentKind);
         v.put("media_mime", m.mediaMime == null ? "" : m.mediaMime);
         v.put("media_uri", m.mediaUri == null ? "" : m.mediaUri);
+        v.put("sender_name", m.senderName == null ? "" : m.senderName);
         return v;
     }
 
@@ -62,6 +63,23 @@ public final class MessageDao {
         Cursor c = helper.getReadableDatabase().query("message", null, "contact_id=?",
             new String[] {String.valueOf(contactId)}, null, null,
             "sent_at DESC, id DESC", String.valueOf(limit));
+        List<Message> out = new ArrayList<Message>();
+        try {
+            while (c.moveToNext()) out.add(message(c));
+        } finally {
+            c.close();
+        }
+        Collections.reverse(out);
+        return out;
+    }
+
+    /** Everything older than a message id for ONE contact (rolling-summary boundary),
+     *  oldest-first, capped to the most recent {@code limit}. */
+    public List<Message> olderThanId(long contactId, long beforeId, int limit) {
+        Cursor c = helper.getReadableDatabase().query("message", null,
+            "contact_id=? AND id<?",
+            new String[] {String.valueOf(contactId), String.valueOf(beforeId)},
+            null, null, "id DESC", String.valueOf(Math.max(1, limit)));
         List<Message> out = new ArrayList<Message>();
         try {
             while (c.moveToNext()) out.add(message(c));
@@ -127,6 +145,7 @@ public final class MessageDao {
         o.contentKind = safe(c, "content_type");
         o.mediaMime = safe(c, "media_mime");
         o.mediaUri = safe(c, "media_uri");
+        o.senderName = safe(c, "sender_name");   // schema v6 — same defensive read
         return o;
     }
 
@@ -137,5 +156,13 @@ public final class MessageDao {
         if (i < 0 || c.isNull(i)) return "";
         String v = c.getString(i);
         return v == null ? "" : v;
+    }
+
+    /** P-ux-fix fork-heal: move all rows from a merged-away duplicate contact. */
+    public void reassignContact(long fromContactId, long toContactId) {
+        android.content.ContentValues v = new android.content.ContentValues();
+        v.put("contact_id", toContactId);
+        helper.getWritableDatabase().update("message", v, "contact_id=?",
+            new String[] {String.valueOf(fromContactId)});
     }
 }

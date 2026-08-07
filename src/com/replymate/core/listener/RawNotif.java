@@ -33,6 +33,8 @@ public final class RawNotif {
     public String ownerKey;            // messagingUser Person key (nullable)
     public Boolean group;              // isGroupConversation tri-state: null = not provided
     public long postTimeMs;
+    public boolean ongoing;            // ongoing-event/foreground-service flags (P-ux-fix status gate)
+    public int progressMax;            // EXTRA_PROGRESS_MAX (>0 ⇒ progress housekeeping)
     public final List<Entry> messages = new ArrayList<Entry>();   // android.messages contents
 
     public RawNotif() { }

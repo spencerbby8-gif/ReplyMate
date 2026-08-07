@@ -58,18 +58,25 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.model.ContentKindTest \
     com.replymate.core.prompt.PromptBuilderTest \
     com.replymate.core.prompt.P4PromptTest \
+    com.replymate.core.prompt.ThreadMapperTest \
+    com.replymate.core.prompt.PromptAuditCompletenessTest \
     com.replymate.core.prompt.VoiceCharterTest \
     com.replymate.core.style.StyleSettingsTest \
     com.replymate.core.style.StyleServiceTest \
     com.replymate.core.learning.LearningEngineTest \
     com.replymate.core.learning.LearningServiceTest \
+    com.replymate.core.learning.StyleProfilerTest \
     com.replymate.core.memory.FactNormalizerTest \
     com.replymate.core.memory.MemoryMergeTest \
     com.replymate.core.memory.IsolationSuite \
+    com.replymate.core.memory.ThreadSummarizerTest \
+    com.replymate.core.memory.MemoryContinuityTest \
     com.replymate.core.budget.TokenBudgeterTest \
     com.replymate.core.usecase.DraftServiceTest \
     com.replymate.core.usecase.DraftServiceToneTest \
     com.replymate.core.usecase.ContactServiceTest \
+    com.replymate.core.auth.AuthFlowTest \
+    com.replymate.core.listener.StatusFilterTest \
     com.replymate.core.listener.IdentityResolverTest \
     com.replymate.core.listener.TextIdsTest \
     com.replymate.core.listener.MessageClassifierTest \
@@ -93,11 +100,13 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.provider.GeminiCandidatesFallbackTest \
     com.replymate.provider.ModelClassifierTest \
     com.replymate.core.usecase.ReplyContextHonestyTest \
+    com.replymate.core.usecase.ContextIsolationTest \
     com.replymate.data.MigrationTest \
     com.replymate.data.MigrationV2Test \
     com.replymate.data.MigrationV3Test \
     com.replymate.data.MigrationV4Test \
     com.replymate.data.MigrationV5Test \
+    com.replymate.data.MigrationV6Test \
     com.replymate.data.PragmaRowBehaviorTest \
     com.replymate.data.PlatformGuardTest \
     com.replymate.data.ManifestCatalogTest

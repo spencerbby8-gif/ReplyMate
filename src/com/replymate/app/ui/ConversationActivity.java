@@ -104,11 +104,11 @@ public final class ConversationActivity extends Activity {
                 startActivity(i);
             }
         });
-        findViewById(R.id.btn_them).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { addMessage(Direction.INCOMING); }
-        });
-        findViewById(R.id.btn_me).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { addMessage(Direction.OUTGOING); }
+        // P-ux-fix: ONE manual action (outgoing only) + AI Generate. The confusing
+        // ＋them / ＋me pair is gone; incoming messages arrive via the notification
+        // listener on their own.
+        findViewById(R.id.btn_manual).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { manualSend(); }
         });
         btnGen.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { generate(); }
@@ -133,27 +133,48 @@ public final class ConversationActivity extends Activity {
             if (fresh == null) { finish(); return; }   // contact deleted meanwhile
             contact = fresh;
             ((TextView) findViewById(R.id.conv_name)).setText(contact.displayName);
+            ((TextView) findViewById(R.id.conv_rel)).setText(
+                contact.relationshipType.isEmpty() ? "manual mode" : contact.relationshipType);
+            // P-ux-fix: edits, newly-arrived notifications and fresh drafts all show
+            // immediately on return to this screen — no stale views.
+            refreshThread();
+            refreshDrafts();
         }
     }
 
     /* ------------------------------------------------------------------ thread */
 
-    private void addMessage(Direction direction) {
-        String text = input.getText().toString().trim();
+    /** P-ux-fix: the ONE manual action — a normal outgoing message. Your words are
+     *  saved to the thread like any sent text; if this contact is connected to an app
+     *  (WhatsApp/Discord…), the status line afterwards offers to open that app with
+     *  the text ready to paste-send. Incoming messages arrive via the listener. */
+    private void manualSend() {
+        final String text = input.getText().toString().trim();
         if (text.isEmpty()) {
-            Toast.makeText(this, "Type or paste a message first", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Type your reply first", Toast.LENGTH_SHORT).show();
             return;
         }
         Message m = new Message();
         m.contactId = contact.id;
         m.channel = Channel.MANUAL;
-        m.direction = direction;
+        m.direction = Direction.OUTGOING;
         m.body = text;
         m.sentAt = c.clock().now();
         m.source = Source.MANUAL;
         c.messages().insert(m);
         input.setText("");
         refreshThread();
+        final Channel origin = originChannel();
+        if (origin != null) {
+            showStatus("Saved ✓ — tap here to open it in "
+                + WatchedApps.labelFor(origin), Ui.GREEN);
+            genStatus.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    openInApp(origin, text);
+                    genStatus.setOnClickListener(null);
+                }
+            });
+        }
     }
 
     private void refreshThread() {
@@ -169,8 +190,10 @@ public final class ConversationActivity extends Activity {
         if (shown.isEmpty()) {
             TextView empty = Ui.sub(this, !filter.isEmpty()
                 ? "No messages match “" + filter + "”."
-                : "No messages yet.\nPaste what " + contact.displayName
-                    + " sent you (＋them), then tap ✨ Generate.");
+                : "No messages yet.\nNew WhatsApp/Discord messages from "
+                    + contact.displayName
+                    + " appear here on their own. Then tap ✨ Generate, or write"
+                    + " your own reply below and tap ✍ Manual.");
             empty.setGravity(android.view.Gravity.CENTER);
             empty.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 24));
             msgList.addView(empty);
@@ -289,9 +312,11 @@ public final class ConversationActivity extends Activity {
         card.addView(body);
 
         // Meta row.
+        // P-ux-fix: provider/model name hidden from normal cards (it stays available
+        // in the "Why this reply?" panel + Prompt Audit for transparency on demand).
         String favMark = draft.favorite ? "★ " : "";
-        card.addView(Ui.sub(this, favMark + draft.model + " · "
-            + TimeFmt.dayTime(draft.createdAt) + " · " + draft.status.wire));
+        card.addView(Ui.sub(this, favMark + TimeFmt.dayTime(draft.createdAt)
+            + " · " + draft.status.wire));
 
         // Expandable "Why this reply?" panel (owner ask): which voice settings, contact
         // overrides, custom instructions and learning signals shaped THIS reply — read
@@ -470,7 +495,10 @@ public final class ConversationActivity extends Activity {
     }
 
     private void openInApp(Channel channel, EditText body) {
-        String text = body.getText().toString().trim();
+        openInApp(channel, body.getText().toString().trim());
+    }
+
+    private void openInApp(Channel channel, String text) {
         boolean opened = DeepLinks.openChat(this, channel, contact.displayName,
             text, WatchedApps.primaryPackageFor(channel));
         if (!opened) {
@@ -488,6 +516,7 @@ public final class ConversationActivity extends Activity {
     /* ------------------------------------------------------------------ status */
 
     private void showStatus(String msg, int color) {
+        genStatus.setOnClickListener(null);   // cancel any pending "tap to open" offer
         genStatus.setVisibility(View.VISIBLE);
         genStatus.setText(msg);
         genStatus.setTextColor(color);

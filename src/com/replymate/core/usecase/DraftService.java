@@ -46,12 +46,14 @@ public final class DraftService {
     private final Logger log;
     private final com.replymate.core.style.StyleService styleService;
     private final com.replymate.core.learning.LearningService learningService;
+    private final com.replymate.core.memory.MemoryService memory;   // null = legacy tests
 
     public DraftService(ContactStore contacts, MessageStore messages, StyleStore styles,
                         ProfileService profiles, DraftStore drafts, UsageStore usage,
                         ProviderGateway gateway, IdGen ids, Clock clock, Logger log,
                         com.replymate.core.style.StyleService styleService,
-                        com.replymate.core.learning.LearningService learningService) {
+                        com.replymate.core.learning.LearningService learningService,
+                        com.replymate.core.memory.MemoryService memory) {
         this.contacts = contacts;
         this.messages = messages;
         this.styles = styles;
@@ -64,6 +66,7 @@ public final class DraftService {
         this.log = log;
         this.styleService = styleService;
         this.learningService = learningService;
+        this.memory = memory;
     }
 
     public Result<DraftOutcome> generateForContact(long contactId) {
@@ -121,11 +124,26 @@ public final class DraftService {
         why.addAll(profiles.excludedSections());
         if (voice != null) why.addAll(voice.why);
 
+        // P-memory-audit: long-term memory for THIS contact only — pinned facts,
+        // rolling summary of everything older than the hot window, learned style
+        // from approved replies. All local; nothing crosses contact boundaries.
+        com.replymate.core.memory.MemoryService.Recall mem = null;
+        if (memory != null) {
+            mem = memory.withLearnedStyle(memory.recall(c, thread), c,
+                approvedTextsFor(contactId));
+            why.addAll(mem.why);
+            if (!c.memoryEnabled) {
+                why.add("memory disabled for this contact — no summary, facts"
+                    + " or learned style were used");
+            }
+        }
+
         ChatRequest request = PromptBuilder.build(new PromptBundle(
             profiles.loadFiltered(), c, styleRules, thread,
             voice == null ? "" : voice.voiceLine,
             voice == null ? null : voice.extraLines,
-            profiles.extraFiltered()));
+            profiles.extraFiltered(),
+            mem == null ? null : mem.lines));
 
         long t0 = clock.now();
         Result<ChatReply> reply = provider.generate(request);
@@ -138,11 +156,19 @@ public final class DraftService {
         ChatReply r = reply.value;
         if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
 
+        // P-ux-fix: (Re)generate REPLACES the current draft instead of stacking duplicate
+        // cards. Only untouched drafts are cleared — anything the owner explicitly kept
+        // (⭐ favorite) or already used (copied/edited/sent) stays. Old drafts are
+        // purged only AFTER the provider succeeded, so a failed regen never wipes
+        // the draft the owner still has.
+        int replaced = purgeUnsavedDrafts(contactId);
+        if (replaced > 0) why.add("regenerate replaced " + replaced + " unsaved draft(s)");
+
         long now = clock.now();
         String group = ids.next();
         String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
         String snapshot = PromptBuilder.snapshot(request, model, "reply", why,
-            auditContextFor(c, lastIncoming));
+            auditContextFor(c, lastIncoming, mem));
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
 
         List<Draft> saved = new ArrayList<Draft>();
@@ -181,10 +207,44 @@ public final class DraftService {
 
     /* ---------------------------------------------------------------- audit ctx */
 
+    /** P-ux-fix: deletes this contact's untouched generated drafts (not favorited,
+     *  never copied/edited/sent). Returns how many were removed. Tone transforms
+     *  bypass this on purpose — stacking tone variants of one draft is intentional. */
+    private int purgeUnsavedDrafts(long contactId) {
+        int removed = 0;
+        List<Draft> existing = drafts.byContact(contactId, 50);
+        for (Draft d : existing) {
+            if (d.status == DraftStatus.GENERATED && !d.favorite) {
+                drafts.delete(d.id);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    /** The most recent APPROVED reply texts for one contact (M4 evidence): drafts
+     *  the owner copied as-is or edited-then-copied. Newest-first, capped. */
+    private java.util.List<String> approvedTextsFor(long contactId) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        java.util.List<Draft> recent = drafts.byContact(contactId, 60);   // newest-first
+        for (Draft d : recent) {
+            if (out.size() >= com.replymate.core.learning.StyleProfiler.MAX_TEXTS) break;
+            if (d == null || (d.status != DraftStatus.COPIED && d.status != DraftStatus.EDITED)) {
+                continue;
+            }
+            String t = d.replyText == null ? "" : d.replyText.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
+
     /** Full provenance for one reply generation (P-audit-deep): the provider identity
      *  + the answered message + its content kind + the source app's package + the
-     *  resolved SOURCE IDENTITY (with confidence) + the plain-language reason. */
-    private com.replymate.core.prompt.AuditContext auditContextFor(Contact c, Message latest) {
+     *  resolved SOURCE IDENTITY (with confidence) + the plain-language reason.
+     *  P-memory-audit: + the actual sender (groups), the captured media MIME and the
+     *  long-term memory layers the request leaned on. */
+    private com.replymate.core.prompt.AuditContext auditContextFor(
+            Contact c, Message latest, com.replymate.core.memory.MemoryService.Recall mem) {
         com.replymate.core.model.ProviderRef ref = gateway.activeMeta();
         if (ref == null) return null;
         String appLabel = latest.channel == com.replymate.core.model.Channel.MANUAL
@@ -215,14 +275,24 @@ public final class DraftService {
             + (latest.sentAt > 0
                 ? " (received " + com.replymate.core.util.TimeFmt.dayTime(latest.sentAt) + ")"
                 : "");
-        return new com.replymate.core.prompt.AuditContext(ref.wire, ref.label, ref.baseUrl,
-            ref.modelName, com.replymate.core.prompt.AuditContext.endpointFor(
-                ref.wire, ref.baseUrl, ref.modelName),
-            latest.body, appLabel, latest.sentAt,
-            kind == null ? "" : kind.wire,
-            appPackage == null ? "" : appPackage,
-            kind != null && kind.isMedia() && !latest.mediaUri.trim().isEmpty(),
-            identity, confidence, reason);
+        com.replymate.core.prompt.AuditContext ctx =
+            new com.replymate.core.prompt.AuditContext(ref.wire, ref.label, ref.baseUrl,
+                ref.modelName, com.replymate.core.prompt.AuditContext.endpointFor(
+                    ref.wire, ref.baseUrl, ref.modelName),
+                latest.body, appLabel, latest.sentAt,
+                kind == null ? "" : kind.wire,
+                appPackage == null ? "" : appPackage,
+                kind != null && kind.isMedia() && !latest.mediaUri.trim().isEmpty(),
+                identity, confidence, reason);
+        // P-memory-audit: actual sender (group attribution) + captured media MIME +
+        // the long-term memory layers this specific request leaned on.
+        ctx.withLatestExtras(latest.senderName,
+            kind != null && kind.isMedia() ? latest.mediaMime : "");
+        if (mem != null) {
+            ctx.withMemory(new com.replymate.core.prompt.AuditContext.Memory(
+                mem.summaryText, mem.summaryMeta, mem.facts, mem.learnedStyle));
+        }
+        return ctx;
     }
 
     /** Kind-specific honest explanation for the no-readable-text gate. */
@@ -273,11 +343,20 @@ public final class DraftService {
         if (global != null && global.derivedRules != null) styleRules = global.derivedRules;
         com.replymate.core.style.StyleService.ComposedVoice voice =
             styleService == null ? null : styleService.compose(c);
+        // P-memory-audit: previews mirror the REAL prompt, memory included (the
+        // synthetic sample thread has id 0, so the summary boundary covers nothing
+        // and refreshSummary writes nothing — facts + learned style still apply).
+        com.replymate.core.memory.MemoryService.Recall mem = null;
+        if (memory != null && c.id > 0) {
+            mem = memory.withLearnedStyle(memory.recall(c, sample), c,
+                approvedTextsFor(c.id));
+        }
         ChatRequest request = PromptBuilder.build(new PromptBundle(
             profiles.loadFiltered(), c, styleRules, sample,
             voice == null ? "" : voice.voiceLine,
             voice == null ? null : voice.extraLines,
-            profiles.extraFiltered()));
+            profiles.extraFiltered(),
+            mem == null ? null : mem.lines));
 
         long t0 = clock.now();
         Result<ChatReply> reply = provider.generate(request);

@@ -1,0 +1,23 @@
+== GET /auth/v1/settings ==
+{"external":{"anonymous_users":false,"apple":false,"azure":false,"bitbucket":false,"discord":false,"facebook":false,"snapchat":false,"figma":false,"fly":false,"github":false,"gitlab":false,"google":false,"keycloak":false,"kakao":false,"linkedin":false,"linkedin_oidc":false,"notion":false,"spotify":false,"slack":false,"slack_oidc":false,"workos":false,"twitch":false,"twitter":false,"email":true,"phone":false,"zoom":false},"disable_signup":false,"mailer_autoconfirm":false,"phone_autoconfirm":false,"sms_provider":"twilio","saml_enabled":false,"saml_private_key_next_configured":true,"passkeys_enabled":false}
+== POST /auth/v1/signup {} (anonymous) ==
+{"code":422,"error_code":"anonymous_provider_disabled","msg":"Anonymous sign-ins are disabled"}
+HTTP 422
+== POST /auth/v1/otp (probe address) ==
+{"code":400,"error_code":"email_address_invalid","msg":"Email address \"replymate-probe@example.com\" is invalid"}
+HTTP 400
+== POST /auth/v1/verify (bogus code — error shape check) ==
+{"code":403,"error_code":"otp_expired","msg":"Token has expired or is invalid"}
+HTTP 403
+== GET /auth/v1/authorize?provider=google&redirect_to=replymate://auth/callback (expect provider_disabled until dashboard setup) ==
+
+HTTP 400
+== POST /auth/v1/token?grant_type=pkce (bogus — error shape) ==
+{"code":404,"error_code":"flow_state_not_found","msg":"invalid flow state, no valid flow state found"}
+HTTP 404
+{"code":400,"error_code":"validation_failed","msg":"Unsupported provider: provider is not enabled"}
+HTTP 400
+
+== regenerated 2026-08-07 (P-splash-auth-polish) ==
+This transcript's file was lost in a sandbox snapshot restore after the original
+2026-08-07 capture; content re-landed verbatim from the phase session record.

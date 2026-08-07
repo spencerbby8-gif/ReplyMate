@@ -17,10 +17,12 @@ public final class PromptBuilder {
 
     public static ChatRequest build(PromptBundle bundle) {
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
-            bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra);
+            bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines);
         List<Turn> turns = ThreadMapper.map(bundle.thread, bundle.contact.displayName);
         // P-context-honesty: the task turn quotes the exact message being answered and
         // names the app, so the model can never reply from the contact name alone.
+        // P-memory-audit: the answered message is attributed to its ACTUAL sender
+        // (group chats — schema v6 sender_name).
         com.replymate.core.model.Message latest = latestUsableIncoming(bundle.thread);
         String appLabel = latest == null || latest.channel == null
                 || latest.channel == com.replymate.core.model.Channel.MANUAL
@@ -30,7 +32,8 @@ public final class PromptBuilder {
         Turn task = TaskComposer.defaultTask(
             bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
             bundle.contact.displayName,
-            latest == null ? null : latest.body, appLabel, kind);
+            latest == null ? null : latest.body, appLabel, kind,
+            latest == null ? null : latest.senderName);
         ChatRequest req = new ChatRequest(system, turns, task,
             GenerationOpts.of(VARIANT_COUNT, 0.8, 220));
         return TokenBudgeter.fit(req, TokenBudgeter.DEFAULT_MAX_INPUT);
@@ -116,14 +119,17 @@ public final class PromptBuilder {
                 .put("model", ctx.providerModel)
                 .put("endpoint", ctx.endpoint));
             if (!ctx.latestText.isEmpty()) {
-                out.put("latestIncoming", JsonObj.create()
+                JsonObj li = JsonObj.create()
                     .put("text", ctx.latestText)
                     .put("channel", ctx.latestChannel)
                     .put("app", ctx.latestPackage)
                     .put("at", ctx.latestAt)
                     .put("contentType", ctx.latestKind)
                     .put("mediaRef", ctx.mediaRefAvailable
-                        ? "captured locally — never opened, never uploaded" : "none"));
+                        ? "captured locally — never opened, never uploaded" : "none");
+                if (!ctx.latestSender.isEmpty()) li.put("sender", ctx.latestSender);
+                if (!ctx.latestMediaMime.isEmpty()) li.put("mediaMime", ctx.latestMediaMime);
+                out.put("latestIncoming", li);
             }
             if (!ctx.sourceIdentity.isEmpty()) {
                 out.put("source", JsonObj.create()
@@ -132,6 +138,25 @@ public final class PromptBuilder {
             }
             if (!ctx.reason.isEmpty()) {
                 out.put("reason", ctx.reason);
+            }
+            // P-memory-audit: the long-term memory layers this request leaned on.
+            if (ctx.memory != null && !ctx.memory.isEmpty()) {
+                JsonObj mem = JsonObj.create();
+                if (!ctx.memory.summaryText.isEmpty()) {
+                    mem.put("summary", ctx.memory.summaryText)
+                       .put("summaryMeta", ctx.memory.summaryMeta);
+                }
+                if (!ctx.memory.facts.isEmpty()) {
+                    JsonArr fa = JsonArr.create();
+                    for (String f : ctx.memory.facts) fa.add(f);
+                    mem.put("facts", fa);
+                }
+                if (!ctx.memory.learnedStyle.isEmpty()) {
+                    JsonArr ls = JsonArr.create();
+                    for (String l : ctx.memory.learnedStyle) ls.add(l);
+                    mem.put("learnedStyle", ls);
+                }
+                out.put("memory", mem);
             }
         }
         return out.toJson();

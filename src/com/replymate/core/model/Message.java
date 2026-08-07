@@ -17,6 +17,8 @@ public class Message {
     public String contentKind = "";      // ContentKind.wire, "" = legacy/not recorded
     public String mediaMime = "";        // e.g. "image/jpeg" when the app exposed it
     public String mediaUri = "";         // content:// reference (local-only, never sent)
+    public String senderName = "";       // actual sender (schema v6, group attribution);
+                                         // "" = unknown/outgoing/manual/legacy
 
     public Message() { }
 

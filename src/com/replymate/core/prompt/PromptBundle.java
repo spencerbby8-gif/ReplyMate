@@ -18,6 +18,8 @@ public final class PromptBundle {
     public final String voiceLine;         // resolved 9-control "Voice: …" line
     public final List<String> voiceExtra;  // custom prompt + learned hints lines
     public final String aboutExtra;        // filtered free-text "About me" box
+    /* P-memory-audit (all may be empty): */
+    public final List<String> memoryLines; // LTM lines: facts, rolling summary, learned style
 
     public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
                         List<Message> thread) {
@@ -27,6 +29,12 @@ public final class PromptBundle {
     public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
                         List<Message> thread, String voiceLine, List<String> voiceExtra,
                         String aboutExtra) {
+        this(profile, contact, styleRules, thread, voiceLine, voiceExtra, aboutExtra, null);
+    }
+
+    public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
+                        List<Message> thread, String voiceLine, List<String> voiceExtra,
+                        String aboutExtra, List<String> memoryLines) {
         this.profile = profile;
         this.contact = contact;
         this.styleRules = styleRules == null ? "" : styleRules;
@@ -38,5 +46,8 @@ public final class PromptBundle {
         if (voiceExtra != null) ve.addAll(voiceExtra);
         this.voiceExtra = Collections.unmodifiableList(ve);
         this.aboutExtra = aboutExtra == null ? "" : aboutExtra;
+        List<String> ml = new ArrayList<String>();
+        if (memoryLines != null) ml.addAll(memoryLines);
+        this.memoryLines = Collections.unmodifiableList(ml);
     }
 }
