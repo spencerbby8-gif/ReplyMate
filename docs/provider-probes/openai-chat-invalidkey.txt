@@ -1,0 +1,14 @@
+=== openai-chat-invalidkey ===
+POST https://api.openai.com/v1/chat/completions
+curl args: -H Authorization: Bearer sk-audit-invalid-0000000000000000 -H Content-Type: application/json -d {"model":"AUDIT-MODEL","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hey"}],"temperature":0.8,"max_tokens":220,"n":2} (keys are dummy)
+status: 401
+body:
+{
+  "error": {
+    "message": "Incorrect API key provided: sk-audit*********************0000. You can find your API key at https://platform.openai.com/account/api-keys.",
+    "type": "invalid_request_error",
+    "code": "invalid_api_key",
+    "param": null
+  },
+  "status": 401
+}

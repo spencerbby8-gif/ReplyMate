@@ -1,0 +1,77 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : gemini
+base URL      : https://generativelanguage.googleapis.com
+model         : gemini-2.5-pro
+api key       : (set, …1q_A, 53 chars)
+
+==> REQUEST
+GET https://generativelanguage.googleapis.com/v1beta/models
+  header: x-goog-api-key: (set, …1q_A, 53 chars)
+<== RESPONSE
+  HTTP status: 200
+  raw body: {  "models": [    {      "name": "models/gemini-2.5-flash",      "version": "001",      "displayName": "Gemini 2.5 Flash",      "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025.",      "inputTokenLimit": 1048576,      "outputTokenLimit": 65536,      "supportedGenerationMethods": [        "generateContent",        "countTokens",        "createCachedContent",        "batchGenerateContent"      ],      "temperature": 1,      "topP": 0.95,      "topK": 64,      "maxTemperature": 2,      "thinking": true    },    {      "name": "models/gemini-2.5-pro",      "version": "2.5",      "displayName": "Gemini 2.5 Pro",      "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro",      "inputTokenLimit": 1048576,      "outputTokenLimit": 65536,      "supportedGenerationMethods": [        "generateContent",        "countTokens",        "createCachedContent",        "batchGenerateContent"      ],      "temperature": 1,      "topP": 0.95,      "topK": 64,      "maxTemperature": 2,      "thinking": true    },    {      "name": "models/gemini-2.0-flash",      "version": "2.0",      "displayNam…[truncated]
+
+APP MAPPING (listModels): OK — 42 models
+   - antigravity-preview-05-2026
+   - deep-research-max-preview-04-2026
+   - deep-research-preview-04-2026
+   - deep-research-pro-preview-12-2025
+   - gemini-2.0-flash
+   - gemini-2.0-flash-001
+   - gemini-2.0-flash-lite
+   - gemini-2.0-flash-lite-001
+   - gemini-2.5-computer-use-preview-10-2025
+   - gemini-2.5-flash
+   - gemini-2.5-flash-image
+   - gemini-2.5-flash-lite
+   - gemini-2.5-flash-preview-tts
+   - gemini-2.5-pro
+   - gemini-2.5-pro-preview-tts
+   - gemini-3-flash-preview
+   - gemini-3-pro-image
+   - gemini-3-pro-image-preview
+   - gemini-3-pro-preview
+   - gemini-3.1-flash-image
+   - gemini-3.1-flash-image-preview
+   - gemini-3.1-flash-lite
+   - gemini-3.1-flash-lite-image
+   - gemini-3.1-flash-lite-preview
+   - gemini-3.1-flash-tts-preview
+   - gemini-3.1-pro-preview
+   - gemini-3.1-pro-preview-customtools
+   - gemini-3.5-flash
+   - gemini-3.5-flash-lite
+   - gemini-3.6-flash
+   - gemini-flash-latest
+   - gemini-flash-lite-latest
+   - gemini-omni-flash-preview
+   - gemini-pro-latest
+   - gemini-robotics-er-1.5-preview
+   - gemini-robotics-er-1.6-preview
+   - gemini-robotics-er-2-preview
+   - gemma-4-26b-a4b-it
+   - gemma-4-31b-it
+   - lyria-3-clip-preview
+   - lyria-3-pro-preview
+   - nano-banana-pro-preview
+
+==> REQUEST
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent
+  header: x-goog-api-key: (set, …1q_A, 53 chars)
+  body: {"system_instruction":{"parts":[{"text":"You write chat replies as the owner."}]},"contents":[{"role":"user","parts":[{"text":"Amara: hey, you still coming through on Saturday?"}]},{"role":"user","parts":[{"text":"Reply as the owner, one short natural text."}]},{"role":"user","parts":[{"text":"Write the reply now."}]}],"generationConfig":{"temperature":0.8,"candidateCount":2,"maxOutputTokens":220}}
+<== RESPONSE
+  HTTP status: 429
+  raw body: {  "error": {    "code": 429,    "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-2.5-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.5-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.5-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-2.5-pro\nPlease retry in 9.424891775s.",    "status": "RESOURCE_EXHAUSTED",    "details": [      {        "@type": "type.googleapis.com/google.rpc.Help",        "links": [          {            "description": "Learn more about Gemini API quotas",            "url": "https://ai.google.dev/gemini-api/docs/rate-limits"          }        ]      },      {        "@type": "typ…[truncated]
+
+APP MAPPING (generate): ERROR ↓
+  QUOTA — Quota limit is 0 for this model on your key — this is NOT used-up quota. Nothing was consumed; the provider does not offer this model to your key/plan at all.
+  Provider: Google Gemini
+  Endpoint: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent
+  Model: gemini-2.5-pro
+  HTTP status: 429
+  Provider said: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.…
+  ReplyMate read: Quota limit is 0 for this model on your key — this is NOT used-up quota. Nothing was consumed; the provider does not offer this model to your key/plan at all.
+  Suggested fix: Pick a different model (for Google AI Studio: one of the models the free tier actually covers today — see the rate-limits page; the Flash/Flash-Lite tier is the free workhorse), or enable billing for this model. Retrying the same model will never succeed.
+  — raw provider body —
+  {  "error": {    "code": 429,    "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-2.5-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.5-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.5-pro\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-2.5-pro\nPlease retry in 9.325838877s.",    "status": "RESOURCE_EXHAUSTE…
+################ END PROBE ################

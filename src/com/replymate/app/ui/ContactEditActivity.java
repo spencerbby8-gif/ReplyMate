@@ -247,6 +247,7 @@ public final class ContactEditActivity extends Activity {
         // Live preview (P-polish): real generation over a sample chat using THIS
         // contact's effective voice (overrides + custom prompt + learned hints).
         this.previewOut = Ui.sub(this, "");
+        this.previewOut.setTextIsSelectable(true);
         this.previewOut.setPadding(0, Ui.dp(this, 6), 0, 0);
         root.addView(this.previewOut);
         this.previewBtn = Ui.btn(this, "Preview replies with this voice");
@@ -323,7 +324,8 @@ public final class ContactEditActivity extends Activity {
                     ContactEditActivity.this.previewBusy = false;
                     ContactEditActivity.this.previewBtn.setEnabled(true);
                     if (!r.ok) {
-                        ContactEditActivity.this.previewOut.setText("Preview failed: " + r.error);
+                        LastProviderError.save(c, r.error);
+                        ContactEditActivity.this.previewOut.setText("Preview failed:\n" + r.error);
                         ContactEditActivity.this.previewOut.setTextColor(Ui.RED);
                         return;
                     }

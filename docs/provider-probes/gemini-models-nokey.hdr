@@ -1,0 +1,13 @@
+HTTP/2 403 
+vary: X-Origin
+vary: Referer
+vary: Origin,Accept-Encoding
+content-type: application/json; charset=UTF-8
+date: Fri, 07 Aug 2026 01:10:19 GMT
+server: scaffolding on HTTPServer2
+x-xss-protection: 0
+x-frame-options: SAMEORIGIN
+x-content-type-options: nosniff
+server-timing: gfet4t7; dur=261
+accept-ranges: none
+

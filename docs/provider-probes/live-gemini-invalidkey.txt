@@ -1,0 +1,57 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : gemini
+base URL      : https://generativelanguage.googleapis.com
+model         : gemini-2.5-flash
+api key       : (set, …0000, 41 chars)
+
+==> REQUEST
+GET https://generativelanguage.googleapis.com/v1beta/models
+  header: x-goog-api-key: (set, …0000, 41 chars)
+<== RESPONSE
+  HTTP status: 400
+  raw body: {  "error": {    "code": 400,    "message": "API key not valid. Please pass a valid API key.",    "status": "INVALID_ARGUMENT",    "details": [      {        "@type": "type.googleapis.com/google.rpc.ErrorInfo",        "reason": "API_KEY_INVALID",        "domain": "googleapis.com",        "metadata": {          "service": "generativelanguage.googleapis.com"        }      },      {        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",        "locale": "en-US",        "message": "API key not valid. Please pass a valid API key."      }    ]  }}
+
+APP MAPPING (listModels): ERROR ↓
+  AUTH — The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Provider: Google Gemini
+  Endpoint: GET https://generativelanguage.googleapis.com/v1beta/models
+  HTTP status: 400
+  Provider said: API key not valid. Please pass a valid API key.
+  ReplyMate read: The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {  "error": {    "code": 400,    "message": "API key not valid. Please pass a valid API key.",    "status": "INVALID_ARGUMENT",    "details": [      {        "@type": "type.googleapis.com/google.rpc.ErrorInfo",        "reason": "API_KEY_INVALID",        "domain": "googleapis.com",        "metadata": {          "service": "generativelanguage.googleapis.com"        }      },      {        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",        "locale": "en-US",        "message": "API key not valid. Please pass a valid API key."      }    ]  }}
+
+==> REQUEST
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+  header: x-goog-api-key: (set, …0000, 41 chars)
+  body: {"system_instruction":{"parts":[{"text":"You write chat replies as the owner."}]},"contents":[{"role":"user","parts":[{"text":"Amara: hey, you still coming through on Saturday?"}]},{"role":"user","parts":[{"text":"Reply as the owner, one short natural text."}]},{"role":"user","parts":[{"text":"Write the reply now."}]}],"generationConfig":{"temperature":0.8,"candidateCount":2,"maxOutputTokens":220}}
+<== RESPONSE
+  HTTP status: 400
+  raw body: {  "error": {    "code": 400,    "message": "API key not valid. Please pass a valid API key.",    "status": "INVALID_ARGUMENT",    "details": [      {        "@type": "type.googleapis.com/google.rpc.ErrorInfo",        "reason": "API_KEY_INVALID",        "domain": "googleapis.com",        "metadata": {          "service": "generativelanguage.googleapis.com"        }      },      {        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",        "locale": "en-US",        "message": "API key not valid. Please pass a valid API key."      }    ]  }}
+
+APP MAPPING (generate): ERROR ↓
+  AUTH — The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Provider: Google Gemini
+  Endpoint: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+  Model: gemini-2.5-flash
+  HTTP status: 400
+  Provider said: API key not valid. Please pass a valid API key.
+  ReplyMate read: The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {  "error": {    "code": 400,    "message": "API key not valid. Please pass a valid API key.",    "status": "INVALID_ARGUMENT",    "details": [      {        "@type": "type.googleapis.com/google.rpc.ErrorInfo",        "reason": "API_KEY_INVALID",        "domain": "googleapis.com",        "metadata": {          "service": "generativelanguage.googleapis.com"        }      },      {        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",        "locale": "en-US",        "message": "API key not valid. Please pass a valid API key."      }    ]  }}
+
+---- wrong-model probe: "replymate-audit-no-such-model" ----
+APP MAPPING (wrong model): ERROR ↓
+  AUTH — The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Provider: Google Gemini
+  Endpoint: POST https://generativelanguage.googleapis.com/v1beta/models/replymate-audit-no-such-model:generateContent
+  Model: replymate-audit-no-such-model
+  HTTP status: 400
+  Provider said: API key not valid. Please pass a valid API key.
+  ReplyMate read: The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {  "error": {    "code": 400,    "message": "API key not valid. Please pass a valid API key.",    "status": "INVALID_ARGUMENT",    "details": [      {        "@type": "type.googleapis.com/google.rpc.ErrorInfo",        "reason": "API_KEY_INVALID",        "domain": "googleapis.com",        "metadata": {          "service": "generativelanguage.googleapis.com"        }      },      {        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",        "locale": "en-US",        "message": "API key not valid. Please pass a valid API key."      }    ]  }}
+################ END PROBE ################

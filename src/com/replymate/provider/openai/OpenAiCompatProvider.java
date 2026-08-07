@@ -5,7 +5,7 @@ import com.replymate.core.ai.ChatRequest;
 import com.replymate.core.ports.AiProvider;
 import com.replymate.core.util.Logger;
 import com.replymate.core.util.Result;
-import com.replymate.provider.http.ApiError;
+import com.replymate.provider.http.Diagnostics;
 import com.replymate.provider.http.HttpClient;
 import com.replymate.provider.http.HttpResponse;
 import com.replymate.provider.http.RetryPolicy;
@@ -42,23 +42,37 @@ public final class OpenAiCompatProvider implements AiProvider {
 
     public String model() { return model; }
 
+    // Diagnostics of the most recent failed attempt (single-flight usage in this app).
+    private Diagnostics lastDiag;
+
     @Override public Result<ChatReply> generate(ChatRequest request) {
         if (baseUrl.isEmpty()) return Result.err("No provider base URL configured — open Settings → AI providers");
         if (model.isEmpty()) return Result.err("No model selected — pick one in Settings → AI providers");
         Map<String, String> headers = OpenAiPayloads.headers(apiKey);
-        Result<ChatReply> r = callWithRetry(OpenAiPayloads.chatEndpoint(baseUrl),
-            headers, OpenAiPayloads.chatBody(request, model, true), true);
-        if (!r.ok && r.error != null && (r.error.startsWith("UNKNOWN") || r.error.startsWith("PARSE"))) {
-            // graceful fallback: n>1 unsupported by this server → single-variant call
+        String url = OpenAiPayloads.chatEndpoint(baseUrl);
+        Result<ChatReply> r = callWithRetry(url, headers, OpenAiPayloads.chatBody(request, model, true));
+        if (!r.ok && rejectedN(lastDiag)) {
+            // graceful fallback: this server rejected the n>1 variants parameter itself
+            // (verified message match — NOT auth/model/quota problems, which must surface
+            //  honestly instead of provoking a confusing double request).
             log.i(wireType, "retrying without n (server may not support variants)");
-            r = callWithRetry(OpenAiPayloads.chatEndpoint(baseUrl),
-                headers, OpenAiPayloads.chatBody(request, model, false), true);
+            r = callWithRetry(url, headers, OpenAiPayloads.chatBody(request, model, false));
         }
         return r;
     }
 
+    /** True only when the provider's own words pin the failure on the n parameter —
+     *  e.g. "'n' is not supported by this server" (captured live). */
+    public static boolean rejectedN(Diagnostics d) {
+        if (d == null || d.cause != Diagnostics.Cause.OTHER) return false;
+        String low = (d.providerMsg + "\n" + d.rawBody).toLowerCase(java.util.Locale.US);
+        return low.contains("\"n\"") || low.contains("'n'") || low.contains(" n is not")
+            || low.contains("parameter n") || low.contains("num_candidates")
+            || low.contains("candidatecount");
+    }
+
     private Result<ChatReply> callWithRetry(String url, Map<String, String> headers,
-                                            String body, boolean allowRetry) {
+                                            String body) {
         int attempt = 0;
         while (true) {
             attempt++;
@@ -66,16 +80,17 @@ public final class OpenAiCompatProvider implements AiProvider {
             if (resp.code >= 200 && resp.code < 300) {
                 return OpenAiParser.parseReply(resp.body);
             }
-            ApiError err = OpenAiParser.errorFrom(resp);
-            if (allowRetry && retry.shouldRetry(err, attempt)) {
-                long wait = retry.sleepMillis(attempt - 1, err.retryAfterSeconds);
-                log.w(wireType, err.type + " (attempt " + attempt + ") — retrying in " + wait + "ms");
+            lastDiag = Diagnostics.build(wireType, "POST", url, model, resp,
+                OpenAiParser.extractProviderMessage(resp.body));
+            if (retry.shouldRetry(lastDiag.error, attempt)) {
+                long wait = retry.sleepMillis(attempt - 1, lastDiag.error.retryAfterSeconds);
+                log.w(wireType, lastDiag.oneLiner() + " (attempt " + attempt + ") — retrying in " + wait + "ms");
                 if (!sleepMs(wait)) {
-                    return Result.err(err.type + " — interrupted while retrying");
+                    return Result.err(lastDiag.error.type + " — interrupted while retrying");
                 }
                 continue;
             }
-            return Result.err(err.type + " — " + err.message);
+            return Result.err(lastDiag.display());
         }
     }
 
@@ -92,8 +107,10 @@ public final class OpenAiCompatProvider implements AiProvider {
         if (resp.code >= 200 && resp.code < 300) {
             return OpenAiParser.parseModels(resp.body);
         }
-        ApiError err = OpenAiParser.errorFrom(resp);
-        return Result.err(err.type + " — " + err.message);
+        String url = OpenAiPayloads.modelsEndpoint(baseUrl);
+        lastDiag = Diagnostics.build(wireType, "GET", url, "", resp,
+            OpenAiParser.extractProviderMessage(resp.body));
+        return Result.err(lastDiag.display());
     }
 
     private static boolean sleepMs(long ms) {

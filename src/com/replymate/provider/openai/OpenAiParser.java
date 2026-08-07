@@ -81,14 +81,27 @@ public final class OpenAiParser {
             providerMsg.isEmpty() ? base.message : providerMsg, base.retryAfterSeconds);
     }
 
-    /** {error:{message}} — the stable cross-provider error shape (official). */
+    /** Provider error text from any of the shapes real compatible servers actually send
+     *  (all captured live 2026-08-07): {error:{message}} (OpenAI/DeepSeek/Kimi/OpenRouter),
+     *  {error:"…"} as a bare STRING (xAI/Grok), {detail:"…"} (Mistral), {message:"…"}
+     *  top-level (misc gateways). error.code may be a string OR a number. */
     public static String extractProviderMessage(String body) {
         try {
-            Object errRaw = Json.parseObj(body).raw("error");
+            JsonObj o = Json.parseObj(body);
+            Object errRaw = o.raw("error");
+            if (errRaw instanceof String && !((String) errRaw).trim().isEmpty()) {
+                return ((String) errRaw).trim();
+            }
             if (errRaw instanceof Map) {
                 Object msg = ((Map<?, ?>) errRaw).get("message");
-                if (msg instanceof String) return (String) msg;
+                if (msg instanceof String && !((String) msg).trim().isEmpty()) return (String) msg;
+                Object code = ((Map<?, ?>) errRaw).get("code");   // string or number
+                if (code != null) return String.valueOf(code);
             }
+            String detail = o.str("detail");
+            if (detail != null && !detail.trim().isEmpty()) return detail.trim();
+            String m = o.str("message");
+            if (m != null && !m.trim().isEmpty()) return m.trim();
         } catch (RuntimeException ignore) { }
         return "";
     }

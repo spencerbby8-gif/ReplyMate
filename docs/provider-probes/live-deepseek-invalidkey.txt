@@ -1,0 +1,57 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : deepseek
+base URL      : https://api.deepseek.com
+model         : deepseek-chat
+api key       : (set, …0000, 33 chars)
+
+==> REQUEST
+GET https://api.deepseek.com/models
+  header: Authorization: (set, …0000, 40 chars)
+<== RESPONSE
+  HTTP status: 401
+  raw body: {"error":{"message":"Authentication Fails, Your api key: ****0000 is invalid","type":"authentication_error","param":null,"code":"invalid_request_error"}}
+
+APP MAPPING (listModels): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: DeepSeek
+  Endpoint: GET https://api.deepseek.com/models
+  HTTP status: 401
+  Provider said: Authentication Fails, Your api key: ****0000 is invalid
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"error":{"message":"Authentication Fails, Your api key: ****0000 is invalid","type":"authentication_error","param":null,"code":"invalid_request_error"}}
+
+==> REQUEST
+POST https://api.deepseek.com/chat/completions
+  header: Authorization: (set, …0000, 40 chars)
+  body: {"model":"deepseek-chat","messages":[{"role":"system","content":"You write chat replies as the owner."},{"role":"user","content":"Amara: hey, you still coming through on Saturday?"},{"role":"user","content":"Reply as the owner, one short natural text."},{"role":"user","content":"Write the reply now."}],"temperature":0.8,"max_tokens":220,"n":2}
+<== RESPONSE
+  HTTP status: 401
+  raw body: {"error":{"message":"Authentication Fails, Your api key: ****0000 is invalid","type":"authentication_error","param":null,"code":"invalid_request_error"}}
+
+APP MAPPING (generate): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: DeepSeek
+  Endpoint: POST https://api.deepseek.com/chat/completions
+  Model: deepseek-chat
+  HTTP status: 401
+  Provider said: Authentication Fails, Your api key: ****0000 is invalid
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"error":{"message":"Authentication Fails, Your api key: ****0000 is invalid","type":"authentication_error","param":null,"code":"invalid_request_error"}}
+
+---- wrong-model probe: "replymate-audit-no-such-model" ----
+APP MAPPING (wrong model): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: DeepSeek
+  Endpoint: POST https://api.deepseek.com/chat/completions
+  Model: replymate-audit-no-such-model
+  HTTP status: 401
+  Provider said: Authentication Fails, Your api key: ****0000 is invalid
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"error":{"message":"Authentication Fails, Your api key: ****0000 is invalid","type":"authentication_error","param":null,"code":"invalid_request_error"}}
+################ END PROBE ################

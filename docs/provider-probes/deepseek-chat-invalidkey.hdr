@@ -1,0 +1,15 @@
+HTTP/2 401 
+content-type: application/json
+content-length: 153
+date: Fri, 07 Aug 2026 01:10:21 GMT
+server: elb
+vary: origin, access-control-request-method, access-control-request-headers
+access-control-allow-credentials: true
+x-ds-trace-id: 1978cca480b8a286af5565dd5f0b6f9c
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+x-content-type-options: nosniff
+x-cache: Error from cloudfront
+via: 1.1 7a4da31004b531d0a925b24ef55c709e.cloudfront.net (CloudFront)
+x-amz-cf-pop: SEA900-P4
+x-amz-cf-id: esIjfjJHnTtTloxMgunVKVNkBBZQkYabZIfp3VkNfxp6WheHii7Htw==
+

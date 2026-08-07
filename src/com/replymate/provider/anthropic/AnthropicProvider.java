@@ -5,7 +5,7 @@ import com.replymate.core.ai.ChatRequest;
 import com.replymate.core.ports.AiProvider;
 import com.replymate.core.util.Logger;
 import com.replymate.core.util.Result;
-import com.replymate.provider.http.ApiError;
+import com.replymate.provider.http.Diagnostics;
 import com.replymate.provider.http.HttpClient;
 import com.replymate.provider.http.HttpResponse;
 import com.replymate.provider.http.RetryPolicy;
@@ -52,16 +52,17 @@ public final class AnthropicProvider implements AiProvider {
             if (resp.code >= 200 && resp.code < 300) {
                 return AnthropicApi.parseReply(resp.body);
             }
-            ApiError err = AnthropicApi.errorFrom(resp);
-            if (retry.shouldRetry(err, attempt)) {
-                long wait = retry.sleepMillis(attempt - 1, err.retryAfterSeconds);
-                log.w("anthropic", err.type + " (attempt " + attempt + ") — retrying in " + wait + "ms");
+            Diagnostics d = Diagnostics.build(type(), "POST", url, model, resp,
+                AnthropicApi.extractProviderMessage(resp.body));
+            if (retry.shouldRetry(d.error, attempt)) {
+                long wait = retry.sleepMillis(attempt - 1, d.error.retryAfterSeconds);
+                log.w("anthropic", d.oneLiner() + " (attempt " + attempt + ") — retrying in " + wait + "ms");
                 if (!sleepMs(wait)) {
-                    return Result.err(err.type + " — interrupted while retrying");
+                    return Result.err(d.error.type + " — interrupted while retrying");
                 }
                 continue;
             }
-            return Result.err(err.type + " — " + err.message);
+            return Result.err(d.display());
         }
     }
 
@@ -78,8 +79,9 @@ public final class AnthropicProvider implements AiProvider {
         if (resp.code >= 200 && resp.code < 300) {
             return AnthropicApi.parseModels(resp.body);
         }
-        ApiError err = AnthropicApi.errorFrom(resp);
-        return Result.err(err.type + " — " + err.message);
+        Diagnostics d = Diagnostics.build(type(), "GET", AnthropicApi.modelsEndpoint(baseUrl),
+            "", resp, AnthropicApi.extractProviderMessage(resp.body));
+        return Result.err(d.display());
     }
 
     private static boolean sleepMs(long ms) {

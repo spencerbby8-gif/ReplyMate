@@ -76,6 +76,7 @@ public final class ConversationActivity extends Activity {
         msgList = (LinearLayout) findViewById(R.id.msg_list);
         draftList = (LinearLayout) findViewById(R.id.draft_list);
         genStatus = (TextView) findViewById(R.id.gen_status);
+        genStatus.setTextIsSelectable(true);
         draftsHeader = (TextView) findViewById(R.id.drafts_header);
         input = (EditText) findViewById(R.id.msg_input);
         search = (EditText) findViewById(R.id.conv_search);
@@ -251,7 +252,8 @@ public final class ConversationActivity extends Activity {
                     refreshDrafts();
                     scrollToBottom();
                 } else {
-                    showStatus("Couldn't generate: " + withHint(r.error), Ui.RED);
+                    LastProviderError.save(c, r.error);
+                    showStatus("Couldn't generate:\n" + r.error, Ui.RED);
                 }
             }
         });
@@ -451,7 +453,8 @@ public final class ConversationActivity extends Activity {
                         + " variant ✓", Ui.GREEN);
                     refreshDrafts();
                 } else {
-                    showStatus("Transform failed: " + withHint(r.error), Ui.RED);
+                    LastProviderError.save(c, r.error);
+                    showStatus("Transform failed:\n" + r.error, Ui.RED);
                     refreshDrafts();                        // un-freeze the card UI
                 }
             }
@@ -491,19 +494,4 @@ public final class ConversationActivity extends Activity {
     }
 
     /** Error text + actionable hint: offline-friendly messaging for network failures. */
-    private static String withHint(String error) {
-        if (error == null) return "unknown error";
-        String low = error.toLowerCase(Locale.US);
-        if (low.contains("api key") || low.contains("401") || low.contains("403")) {
-            return error + " — check your API key in Settings → AI provider";
-        }
-        if (low.contains("network") || low.contains("timeout") || low.contains("connect")
-                || low.contains("unreachable") || low.contains("socket")) {
-            return error + " — check your internet connection, then tap ✨ again to retry";
-        }
-        if (low.contains("429") || low.contains("quota") || low.contains("rate")) {
-            return error + " — provider limit hit; wait a moment, then retry";
-        }
-        return error;
-    }
 }

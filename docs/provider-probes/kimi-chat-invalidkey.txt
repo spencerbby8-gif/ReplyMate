@@ -1,0 +1,6 @@
+=== kimi-chat-invalidkey ===
+POST https://api.moonshot.ai/v1/chat/completions
+curl args: -H Authorization: Bearer sk-audit-invalid-0000000000000000 -H Content-Type: application/json -d {"model":"AUDIT-MODEL","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hey"}],"temperature":0.8,"max_tokens":220,"n":2} (keys are dummy)
+status: 401
+body:
+{"error":{"message":"Invalid Authentication","type":"invalid_authentication_error"}}

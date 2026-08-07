@@ -1,0 +1,109 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : openrouter
+base URL      : https://openrouter.ai/api/v1
+model         : openai/gpt-4o-mini
+api key       : (set, …0000, 33 chars)
+
+==> REQUEST
+GET https://openrouter.ai/api/v1/models
+  header: Authorization: (set, …0000, 40 chars)
+<== RESPONSE
+  HTTP status: 200
+  raw body: {"data":[{"id":"inclusionai/ling-3.0-tiny:free","canonical_slug":"inclusionai/ling-3.0-tiny-20260806","hugging_face_id":null,"name":"inclusionAI: Ling 3.0 Tiny (free)","created":1786034890,"description":"Ling 3.0 Tiny is a mixture-of-experts model from InclusionAI, with 1.3B active parameters out of 7.9B total. It is designed for responsive agents, instruction following, and multi-turn conversations, with switchable...","context_length":262144,"architecture":{"modality":"text->text","input_modalities":["text"],"output_modalities":["text"],"tokenizer":"Other","instruct_type":null},"pricing":{"prompt":"0","completion":"0"},"top_provider":{"context_length":262144,"max_completion_tokens":32768,"is_moderated":false},"per_request_limits":null,"supported_parameters":["frequency_penalty","include_reasoning","logprobs","max_tokens","presence_penalty","reasoning","repetition_penalty","seed","stop","temperature","tool_choice","tools","top_k","top_logprobs","top_p"],"default_parameters":{},"supported_voices":null,"knowledge_cutoff":null,"expiration_date":null,"links":{"details":"/api/v1/models/inclusionai/ling-3.0-tiny-20260806/endpoints"},"reasoning":{"mandatory":false,"default_enabled":true}…[truncated]
+
+APP MAPPING (listModels): OK — 400 models
+   - ai21/jamba-large-1.7
+   - aion-labs/aion-2.0
+   - aion-labs/aion-3.0
+   - aion-labs/aion-3.0-mini
+   - aion-labs/aion-rp-llama-3.1-8b
+   - allenai/olmo-3-32b-think
+   - amazon/nova-2-lite-v1
+   - amazon/nova-lite-v1
+   - amazon/nova-micro-v1
+   - amazon/nova-premier-v1
+   - amazon/nova-pro-v1
+   - anthracite-org/magnum-v4-72b
+   - anthropic/claude-3-haiku
+   - anthropic/claude-fable-5
+   - anthropic/claude-fable-5:batch
+   - anthropic/claude-haiku-4.5
+   - anthropic/claude-haiku-4.5:batch
+   - anthropic/claude-opus-4
+   - anthropic/claude-opus-4.1
+   - anthropic/claude-opus-4.1:batch
+   - anthropic/claude-opus-4.5
+   - anthropic/claude-opus-4.5:batch
+   - anthropic/claude-opus-4.6
+   - anthropic/claude-opus-4.6:batch
+   - anthropic/claude-opus-4.7
+   - anthropic/claude-opus-4.7-fast
+   - anthropic/claude-opus-4.7:batch
+   - anthropic/claude-opus-4.8
+   - anthropic/claude-opus-4.8-fast
+   - anthropic/claude-opus-4.8:batch
+   - anthropic/claude-opus-5
+   - anthropic/claude-opus-5-fast
+   - anthropic/claude-opus-5:batch
+   - anthropic/claude-sonnet-4
+   - anthropic/claude-sonnet-4.5
+   - anthropic/claude-sonnet-4.5:batch
+   - anthropic/claude-sonnet-4.6
+   - anthropic/claude-sonnet-4.6:batch
+   - anthropic/claude-sonnet-5
+   - anthropic/claude-sonnet-5:batch
+   - arcee-ai/trinity-large-thinking
+   - arcee-ai/virtuoso-large
+   - baidu/ernie-4.5-vl-424b-a47b
+   - bytedance-seed/seed-1.6
+   - bytedance-seed/seed-1.6-flash
+   - bytedance-seed/seed-2.0-lite
+   - bytedance-seed/seed-2.0-mini
+   - bytedance/ui-tars-1.5-7b
+   - cognitivecomputations/dolphin-mistral-24b-venice-edition
+   - cohere/command-a
+   - cohere/command-r-08-2024
+   - cohere/command-r-plus-08-2024
+   - cohere/command-r7b-12-2024
+   - cohere/north-mini-code:free
+   - deepcogito/cogito-v2.1-671b
+   - deepseek/deepseek-chat
+   - deepseek/deepseek-chat-v3-0324
+   - deepseek/deepseek-chat-v3.1
+   - deepseek/deepseek-r1
+   - deepseek/deepseek-r1-0528
+   … (340 more)
+
+==> REQUEST
+POST https://openrouter.ai/api/v1/chat/completions
+  header: Authorization: (set, …0000, 40 chars)
+  body: {"model":"openai/gpt-4o-mini","messages":[{"role":"system","content":"You write chat replies as the owner."},{"role":"user","content":"Amara: hey, you still coming through on Saturday?"},{"role":"user","content":"Reply as the owner, one short natural text."},{"role":"user","content":"Write the reply now."}],"temperature":0.8,"max_tokens":220,"n":2}
+<== RESPONSE
+  HTTP status: 401
+  raw body: {"error":{"message":"Missing Authentication header","code":401}}
+
+APP MAPPING (generate): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: OpenRouter
+  Endpoint: POST https://openrouter.ai/api/v1/chat/completions
+  Model: openai/gpt-4o-mini
+  HTTP status: 401
+  Provider said: Missing Authentication header
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"error":{"message":"Missing Authentication header","code":401}}
+
+---- wrong-model probe: "replymate-audit-no-such-model" ----
+APP MAPPING (wrong model): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: OpenRouter
+  Endpoint: POST https://openrouter.ai/api/v1/chat/completions
+  Model: replymate-audit-no-such-model
+  HTTP status: 401
+  Provider said: Missing Authentication header
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"error":{"message":"Missing Authentication header","code":401}}
+################ END PROBE ################

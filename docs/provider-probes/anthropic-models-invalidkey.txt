@@ -1,0 +1,6 @@
+=== anthropic-models-invalidkey ===
+GET https://api.anthropic.com/v1/models
+curl args: -H x-api-key: sk-ant-audit-invalid-0000000 -H anthropic-version: 2023-06-01 (keys are dummy)
+status: 401
+body:
+{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdnVksabwySVW1VAAZfFz"}

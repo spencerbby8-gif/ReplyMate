@@ -118,16 +118,16 @@ public final class AnthropicApi {
 
     public static ApiError errorFrom(HttpResponse resp) {
         ApiError base = ApiError.of(resp.code, resp.body);
-        String msg = "";
-        try {
-            Object errRaw = com.replymate.core.json.Json.parseObj(resp.body).raw("error");
-            if (errRaw instanceof Map) {
-                Object m = ((Map<?, ?>) errRaw).get("message");
-                if (m instanceof String) msg = (String) m;
-            }
-        } catch (RuntimeException ignore) { }
+        String msg = extractProviderMessage(resp.body);
         return new ApiError(base.type, msg.isEmpty() ? base.message : msg,
             base.retryAfterSeconds);
+    }
+
+    /** Anthropic error envelope (verified live 2026-08-07):
+     *  {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}
+     *  — the error.message form, same tolerant extraction as the OpenAI dialect. */
+    public static String extractProviderMessage(String body) {
+        return com.replymate.provider.openai.OpenAiParser.extractProviderMessage(body);
     }
 
     static String trimBase(String baseUrl) {

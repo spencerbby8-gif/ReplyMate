@@ -1,0 +1,28 @@
+=== gemini-gen-invalidkey ===
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+curl args: -H x-goog-api-key: AIzaSyAUDIT-INVALID-000000000000000000000 -H Content-Type: application/json -d {"contents":[{"role":"user","parts":[{"text":"hey, you still coming on Saturday?"}]}],"systemInstruction":{"parts":[{"text":"You write replies as the owner."}]},"generationConfig":{"candidateCount":2,"temperature":0.8,"maxOutputTokens":220}} (keys are dummy)
+status: 400
+body:
+{
+  "error": {
+    "code": 400,
+    "message": "API key not valid. Please pass a valid API key.",
+    "status": "INVALID_ARGUMENT",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "API_KEY_INVALID",
+        "domain": "googleapis.com",
+        "metadata": {
+          "service": "generativelanguage.googleapis.com"
+        }
+      },
+      {
+        "@type": "type.googleapis.com/google.rpc.LocalizedMessage",
+        "locale": "en-US",
+        "message": "API key not valid. Please pass a valid API key."
+      }
+    ]
+  }
+}
+

@@ -377,6 +377,12 @@ public final class SettingsActivity extends Activity {
         if (notInstalled.length() > 0) {
             out.append("  not installed: ").append(notInstalled).append('\n');
         }
+        // Provider audit: the most recent AI provider failure, verbatim — provider,
+        // endpoint, model, HTTP status, the provider's own words, ReplyMate's read,
+        // and the suggested fix. Written by every failing surface (see LastProviderError).
+        String lastErr = c.kv().get(LastProviderError.KV_KEY, "");
+        out.append("Last AI provider error:\n");
+        out.append(lastErr.isEmpty() ? "  (none recorded)" : lastErr).append('\n');
         return out.toString();
     }
 

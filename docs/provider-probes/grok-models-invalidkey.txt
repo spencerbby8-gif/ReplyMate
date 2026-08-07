@@ -1,0 +1,6 @@
+=== grok-models-invalidkey ===
+GET https://api.x.ai/v1/models
+curl args: -H Authorization: Bearer sk-audit-invalid-0000000000000000 (keys are dummy)
+status: 400
+body:
+{"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}

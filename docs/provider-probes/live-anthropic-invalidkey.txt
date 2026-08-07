@@ -1,0 +1,59 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : anthropic
+base URL      : https://api.anthropic.com
+model         : claude-sonnet-4-5
+api key       : (set, …0000, 28 chars)
+
+==> REQUEST
+GET https://api.anthropic.com/v1/models
+  header: x-api-key: (set, …0000, 28 chars)
+  header: anthropic-version: 2023-06-01
+<== RESPONSE
+  HTTP status: 401
+  raw body: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdnWrp5o3mcwUPwM5kr65"}
+
+APP MAPPING (listModels): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: Anthropic (Claude)
+  Endpoint: GET https://api.anthropic.com/v1/models
+  HTTP status: 401
+  Provider said: invalid x-api-key
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdnWrq3LiZFr7t9KqxXMd"}
+
+==> REQUEST
+POST https://api.anthropic.com/v1/messages
+  header: x-api-key: (set, …0000, 28 chars)
+  header: anthropic-version: 2023-06-01
+  body: {"model":"claude-sonnet-4-5","max_tokens":220,"temperature":0.8,"messages":[{"role":"user","content":"Amara: hey, you still coming through on Saturday?\nReply as the owner, one short natural text.\nWrite the reply now."}],"system":"You write chat replies as the owner."}
+<== RESPONSE
+  HTTP status: 401
+  raw body: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdnWrrAobrpz4TrukXj5W"}
+
+APP MAPPING (generate): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: Anthropic (Claude)
+  Endpoint: POST https://api.anthropic.com/v1/messages
+  Model: claude-sonnet-4-5
+  HTTP status: 401
+  Provider said: invalid x-api-key
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdnWrreKsydRDGYPZScfh"}
+
+---- wrong-model probe: "replymate-audit-no-such-model" ----
+APP MAPPING (wrong model): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: Anthropic (Claude)
+  Endpoint: POST https://api.anthropic.com/v1/messages
+  Model: replymate-audit-no-such-model
+  HTTP status: 401
+  Provider said: invalid x-api-key
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdnWrsFYLhYSHiWo8Co5t"}
+################ END PROBE ################

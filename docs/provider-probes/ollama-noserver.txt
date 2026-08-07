@@ -1,0 +1,7 @@
+=== ollama-noserver ===
+GET http://localhost:11434/v1/models
+curl args:  (keys are dummy)
+curl: (7) Failed to connect to localhost port 11434 after 0 ms: Could not connect to server
+status: 000
+body:
+

@@ -1,0 +1,57 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : grok
+base URL      : https://api.x.ai/v1
+model         : grok-3-mini
+api key       : (set, …0000, 33 chars)
+
+==> REQUEST
+GET https://api.x.ai/v1/models
+  header: Authorization: (set, …0000, 40 chars)
+<== RESPONSE
+  HTTP status: 400
+  raw body: {"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}
+
+APP MAPPING (listModels): ERROR ↓
+  AUTH — The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Provider: Grok (xAI)
+  Endpoint: GET https://api.x.ai/v1/models
+  HTTP status: 400
+  Provider said: Incorrect API key provided. You can obtain an API key from https://console.x.ai.
+  ReplyMate read: The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}
+
+==> REQUEST
+POST https://api.x.ai/v1/chat/completions
+  header: Authorization: (set, …0000, 40 chars)
+  body: {"model":"grok-3-mini","messages":[{"role":"system","content":"You write chat replies as the owner."},{"role":"user","content":"Amara: hey, you still coming through on Saturday?"},{"role":"user","content":"Reply as the owner, one short natural text."},{"role":"user","content":"Write the reply now."}],"temperature":0.8,"max_tokens":220,"n":2}
+<== RESPONSE
+  HTTP status: 400
+  raw body: {"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}
+
+APP MAPPING (generate): ERROR ↓
+  AUTH — The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Provider: Grok (xAI)
+  Endpoint: POST https://api.x.ai/v1/chat/completions
+  Model: grok-3-mini
+  HTTP status: 400
+  Provider said: Incorrect API key provided. You can obtain an API key from https://console.x.ai.
+  ReplyMate read: The provider rejected the API key for this call (yes — this provider reports bad keys as HTTP 400, not 401; verified against its live API).
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}
+
+---- wrong-model probe: "replymate-audit-no-such-model" ----
+APP MAPPING (wrong model): ERROR ↓
+  UNKNOWN — The provider does not recognize this model ("replymate-audit-no-such-model") for this endpoint.
+  Provider: Grok (xAI)
+  Endpoint: POST https://api.x.ai/v1/chat/completions
+  Model: replymate-audit-no-such-model
+  HTTP status: 400
+  Provider said: Model not found: replymate-audit-no-such-model
+  ReplyMate read: The provider does not recognize this model ("replymate-audit-no-such-model") for this endpoint.
+  Suggested fix: Open the provider and tap "Discover models (live)", then pick one from the returned list — hand-typed or remembered names often don't exist or were renamed/retired.
+  — raw provider body —
+  {"code":"invalid-argument","error":"Model not found: replymate-audit-no-such-model"}
+################ END PROBE ################

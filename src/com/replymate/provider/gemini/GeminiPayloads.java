@@ -35,6 +35,14 @@ public final class GeminiPayloads {
     }
 
     public static String generateBody(ChatRequest req) {
+        return generateBody(req, true);
+    }
+
+    /** @param sendCandidates false to omit generationConfig.candidateCount entirely —
+     *  live-verified 2026-08-07: the Gemini 3 generation rejects the field
+     *  ("Multiple candidates is not enabled for this model"), while Gemini 2.x accepts
+     *  multiple candidates. Providers retry without it when the server says so. */
+    public static String generateBody(ChatRequest req, boolean sendCandidates) {
         JsonObj root = JsonObj.create();
 
         root.put("system_instruction", JsonObj.create()
@@ -46,10 +54,13 @@ public final class GeminiPayloads {
         if (req.task != null) contents.add(turnJson(req.task));
         root.put("contents", contents);
 
-        root.put("generationConfig", JsonObj.create()
-            .put("temperature", req.opts.temperature)
-            .put("candidateCount", req.opts.candidates)
-            .put("maxOutputTokens", req.opts.maxOutputTokens));
+        JsonObj genConfig = JsonObj.create()
+            .put("temperature", req.opts.temperature);
+        if (sendCandidates && req.opts.candidates > 1) {
+            genConfig.put("candidateCount", req.opts.candidates);
+        }
+        genConfig.put("maxOutputTokens", req.opts.maxOutputTokens);
+        root.put("generationConfig", genConfig);
 
         return root.toJson();
     }

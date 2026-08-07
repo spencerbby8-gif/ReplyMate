@@ -1,0 +1,57 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : mistral
+base URL      : https://api.mistral.ai/v1
+model         : mistral-small-latest
+api key       : (set, …0000, 33 chars)
+
+==> REQUEST
+GET https://api.mistral.ai/v1/models
+  header: Authorization: (set, …0000, 40 chars)
+<== RESPONSE
+  HTTP status: 401
+  raw body: {"detail":"Invalid API Key"}
+
+APP MAPPING (listModels): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: Mistral
+  Endpoint: GET https://api.mistral.ai/v1/models
+  HTTP status: 401
+  Provider said: Invalid API Key
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"detail":"Invalid API Key"}
+
+==> REQUEST
+POST https://api.mistral.ai/v1/chat/completions
+  header: Authorization: (set, …0000, 40 chars)
+  body: {"model":"mistral-small-latest","messages":[{"role":"system","content":"You write chat replies as the owner."},{"role":"user","content":"Amara: hey, you still coming through on Saturday?"},{"role":"user","content":"Reply as the owner, one short natural text."},{"role":"user","content":"Write the reply now."}],"temperature":0.8,"max_tokens":220,"n":2}
+<== RESPONSE
+  HTTP status: 401
+  raw body: {"detail":"Invalid API Key"}
+
+APP MAPPING (generate): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: Mistral
+  Endpoint: POST https://api.mistral.ai/v1/chat/completions
+  Model: mistral-small-latest
+  HTTP status: 401
+  Provider said: Invalid API Key
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"detail":"Invalid API Key"}
+
+---- wrong-model probe: "replymate-audit-no-such-model" ----
+APP MAPPING (wrong model): ERROR ↓
+  AUTH — The provider rejected the API key for this call.
+  Provider: Mistral
+  Endpoint: POST https://api.mistral.ai/v1/chat/completions
+  Model: replymate-audit-no-such-model
+  HTTP status: 401
+  Provider said: Invalid API Key
+  ReplyMate read: The provider rejected the API key for this call.
+  Suggested fix: Open Settings → AI providers → this provider and re-check the key: paste it exactly with no spaces, or generate a fresh one from the provider's console.
+  — raw provider body —
+  {"detail":"Invalid API Key"}
+################ END PROBE ################

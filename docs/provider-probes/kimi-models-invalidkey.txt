@@ -1,0 +1,6 @@
+=== kimi-models-invalidkey ===
+GET https://api.moonshot.ai/v1/models
+curl args: -H Authorization: Bearer sk-audit-invalid-0000000000000000 (keys are dummy)
+status: 401
+body:
+{"error":{"message":"Invalid Authentication","type":"invalid_authentication_error"}}

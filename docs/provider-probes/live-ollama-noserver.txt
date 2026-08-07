@@ -1,0 +1,55 @@
+################ REPLYMATE LIVE PROVIDER PROBE ################
+provider wire : ollama
+base URL      : http://localhost:11434/v1
+model         : llama3.1
+api key       : (none)
+
+==> REQUEST
+GET http://localhost:11434/v1/models
+  header: Authorization: (set, …er -, 8 chars)
+<== RESPONSE
+  HTTP status: NO RESPONSE (transport: Connection refused (Connection refused))
+  raw body: 
+
+APP MAPPING (listModels): ERROR ↓
+  NETWORK — No response from the server (Connection refused (Connection refused)).
+  Provider: Ollama (local)
+  Endpoint: GET http://localhost:11434/v1/models
+  HTTP status: no response (transport failure)
+  Provider said: (no message in the reply body)
+  ReplyMate read: No response from the server (Connection refused (Connection refused)).
+  Suggested fix: This is a local/self-hosted server — make sure it is running (for Ollama: the Ollama app or `ollama serve`), that the device can reach the host, and that the base URL + port are right.
+
+==> REQUEST
+POST http://localhost:11434/v1/chat/completions
+  header: Authorization: (set, …er -, 8 chars)
+  body: {"model":"llama3.1","messages":[{"role":"system","content":"You write chat replies as the owner."},{"role":"user","content":"Amara: hey, you still coming through on Saturday?"},{"role":"user","content":"Reply as the owner, one short natural text."},{"role":"user","content":"Write the reply now."}],"temperature":0.8,"max_tokens":220,"n":2}
+<== RESPONSE
+  HTTP status: NO RESPONSE (transport: Connection refused (Connection refused))
+  raw body: 
+
+  [log.w ollama] NETWORK — No response from the server (Connection refused (Connection refused)). (attempt 1) — retrying in 545ms
+  [log.w ollama] NETWORK — No response from the server (Connection refused (Connection refused)). (attempt 2) — retrying in 1073ms
+APP MAPPING (generate): ERROR ↓
+  NETWORK — No response from the server (Connection refused (Connection refused)).
+  Provider: Ollama (local)
+  Endpoint: POST http://localhost:11434/v1/chat/completions
+  Model: llama3.1
+  HTTP status: no response (transport failure)
+  Provider said: (no message in the reply body)
+  ReplyMate read: No response from the server (Connection refused (Connection refused)).
+  Suggested fix: This is a local/self-hosted server — make sure it is running (for Ollama: the Ollama app or `ollama serve`), that the device can reach the host, and that the base URL + port are right.
+
+---- wrong-model probe: "replymate-audit-no-such-model" ----
+  [log.w ollama] NETWORK — No response from the server (Connection refused (Connection refused)). (attempt 1) — retrying in 545ms
+  [log.w ollama] NETWORK — No response from the server (Connection refused (Connection refused)). (attempt 2) — retrying in 1073ms
+APP MAPPING (wrong model): ERROR ↓
+  NETWORK — No response from the server (Connection refused (Connection refused)).
+  Provider: Ollama (local)
+  Endpoint: POST http://localhost:11434/v1/chat/completions
+  Model: replymate-audit-no-such-model
+  HTTP status: no response (transport failure)
+  Provider said: (no message in the reply body)
+  ReplyMate read: No response from the server (Connection refused (Connection refused)).
+  Suggested fix: This is a local/self-hosted server — make sure it is running (for Ollama: the Ollama app or `ollama serve`), that the device can reach the host, and that the base URL + port are right.
+################ END PROBE ################

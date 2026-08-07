@@ -1,0 +1,6 @@
+=== deepseek-models-invalidkey ===
+GET https://api.deepseek.com/models
+curl args: -H Authorization: Bearer sk-audit-invalid-0000000000000000 (keys are dummy)
+status: 401
+body:
+{"error":{"message":"Authentication Fails, Your api key: ****0000 is invalid","type":"authentication_error","param":null,"code":"invalid_request_error"}}

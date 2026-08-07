@@ -1,0 +1,7 @@
+=== mistral-models-invalidkey ===
+GET https://api.mistral.ai/v1/models
+curl args: -H Authorization: Bearer sk-audit-invalid-0000000000000000 (keys are dummy)
+status: 401
+body:
+{"detail":"Invalid API Key"}
+

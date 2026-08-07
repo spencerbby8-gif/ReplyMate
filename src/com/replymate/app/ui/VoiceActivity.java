@@ -79,6 +79,7 @@ public final class VoiceActivity extends Activity {
         root.addView(Ui.sub(this,
             "Runs one real AI reply over a sample chat using your saved voice (uses your configured provider; counted in usage)."));
         previewOut = Ui.sub(this, "");
+        previewOut.setTextIsSelectable(true);
         previewOut.setPadding(0, Ui.dp(this, 6), 0, 0);
         root.addView(previewOut);
         previewBtn = Ui.btn(this, "Preview replies with this voice");
@@ -120,7 +121,8 @@ public final class VoiceActivity extends Activity {
                     previewBusy = false;
                     previewBtn.setEnabled(true);
                     if (!r.ok) {
-                        previewOut.setText("Preview failed: " + r.error);
+                        LastProviderError.save(c, r.error);
+                        previewOut.setText("Preview failed:\n" + r.error);
                         previewOut.setTextColor(Ui.RED);
                         return;
                     }

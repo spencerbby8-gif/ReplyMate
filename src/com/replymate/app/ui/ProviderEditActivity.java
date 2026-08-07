@@ -109,6 +109,7 @@ public final class ProviderEditActivity extends Activity {
         root.addView(keyHint);
 
         status = Ui.sub(this, "");
+        status.setTextIsSelectable(true);   // audit: raw provider diagnostics must be copyable
         status.setPadding(0, Ui.dp(this, 10), 0, 0);
         root.addView(status);
 
@@ -249,7 +250,8 @@ public final class ProviderEditActivity extends Activity {
         }, new Tasks.Done<Result<List<String>>>() {
             @Override public void accept(Result<List<String>> r) {
                 if (!r.ok) {
-                    showStatus("Couldn't list models: " + withHint(r.error), Ui.RED);
+                    LastProviderError.save(c, r.error);
+                    showStatus("Couldn't list models:\n" + r.error, Ui.RED);
                     return;
                 }
                 showStatus(r.value.size() + " models — tap one to use it:", Ui.GREEN);
@@ -287,7 +289,8 @@ public final class ProviderEditActivity extends Activity {
         }, new Tasks.Done<Result<Boolean>>() {
             @Override public void accept(Result<Boolean> r) {
                 if (!r.ok || !Boolean.TRUE.equals(r.value)) {
-                    showStatus("Connection failed: " + withHint(r.error), Ui.RED);
+                    LastProviderError.save(c, r.error);
+                    showStatus("Connection failed:\n" + r.error, Ui.RED);
                 } else {
                     if (!key.isEmpty()) c.registerSensitive(key);
                     showStatus("Connection OK ✓ — provider is reachable"
@@ -353,19 +356,4 @@ public final class ProviderEditActivity extends Activity {
     }
 
     /** Error text + actionable hint (mirrors Conversation UX, offline-friendly). */
-    private static String withHint(String error) {
-        if (error == null) return "unknown error";
-        String low = error.toLowerCase(java.util.Locale.US);
-        if (low.contains("auth") || low.contains("401") || low.contains("403")) {
-            return error + " — check the API key";
-        }
-        if (low.contains("network") || low.contains("timeout") || low.contains("connect")
-                || low.contains("unreachable") || low.contains("socket")) {
-            return error + " — no connection (for Ollama: make sure the server is running)";
-        }
-        if (low.contains("429") || low.contains("quota")) {
-            return error + " — provider limit hit; wait a moment";
-        }
-        return error;
-    }
 }
