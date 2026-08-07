@@ -102,6 +102,45 @@ public class PromptBuilderTest {
         assertNotNull(req.task);
     }
 
+    /* ---------------- P-audit-deep: content-kind honesty in the task turn ---------- */
+
+    @Test public void captionedPhotoTaskDisclosesUnseenMediaAndQuotesTheCaption() {
+        Contact c = Fakes.contact(1, "Amara");
+        List<Message> thread = new ArrayList<Message>();
+        Message photo = Fakes.msg(1, Direction.INCOMING, "rate this fit");
+        photo.contentKind = "image";
+        photo.channel = com.replymate.core.model.Channel.WHATSAPP;
+        thread.add(photo);
+        ChatRequest req = PromptBuilder.build(new PromptBundle(profile("K"), c, "", thread));
+        assertTrue(req.task.text.contains("rate this fit"));
+        assertTrue("task must admit the photo cannot be seen",
+            req.task.text.contains("cannot see"));
+        assertTrue(req.task.text.contains("WhatsApp"));
+    }
+
+    @Test public void missedCallTaskAnswersWithoutInventingSpeech() {
+        Contact c = Fakes.contact(1, "Amara");
+        List<Message> thread = new ArrayList<Message>();
+        Message call = Fakes.msg(1, Direction.INCOMING, "Missed voice call");
+        call.contentKind = "call";
+        call.channel = com.replymate.core.model.Channel.WHATSAPP;
+        thread.add(call);
+        ChatRequest req = PromptBuilder.build(new PromptBundle(profile("K"), c, "", thread));
+        assertTrue(req.task.text.contains("Missed voice call"));
+        assertTrue("never invent what was said on the call",
+            req.task.text.contains("never invent what was said"));
+    }
+
+    @Test public void plainTextTaskCarriesNoMediaDisclosure() {
+        Contact c = Fakes.contact(1, "Amara");
+        List<Message> thread = new ArrayList<Message>();
+        Message t = Fakes.msg(1, Direction.INCOMING, "you dey around?");
+        t.channel = com.replymate.core.model.Channel.WHATSAPP;
+        thread.add(t);
+        ChatRequest req = PromptBuilder.build(new PromptBundle(profile("K"), c, "", thread));
+        assertFalse(req.task.text.contains("cannot see"));
+    }
+
     private static String big(int len) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < len; i++) sb.append('x');

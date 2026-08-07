@@ -83,6 +83,28 @@ public class OpenAiDialectTest {
         assertEquals(Arrays.asList("alpha", "zeta"), r.value);
     }
 
+    /* --------------- P-audit-deep: finish_reason "length" is never a draft ---------- */
+
+    @Test public void allChoicesCutAtLengthIsTruncationError() {
+        String body = "{\"choices\":["
+            + "{\"message\":{\"role\":\"assistant\",\"content\":\"half a th\"},\"finish_reason\":\"length\"}"
+            + "],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":220}}";
+        Result<ChatReply> r = OpenAiParser.parseReply(body);
+        assertFalse(r.ok);
+        assertTrue("got: " + r.error, r.error.startsWith("TRUNCATED"));
+        assertTrue(r.error.contains("output-token limit"));
+    }
+
+    @Test public void finishedChoicesSurviveWhenOthersHitLength() {
+        String body = "{\"choices\":["
+            + "{\"message\":{\"content\":\"done and complete\"},\"finish_reason\":\"stop\"},"
+            + "{\"message\":{\"content\":\"cut\"},\"finish_reason\":\"length\"}]}";
+        Result<ChatReply> r = OpenAiParser.parseReply(body);
+        assertTrue(r.ok);
+        assertEquals(1, r.value.variants.size());
+        assertEquals("done and complete", r.value.variants.get(0));
+    }
+
     @Test public void errorsCarryTheProvidersOwnMessage() {
         String msg = OpenAiParser.extractProviderMessage(
             "{\"error\":{\"message\":\"Invalid API key\",\"type\":\"authentication_error\"}}");

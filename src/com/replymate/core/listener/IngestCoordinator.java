@@ -74,17 +74,38 @@ public final class IngestCoordinator {
 
             String convTitle = IdentityResolver.firstNonEmpty(
                 e.conversationTitle, e.senderName, "Unknown");
-            String remoteKey = IdentityResolver.remoteKeyFor(convTitle, e.group);
+            java.util.List<String> keys = IdentityResolver.keyCandidates(
+                e.conversationId, convTitle, e.group);
+            String remoteKey = keys.get(0);
             Contact contact = contactService.ensureChannelContact(
-                e.channel, remoteKey, IdentityResolver.displayNameFor(convTitle));
+                e.channel, remoteKey, IdentityResolver.displayNameFor(convTitle), keys);
 
-            Direction dir = MessageClassifier.directionFor(e.senderName, e.ownerName);
+            Direction dir = MessageClassifier.directionFor(
+                e.senderName, e.ownerName, e.senderKey, e.ownerKey);
+
+            // Content kind decided ONCE, from notification evidence (P-audit-deep) —
+            // never from which app sent it. Media-only items get an honest per-kind
+            // placeholder body; a real caption (text with media) is kept verbatim.
+            com.replymate.core.model.ContentKind kind = e.contentKind != null
+                ? e.contentKind
+                : ContentSignals.classify(e.mediaMime, e.hasAttachment, e.text);
             boolean emptyText = e.text == null || e.text.trim().isEmpty();
-            String body = emptyText ? ListenerFilter.MEDIA_PLACEHOLDER : e.text.trim();
+            String body;
+            if (kind != null && kind.isUnreadable()
+                    && (emptyText || ContentSignals.isFallbackShape(e.text))) {
+                body = kind.placeholder();
+            } else {
+                body = emptyText ? ListenerFilter.MEDIA_PLACEHOLDER : e.text.trim();
+            }
 
             long ts = e.timestampMs > 0 ? e.timestampMs : clock.now();
+            // Dedupe key is built from the RAW text + kind (stable across app
+            // versions), not from our placeholder wording.
+            String keyBody = kind != null && kind.isUnreadable()
+                ? "|" + kind.wire + "|" + (e.text == null ? "" : e.text.trim())
+                : body;
             String notifKey = TextIds.computeNotifKey(
-                e.channel.wire, remoteKey, e.senderName, body, ts);
+                e.channel.wire, remoteKey, e.senderName, keyBody, ts);
 
             if (messages.getByNotifKey(e.channel, notifKey) != null) {
                 rep.duplicates++;
@@ -99,6 +120,11 @@ public final class IngestCoordinator {
             m.sentAt = ts;
             m.notifKey = notifKey;
             m.source = Source.LISTENER;
+            m.contentKind = (kind == null ? com.replymate.core.model.ContentKind.TEXT : kind).wire;
+            if (kind != null && kind.isMedia()) {
+                m.mediaMime = e.mediaMime == null ? "" : e.mediaMime;
+                m.mediaUri = e.mediaUri == null ? "" : e.mediaUri;
+            }
             messages.insertIgnore(m);
             rep.stored++;
 

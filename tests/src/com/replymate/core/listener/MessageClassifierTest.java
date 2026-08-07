@@ -23,4 +23,26 @@ public class MessageClassifierTest {
     @Test public void nullSenderDefaultsToIncoming() {
         assertEquals(Direction.INCOMING, MessageClassifier.directionFor(null, "Kelechi"));
     }
+
+    /* ---------------- P-audit-deep: Person keys beat display names ---------------- */
+
+    @Test public void matchingPersonKeysAreOutgoingEvenWhenNamesDiffer() {
+        assertEquals(Direction.OUTGOING,
+            MessageClassifier.directionFor("Kelechi (work)", "Kelechi", "jid-owner", "jid-owner"));
+    }
+
+    @Test public void differentKeysAreIncomingEvenWhenNamesMatch() {
+        // contact literally shares the owner's display name — names would lie
+        assertEquals(Direction.INCOMING,
+            MessageClassifier.directionFor("Kelechi", "Kelechi", "jid-contact", "jid-owner"));
+    }
+
+    @Test public void missingKeysFallBackToNameComparison() {
+        assertEquals(Direction.OUTGOING,
+            MessageClassifier.directionFor("Kelechi", "Kelechi", null, "jid-owner"));
+        assertEquals(Direction.OUTGOING,
+            MessageClassifier.directionFor("Kelechi", "Kelechi", "", ""));
+        assertEquals(Direction.INCOMING,
+            MessageClassifier.directionFor("Amara", "Kelechi", "jid-contact", null));
+    }
 }

@@ -167,4 +167,115 @@ public class IngestCoordinatorTest {
         assertTrue(DiagnosticsRing.lines(kv.get(IngestCoordinator.KV_RING, "")).size()
             <= DiagnosticsRing.CAP);
     }
+
+    /* --------------- P-audit-deep: content kinds + media pipeline + identity --------- */
+
+    private static NotifEvent media(Channel ch, String conv, String text,
+                                    String mime, String uri,
+                                    com.replymate.core.model.ContentKind kind) {
+        NotifEvent e = ev(ch, conv, conv, "Me", text, 1000L, false, true);
+        e.contentKind = kind;
+        e.mediaMime = mime;
+        e.mediaUri = uri;
+        return e;
+    }
+
+    @Test public void mediaOnlyStoredWithKindPlaceholderMimeAndUriNoPing() {
+        engine.handle(list(media(Channel.WHATSAPP, "Amara", "📷 Photo",
+            "image/jpeg", "content://wa/123", com.replymate.core.model.ContentKind.IMAGE)), allOn());
+        Contact c = contacts.all().get(0);
+        Message m = messages.lastMessages(c.id, 1).get(0);
+        assertEquals(com.replymate.core.model.ContentKind.IMAGE.placeholder(), m.body);
+        assertEquals("image", m.contentKind);
+        assertEquals("image/jpeg", m.mediaMime);
+        assertEquals("content://wa/123", m.mediaUri);
+        assertEquals(com.replymate.core.model.ContentKind.IMAGE, m.effectiveKind());
+    }
+
+    @Test public void captionedMediaKeepsTheCaptionAndTheKind() {
+        engine.handle(list(media(Channel.WHATSAPP, "Amara", "rate this fit",
+            "image/jpeg", "content://wa/441", com.replymate.core.model.ContentKind.IMAGE)), allOn());
+        Contact c = contacts.all().get(0);
+        Message m = messages.lastMessages(c.id, 1).get(0);
+        assertEquals("rate this fit", m.body);          // the REAL text, answerable
+        assertEquals("image", m.contentKind);           // …but honestly flagged as photo
+        assertEquals(com.replymate.core.model.ContentKind.IMAGE, m.effectiveKind());
+    }
+
+    @Test public void missedCallStoredAsCallEventNoPing() {
+        NotifEvent call = media(Channel.WHATSAPP, "Amara", "Missed voice call",
+            null, null, com.replymate.core.model.ContentKind.CALL);
+        call.hasAttachment = false;
+        IngestReport rep = engine.handle(list(call), allOn());
+        assertEquals(1, rep.stored);
+        assertEquals(0, rep.pings.size());
+        Contact c = contacts.all().get(0);
+        Message m = messages.lastMessages(c.id, 1).get(0);
+        assertEquals("Missed voice call", m.body);
+        assertEquals(com.replymate.core.model.ContentKind.CALL, m.effectiveKind());
+        assertEquals("", m.mediaUri);      // calls never carry media references
+    }
+
+    @Test public void mediaRowsNeverLeakMimeOrUriIntoTextMessages() {
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "hello there", 777L, false, false),
+            media(Channel.WHATSAPP, "Amara", "🎥 Video", "video/mp4", "content://wa/v9",
+                com.replymate.core.model.ContentKind.VIDEO)), allOn());
+        Contact c = contacts.all().get(0);
+        java.util.List<Message> thread = messages.lastMessages(c.id, 10);
+        assertEquals("", thread.get(0).mediaMime);   // text row stays clean
+        assertEquals("", thread.get(0).mediaUri);
+        assertEquals("video/mp4", thread.get(1).mediaMime);
+    }
+
+    @Test public void identicalMediaRepostDedupesAcrossPlaceholderGenerations() {
+        IngestReport first = engine.handle(list(media(Channel.WHATSAPP, "Amara", "📷 Photo",
+            "image/jpeg", "content://wa/123", com.replymate.core.model.ContentKind.IMAGE)), allOn());
+        assertEquals(1, first.stored);
+        IngestReport second = engine.handle(list(media(Channel.WHATSAPP, "Amara", "📷 Photo",
+            "image/jpeg", "content://wa/123", com.replymate.core.model.ContentKind.IMAGE)), allOn());
+        assertEquals(0, second.stored);
+        assertEquals(1, second.duplicates);
+    }
+
+    @Test public void nativeConversationIdBecomesThePrimaryIdentity() {
+        NotifEvent e = ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "hey", 1000L, false, false);
+        e.conversationId = "23480@s.whatsapp.net";
+        engine.handle(list(e), allOn());
+        assertEquals(1, contacts.all().size());
+        assertNotNull(contacts.findChannel(Channel.WHATSAPP, "cid:23480@s.whatsapp.net"));
+    }
+
+    @Test public void identityUpgradesRelinkWithoutForkingTheContact() {
+        // first: legacy app — title key only
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "first", 1000L, false, false)), allOn());
+        // later: same chat now publishes its native thread id
+        NotifEvent e2 = ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "second", 2000L, false, false);
+        e2.conversationId = "23480@s.whatsapp.net";
+        engine.handle(list(e2), allOn());
+        assertEquals("no contact fork on identity upgrade", 1, contacts.all().size());
+        Contact c = contacts.all().get(0);
+        assertEquals(2, countMessages(c.id));
+        assertNotNull(contacts.findChannel(Channel.WHATSAPP, "cid:23480@s.whatsapp.net"));
+    }
+
+    @Test public void directionFollowsPersonKeysWhenNamesAreAmbiguous() {
+        // owner AND a contact both named "Kelechi": the app-published keys decide
+        NotifEvent mine = ev(Channel.WHATSAPP, "Kelechi", "Kelechi", "Kelechi", "my own reply", 1000L, false, false);
+        mine.senderKey = "jid-owner";
+        mine.ownerKey = "jid-owner";
+        NotifEvent theirs = ev(Channel.WHATSAPP, "Kelechi", "Kelechi", "Kelechi", "hey from the other kelechi", 2000L, false, false);
+        theirs.senderKey = "jid-contact";
+        theirs.ownerKey = "jid-owner";
+        engine.handle(list(mine, theirs), allOn());
+        Contact c = contacts.all().get(0);
+        java.util.List<Message> thread = messages.lastMessages(c.id, 10);
+        assertEquals(Direction.OUTGOING, thread.get(0).direction);
+        assertEquals(Direction.INCOMING, thread.get(1).direction);
+    }
+
+    private int countMessages(long contactId) {
+        return messages.countByContact(contactId);
+    }
 }

@@ -126,4 +126,95 @@ public class MessagingStyleParserTest {
             assertEquals("category " + cat, NotifParser.Result.Kind.EVENTS, parser.parse(raw).kind);
         }
     }
+
+    /* ---------------- P-audit-deep: content kinds, media data, identity ---------------- */
+
+    private static RawNotif.Entry mediaEntry(String text, String mime, String uri) {
+        RawNotif.Entry e = ParserFixtures.msg(text, 1000L, "Amara", true);
+        e.mimeType = mime;
+        e.dataUri = uri;
+        return e;
+    }
+
+    @Test public void photoFallbackClassifiedImageWithMediaReferenceKept() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.messages.add(mediaEntry("📷 Photo", "image/jpeg", "content://wa/123"));
+        NotifEvent e = parser.parse(raw).events.get(0);
+        assertEquals(com.replymate.core.model.ContentKind.IMAGE, e.contentKind);
+        assertTrue(e.hasAttachment);
+        assertEquals("image/jpeg", e.mediaMime);
+        assertEquals("content://wa/123", e.mediaUri);
+    }
+
+    @Test public void voiceNoteWithDurationClassifiedVoice() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.messages.add(mediaEntry("🎤 Voice message (0:07)", "audio/ogg; codecs=opus", "content://wa/vn7"));
+        assertEquals(com.replymate.core.model.ContentKind.VOICE, parser.parse(raw).events.get(0).contentKind);
+    }
+
+    @Test public void videoAndStickerClassifiedFromEvidence() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.messages.add(mediaEntry("🎥 Video", "video/mp4", "content://wa/v9"));
+        raw.messages.add(mediaEntry("Sticker", "image/webp", "content://wa/st1"));
+        assertEquals(com.replymate.core.model.ContentKind.VIDEO, parser.parse(raw).events.get(0).contentKind);
+        assertEquals(com.replymate.core.model.ContentKind.STICKER, parser.parse(raw).events.get(1).contentKind);
+    }
+
+    @Test public void captionedPhotoStaysImageButTextIsPreserved() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.messages.add(mediaEntry("rate this fit", "image/jpeg", "content://wa/441"));
+        NotifEvent e = parser.parse(raw).events.get(0);
+        assertEquals(com.replymate.core.model.ContentKind.IMAGE, e.contentKind);
+        assertEquals("rate this fit", e.text);   // the caption — real, answerable text
+    }
+
+    @Test public void emptyAttachmentIsUnknownMediaNotText() {
+        RawNotif raw = ParserFixtures.raw("org.telegram.messenger");
+        raw.title = "Sam";
+        raw.messages.add(ParserFixtures.msg(null, 1000L, "Sam", true));  // attach flag, no mime
+        NotifEvent e = parser.parse(raw).events.get(0);
+        assertEquals(com.replymate.core.model.ContentKind.UNKNOWN, e.contentKind);
+        assertTrue(e.hasAttachment);
+    }
+
+    @Test public void singleShotPhotoFallbackDetectedWithoutAnyEntries() {
+        // BigPicture-style apps post EXTRA_TEXT "📷 Photo" with NO messages array
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.text = "📷 Photo";
+        NotifEvent e = parser.parse(raw).events.get(0);
+        assertEquals(com.replymate.core.model.ContentKind.IMAGE, e.contentKind);
+        assertTrue(e.hasAttachment);
+    }
+
+    @Test public void missedCallCategoryProducesCallEvent() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.text = "Missed voice call";
+        raw.category = "call";
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals(NotifParser.Result.Kind.EVENTS, r.kind);
+        assertEquals(com.replymate.core.model.ContentKind.CALL, r.events.get(0).contentKind);
+        assertEquals("Missed voice call", r.events.get(0).text);
+    }
+
+    @Test public void nativeIdentityFieldsPropagateUntouched() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.conversationId = "2348012345678@s.whatsapp.net";   // WhatsApp's OWN thread id
+        raw.ownerKey = "owner-jid";
+        RawNotif.Entry e = ParserFixtures.msg(ParserFixtures.T_GREET, 1000L, "Amara", false);
+        e.senderKey = "amara-jid";
+        e.senderUri = "tel:+2348012345678";
+        raw.messages.add(e);
+        NotifEvent parsed = parser.parse(raw).events.get(0);
+        assertEquals("2348012345678@s.whatsapp.net", parsed.conversationId);
+        assertEquals("amara-jid", parsed.senderKey);
+        assertEquals("tel:+2348012345678", parsed.senderUri);
+        assertEquals("owner-jid", parsed.ownerKey);
+    }
 }

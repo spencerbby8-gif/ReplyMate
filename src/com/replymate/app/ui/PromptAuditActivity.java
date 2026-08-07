@@ -172,9 +172,29 @@ public final class PromptAuditActivity extends Activity {
                 String text = str(latest, "text");
                 if (text.length() > 300) text = text.substring(0, 300) + "…";
                 sb.append("Latest incoming answered (").append(str(latest, "channel"));
+                String app = str(latest, "app");
+                if (!app.isEmpty()) sb.append(" · ").append(app);
                 long at = latest.lng("at", 0);
                 if (at > 0) sb.append(" · ").append(TimeFmt.dayTime(at));
                 sb.append("): \"").append(text).append("\"\n");
+                String kind = str(latest, "contentType");
+                if (!kind.isEmpty()) {
+                    sb.append("Content type detected: ").append(kind).append('\n');
+                }
+                String mediaRef = str(latest, "mediaRef");
+                if (!mediaRef.isEmpty() && !"none".equals(mediaRef)) {
+                    sb.append("Media reference: ").append(mediaRef).append('\n');
+                }
+            }
+            com.replymate.core.json.JsonObj source = root.obj("source");
+            if (source != null) {
+                sb.append("Source identity: ").append(str(source, "identity"))
+                  .append(" (confidence: ").append(str(source, "confidence"))
+                  .append(")\n");
+            }
+            String reason = str(root, "reason");
+            if (!reason.isEmpty()) {
+                sb.append("Reason: ").append(reason).append('\n');
             }
             Long turns = root.lng("contextTurns", -1);
             if (turns != null && turns > 0) {

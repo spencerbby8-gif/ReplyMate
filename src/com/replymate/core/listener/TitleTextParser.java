@@ -26,6 +26,16 @@ public class TitleTextParser implements NotifParser {
                     && !"message".equals(raw.category)) {
                 return Result.ignore("non-message category: " + raw.category);
             }
+            // Call-category notifications are never chat messages: store only a
+            // FINISHED call outcome (missed/declined) as a CALL event; ringing /
+            // ongoing state is noise regardless of the message-category setting.
+            boolean callOutcome = raw.category != null && "call".equals(raw.category);
+            if (callOutcome && !ContentSignals.isCallEvent(
+                    MessagingStyleParser.trim(raw.text).isEmpty()
+                        ? MessagingStyleParser.trim(raw.bigText)
+                        : MessagingStyleParser.trim(raw.text))) {
+                return Result.ignore("non-final call state");
+            }
             boolean group = raw.group != null && raw.group.booleanValue();
             if (!group) group = looksLikeGroup(raw);
 
@@ -40,7 +50,13 @@ public class TitleTextParser implements NotifParser {
                         e.text = m.text;
                         e.timestampMs = m.timestampMs > 0 ? m.timestampMs : raw.postTimeMs;
                         e.senderName = m.senderName;
+                        e.senderKey = m.senderKey;
+                        e.senderUri = m.senderUri;
                         e.hasAttachment = m.hasAttachment;
+                        e.mediaMime = m.mimeType;
+                        e.mediaUri = m.dataUri;
+                        MessagingStyleParser.classify(e, m.mimeType, m.hasAttachment,
+                            m.text, false);
                         out.add(e);
                     }
                     return Result.events(out);
@@ -51,11 +67,14 @@ public class TitleTextParser implements NotifParser {
             String title = MessagingStyleParser.trim(raw.title);
             String sender = senderFrom(raw, text);
             String body = bodyFrom(raw, text, sender);
+            boolean callEvent = raw.category != null && "call".equals(raw.category)
+                && ContentSignals.isCallEvent(body);
 
             NotifEvent e = base(raw, group);
             e.text = body;
             e.senderName = sender;
             e.timestampMs = raw.postTimeMs;
+            MessagingStyleParser.classify(e, null, false, body, callEvent);
             if (sender != null && title.regionMatches(true, 0, sender, 0, sender.length())) {
                 // "Title == sender" is the strongest identity hint these apps give
                 e.conversationTitle = title;

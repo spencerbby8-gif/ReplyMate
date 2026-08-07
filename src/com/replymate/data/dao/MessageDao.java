@@ -39,6 +39,9 @@ public final class MessageDao {
         if (m.notifKey == null) v.putNull("notif_key");
         else v.put("notif_key", m.notifKey);
         v.put("source", m.source.wire);
+        v.put("content_type", m.contentKind == null ? "" : m.contentKind);
+        v.put("media_mime", m.mediaMime == null ? "" : m.mediaMime);
+        v.put("media_uri", m.mediaUri == null ? "" : m.mediaUri);
         return v;
     }
 
@@ -121,6 +124,18 @@ public final class MessageDao {
         int nk = c.getColumnIndexOrThrow("notif_key");
         o.notifKey = c.isNull(nk) ? null : c.getString(nk);
         o.source = Source.fromWire(c.getString(c.getColumnIndexOrThrow("source")));
+        o.contentKind = safe(c, "content_type");
+        o.mediaMime = safe(c, "media_mime");
+        o.mediaUri = safe(c, "media_uri");
         return o;
+    }
+
+    /** Column present since schema v5 — read defensively so a pre-v5 database opened
+     *  without migration (should never happen; belt and braces) can't crash us. */
+    private static String safe(Cursor c, String column) {
+        int i = c.getColumnIndex(column);
+        if (i < 0 || c.isNull(i)) return "";
+        String v = c.getString(i);
+        return v == null ? "" : v;
     }
 }

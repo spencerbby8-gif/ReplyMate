@@ -88,19 +88,26 @@ public final class DraftService {
                 + " first, so I know what to reply to.");
         }
 
-        // P-context-honesty: the reply MUST answer the latest incoming message, so it has
-        // to be readable text. Media-only notifications (photo/video/sticker/voice/call)
-        // get an honest explanation + safe fallback — never a hallucinated reply.
+        // P-context-honesty (extended P-audit-deep): the reply MUST answer the latest
+        // incoming message, so it has to be readable text. Media-only / empty items
+        // get an honest, KIND-SPECIFIC explanation + safe fallback — never a
+        // hallucinated reply and never a provider call (no money burned guessing).
         if (!PromptBuilder.usableText(lastIncoming.body)) {
             String app = com.replymate.core.listener.WatchedApps.labelFor(lastIncoming.channel);
-            boolean media = com.replymate.core.listener.ListenerFilter.MEDIA_PLACEHOLDER
-                .equals(lastIncoming.body == null ? "" : lastIncoming.body.trim());
-            return Result.err("The latest " + app + " message from " + c.displayName
-                + (media
-                    ? " is media (a photo, video, sticker, voice note or a call) — ReplyMate can't read its content."
-                    : " has no readable text.")
+            com.replymate.core.model.ContentKind kind = lastIncoming.effectiveKind();
+            String what = kind == null || kind == com.replymate.core.model.ContentKind.TEXT
+                ? " has no readable text."
+                : " is " + kind.label() + " — ReplyMate "
+                    + kindExplanation(kind) + ".";
+            boolean mediaRef = kind != null && kind.isMedia()
+                && !lastIncoming.mediaUri.trim().isEmpty();
+            return Result.err("The latest " + app + " item from " + c.displayName + what
+                + (mediaRef
+                    ? " The notification did share a file reference; it stays on this phone —"
+                        + " ReplyMate never opens or uploads media."
+                    : " The notification also carried no usable media reference.")
                 + " I won't invent a reply without their actual words. Open " + app
-                + " to read it, or type their message into this chat and generate again.");
+                + " to check it, or type their message into this chat and generate again.");
         }
 
         String styleRules = "";
@@ -135,10 +142,7 @@ public final class DraftService {
         String group = ids.next();
         String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
         String snapshot = PromptBuilder.snapshot(request, model, "reply", why,
-            com.replymate.core.prompt.AuditContext.of(gateway.activeMeta(),
-                lastIncoming.body,
-                com.replymate.core.listener.WatchedApps.labelFor(lastIncoming.channel),
-                lastIncoming.sentAt));
+            auditContextFor(c, lastIncoming));
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
 
         List<Draft> saved = new ArrayList<Draft>();
@@ -173,6 +177,65 @@ public final class DraftService {
         log.i("DraftService", "generated " + saved.size() + " variants for contact " + contactId
             + " in " + latency + "ms");
         return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
+    }
+
+    /* ---------------------------------------------------------------- audit ctx */
+
+    /** Full provenance for one reply generation (P-audit-deep): the provider identity
+     *  + the answered message + its content kind + the source app's package + the
+     *  resolved SOURCE IDENTITY (with confidence) + the plain-language reason. */
+    private com.replymate.core.prompt.AuditContext auditContextFor(Contact c, Message latest) {
+        com.replymate.core.model.ProviderRef ref = gateway.activeMeta();
+        if (ref == null) return null;
+        String appLabel = latest.channel == com.replymate.core.model.Channel.MANUAL
+            ? "" : com.replymate.core.listener.WatchedApps.labelFor(latest.channel);
+        String appPackage = com.replymate.core.listener.WatchedApps.primaryPackageFor(
+            latest.channel);
+        com.replymate.core.model.ContentKind kind = latest.effectiveKind();
+        String identity = "";
+        String confidence = "";
+        if (latest.channel != null) {
+            for (com.replymate.core.model.ContactChannel ch : contacts.channelsByContact(c.id)) {
+                if (ch.channel == latest.channel) {
+                    identity = ch.remoteKey;
+                    confidence = com.replymate.core.listener.IdentityResolver
+                        .confidenceOf(ch.remoteKey);
+                    break;
+                }
+            }
+        }
+        // the phrase "latest <X> on <app>" must read like English: texts are "latest
+        // message" (manual chats have no app to name), media keeps its article label.
+        String thing = kind == null || kind == com.replymate.core.model.ContentKind.TEXT
+            ? "message" : kind.label();
+        String where = latest.channel == com.replymate.core.model.Channel.MANUAL
+            ? " in this chat" : " on " + appLabel;
+        String reason = "Manual reply request — answering " + c.displayName + "'s latest "
+            + thing + where
+            + (latest.sentAt > 0
+                ? " (received " + com.replymate.core.util.TimeFmt.dayTime(latest.sentAt) + ")"
+                : "");
+        return new com.replymate.core.prompt.AuditContext(ref.wire, ref.label, ref.baseUrl,
+            ref.modelName, com.replymate.core.prompt.AuditContext.endpointFor(
+                ref.wire, ref.baseUrl, ref.modelName),
+            latest.body, appLabel, latest.sentAt,
+            kind == null ? "" : kind.wire,
+            appPackage == null ? "" : appPackage,
+            kind != null && kind.isMedia() && !latest.mediaUri.trim().isEmpty(),
+            identity, confidence, reason);
+    }
+
+    /** Kind-specific honest explanation for the no-readable-text gate. */
+    private static String kindExplanation(com.replymate.core.model.ContentKind kind) {
+        switch (kind) {
+            case IMAGE:   return "can't see photos or images";
+            case VIDEO:   return "can't watch videos";
+            case AUDIO:   return "can't listen to audio files";
+            case VOICE:   return "can't hear voice notes";
+            case STICKER: return "can't see stickers";
+            case CALL:    return "can't read a call — there is no message text in it";
+            default:      return "can't read media content in this one";
+        }
     }
 
     /** P-polish: live voice PREVIEW — runs the real reply-generation prompt with the

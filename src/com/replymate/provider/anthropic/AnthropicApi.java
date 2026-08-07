@@ -83,7 +83,14 @@ public final class AnthropicApi {
 
     public static Result<com.replymate.core.ai.ChatReply> parseReply(String body) {
         try {
-            Object contentRaw = com.replymate.core.json.Json.parseObj(body).raw("content");
+            com.replymate.core.json.JsonObj root = com.replymate.core.json.Json.parseObj(body);
+            // P-audit-deep: stop_reason "max_tokens" = the single completion was cut
+            // off — never saved as a finished draft.
+            if ("max_tokens".equals(root.str("stop_reason"))) {
+                return Result.err(com.replymate.provider.gemini.GeminiParser
+                    .truncationMessage(1, "stop_reason \"max_tokens\""));
+            }
+            Object contentRaw = root.raw("content");
             if (!(contentRaw instanceof List)) {
                 return Result.err("PARSE — provider reply had no content blocks");
             }
@@ -96,7 +103,7 @@ public final class AnthropicApi {
             String out = text.toString().trim();
             if (out.isEmpty()) return Result.err("PARSE — provider reply had no text");
             int tin = 0, tout = 0;
-            Object usageRaw = com.replymate.core.json.Json.parseObj(body).raw("usage");
+            Object usageRaw = root.raw("usage");
             if (usageRaw instanceof Map) {
                 Object in = ((Map<?, ?>) usageRaw).get("input_tokens");
                 Object o = ((Map<?, ?>) usageRaw).get("output_tokens");

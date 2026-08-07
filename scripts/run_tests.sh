@@ -55,6 +55,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.util.ResultTest \
     com.replymate.core.model.ToneTransformTest \
     com.replymate.core.model.ProviderTypeTest \
+    com.replymate.core.model.ContentKindTest \
     com.replymate.core.prompt.PromptBuilderTest \
     com.replymate.core.prompt.P4PromptTest \
     com.replymate.core.prompt.VoiceCharterTest \
@@ -78,6 +79,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.listener.MessagingStyleParserTest \
     com.replymate.core.listener.TitleTextParserTest \
     com.replymate.core.listener.ParserRegistryTest \
+    com.replymate.core.listener.ContentSignalsTest \
     com.replymate.core.listener.ChatLinkTest \
     com.replymate.core.supabase.SupabaseConfigTest \
     com.replymate.provider.RetryPolicyTest \
@@ -95,6 +97,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.data.MigrationV2Test \
     com.replymate.data.MigrationV3Test \
     com.replymate.data.MigrationV4Test \
+    com.replymate.data.MigrationV5Test \
     com.replymate.data.PragmaRowBehaviorTest \
     com.replymate.data.PlatformGuardTest \
     com.replymate.data.ManifestCatalogTest

@@ -75,6 +75,40 @@ public class GeminiParserTest {
         assertFalse(e.retryable());
     }
 
+    /* -------------- P-audit-deep: cut-off candidates are never saved as drafts ------ */
+
+    @Test public void allCandidatesCutOffAtMaxTokensIsTruncationError() {
+        String body = "{\"candidates\":["
+            + "{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"\"}]},\"finishReason\":\"MAX_TOKENS\"},"
+            + "{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"half a sen\"}]},\"finishReason\":\"MAX_TOKENS\"}"
+            + "],\"usageMetadata\":{\"promptTokenCount\":50,\"candidatesTokenCount\":220}}";
+        Result<ChatReply> r = GeminiParser.parseReply(body);
+        assertFalse(r.ok);
+        assertTrue("got: " + r.error, r.error.startsWith("TRUNCATED"));
+        assertTrue(r.error.contains("output-token limit"));
+        assertTrue(r.error.contains("MAX_TOKENS"));
+    }
+
+    @Test public void finishedCandidatesSurviveWhenOthersAreCutOff() {
+        String body = "{\"candidates\":["
+            + "{\"content\":{\"parts\":[{\"text\":\"complete reply\"}]},\"finishReason\":\"STOP\"},"
+            + "{\"content\":{\"parts\":[{\"text\":\"cut off mid\"}]},\"finishReason\":\"MAX_TOKENS\"}"
+            + "]}";
+        Result<ChatReply> r = GeminiParser.parseReply(body);
+        assertTrue(r.ok);
+        assertEquals(1, r.value.variants.size());
+        assertEquals("complete reply", r.value.variants.get(0));
+    }
+
+    @Test public void thinkingModelBurningBudgetGetsHonestDiagnosis() {
+        // thinking models can consume maxOutputTokens on thought parts only → empty text
+        String body = "{\"candidates\":[{\"finishReason\":\"MAX_TOKENS\","
+            + "\"content\":{\"role\":\"model\",\"parts\":[{\"thought\":true,\"text\":\"reasoning…\"}]}}]}";
+        Result<ChatReply> r = GeminiParser.parseReply(body);
+        assertFalse(r.ok);
+        assertTrue(r.error.startsWith("TRUNCATED"));
+    }
+
     @Test public void longProviderMessageIsTruncated() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 400; i++) sb.append('e');

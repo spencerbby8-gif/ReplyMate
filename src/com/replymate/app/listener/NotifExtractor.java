@@ -41,6 +41,8 @@ public final class NotifExtractor {
     private static final String K_IS_GROUP = "android.isGroupConversation";
     private static final String K_URI = "uri";
     private static final String K_MIME = "type";
+    private static final String K_PERSON_KEY = "key";
+    private static final String K_PERSON_URI = "uri";
 
     private NotifExtractor() { }
 
@@ -65,6 +67,8 @@ public final class NotifExtractor {
         raw.ownerName = firstNonBlank(
             personName(safeBundle(x, K_USER)),
             chars(x.getCharSequence(K_SELF_NAME)));
+        raw.ownerKey = ownerPersonField(x, K_PERSON_KEY);
+        raw.conversationId = shortcutIdOf(n);
         raw.group = x.containsKey(K_IS_GROUP)
             ? Boolean.valueOf(x.getBoolean(K_IS_GROUP, false)) : null;
 
@@ -91,7 +95,13 @@ public final class NotifExtractor {
             e.senderName = firstNonBlank(
                 senderName(mb),
                 chars(mb.getCharSequence(K_SENDER)));
+            e.senderKey = senderPersonField(mb, K_PERSON_KEY);
+            e.senderUri = senderPersonField(mb, K_PERSON_URI);
             e.hasAttachment = mb.get(K_URI) != null || mb.get(K_MIME) != null;
+            // P-audit-deep: keep the attachment reference + MIME (never opened here —
+            // extraction only, so the media pipeline can record WHAT is attached).
+            e.mimeType = chars(bundleChars(mb, K_MIME));
+            e.dataUri = uriString(mb.get(K_URI));
             return e;
         } catch (RuntimeException malformed) {
             // One malformed message bundle must never drop the whole
@@ -104,9 +114,93 @@ public final class NotifExtractor {
     /** Owner display name from "android.messagingUser" — always a Bundle
      *  (framework writes Person.toBundle() into this extra; Person key "name"). */
     private static String personName(Bundle person) {
+        return personField(person, K_PERSON_NAME);
+    }
+
+    /** Any string-ish field from a Person bundle (name/key/uri), defensively. */
+    private static String personField(Bundle person, String key) {
         if (person == null) return null;
-        CharSequence name = person.getCharSequence(K_PERSON_NAME);
-        return name == null ? null : name.toString();
+        try {
+            CharSequence v = person.getCharSequence(key);
+            if (v != null) return v.toString();
+            Object raw = person.get(key);
+            return raw == null ? null : String.valueOf(raw);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Owner fields from "android.messagingUser": same dual delivery shape as
+     *  sender_person (Bundle on 24-27/compat, framework Person Parcelable on 28+). */
+    private static String ownerPersonField(Bundle x, String field) {
+        Object raw;
+        try {
+            raw = x.get(K_USER);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (raw instanceof Bundle) return personField((Bundle) raw, field);
+        if (Build.VERSION.SDK_INT >= 28 && raw instanceof android.app.Person) {
+            android.app.Person p = (android.app.Person) raw;
+            if (K_PERSON_NAME.equals(field)) {
+                CharSequence name = p.getName();
+                return name == null ? null : name.toString();
+            }
+            if (K_PERSON_KEY.equals(field)) return p.getKey();
+            if (K_PERSON_URI.equals(field)) return p.getUri();
+        }
+        return null;
+    }
+
+    /** Any field (name/key/uri) from the sender_person value, whichever runtime shape
+     *  the POSTING app wrote: a Bundle (API 24-27 MessagingStyle / compat) or a
+     *  framework android.app.Person Parcelable (API 28+). Defensive throughout. */
+    private static String senderPersonField(Bundle mb, String field) {
+        Object raw;
+        try {
+            raw = mb.get(K_SENDER_PERSON);
+        } catch (RuntimeException badParcel) {
+            return null;
+        }
+        if (raw instanceof Bundle) {
+            return personField((Bundle) raw, field);
+        }
+        if (Build.VERSION.SDK_INT >= 28 && raw instanceof android.app.Person) {
+            android.app.Person p = (android.app.Person) raw;
+            if (K_PERSON_NAME.equals(field)) {
+                CharSequence name = p.getName();
+                return name == null ? null : name.toString();
+            }
+            if (K_PERSON_KEY.equals(field)) return p.getKey();
+            if (K_PERSON_URI.equals(field)) return p.getUri();
+        }
+        return null;
+    }
+
+    /** Native conversation identifier the SOURCE app published with the notification:
+     *  the shortcut id (API 29+ conversations). WhatsApp IDs its threads here (JID);
+     *  other apps use their own (channel/room/thread ids). Never synthesized. */
+    private static String shortcutIdOf(Notification n) {
+        if (Build.VERSION.SDK_INT < 29) return null;
+        try {
+            return n.getShortcutId();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static CharSequence bundleChars(Bundle b, String key) {
+        try {
+            return b.getCharSequence(key);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Uri Parcelable (or plain string) → display string; never dereferenced. */
+    private static String uriString(Object o) {
+        if (o == null) return null;
+        return String.valueOf(o);
     }
 
     /** getBundle() defensively: a mistyped value must not blow up extraction. */

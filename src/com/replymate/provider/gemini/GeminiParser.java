@@ -34,20 +34,29 @@ public final class GeminiParser {
         }
 
         List<String> variants = new ArrayList<String>();
+        int truncated = 0;
         for (int i = 0; i < candidates.size(); i++) {
             JsonObj cand = candidates.obj(i);
             if (cand == null) continue;
+            String finish = cand.str("finishReason");
             JsonObj content = cand.obj("content");
-            if (content == null) continue;
-            JsonArr parts = content.arr("parts");
-            if (parts == null) continue;
             StringBuilder text = new StringBuilder();
-            for (int p = 0; p < parts.size(); p++) {
-                String t = parts.obj(p) == null ? null : parts.obj(p).str("text");
-                if (t != null) text.append(t);
+            if (content != null) {
+                JsonArr parts = content.arr("parts");
+                if (parts != null) {
+                    for (int p = 0; p < parts.size(); p++) {
+                        String t = parts.obj(p) == null ? null : parts.obj(p).str("text");
+                        if (t != null) text.append(t);
+                    }
+                }
             }
             String v = text.toString().trim();
+            // P-audit-deep: a cut-off candidate must never become a "finished" draft.
+            if ("MAX_TOKENS".equals(finish)) { truncated++; continue; }
             if (!v.isEmpty()) variants.add(v);
+        }
+        if (variants.isEmpty() && truncated > 0) {
+            return Result.err(truncationMessage(truncated, "finishReason MAX_TOKENS"));
         }
 
         int tokensIn = 0, tokensOut = 0;
@@ -57,6 +66,15 @@ public final class GeminiParser {
             tokensOut = (int) usage.lng("candidatesTokenCount", 0);
         }
         return Result.ok(new ChatReply(variants, tokensIn, tokensOut, RateLimitInfo.NONE));
+    }
+
+    /** Honest truncation explanation (P-audit-deep): never save half a sentence as a
+     *  finished draft; say WHY it happened and what to do. Same wording everywhere. */
+    public static String truncationMessage(int count, String signal) {
+        return "TRUNCATED — the model hit its output-token limit before finishing"
+            + " (" + count + " candidate(s) cut off; " + signal + ")."
+            + " 'Thinking' models can spend the whole budget on reasoning instead of"
+            + " the reply. Retry, or pick a different model in Settings → AI providers";
     }
 
     /** Model discovery parse: {models:[{name:"models/x",supportedGenerationMethods:[…]}]}

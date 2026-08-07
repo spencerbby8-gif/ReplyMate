@@ -80,6 +80,18 @@ public class AnthropicApiTest {
         assertEquals(Arrays.asList("claude-a", "claude-b"), r.value);
     }
 
+    /* --------------- P-audit-deep: stop_reason max_tokens is never a draft ---------- */
+
+    @Test public void maxTokensStopReasonIsTruncationErrorNotAHalfDraft() {
+        Result<ChatReply> r = AnthropicApi.parseReply(
+            "{\"content\":[{\"type\":\"text\",\"text\":\"half a sent\"}],"
+            + "\"stop_reason\":\"max_tokens\","
+            + "\"usage\":{\"input_tokens\":30,\"output_tokens\":220}}");
+        assertFalse(r.ok);
+        assertTrue("got: " + r.error, r.error.startsWith("TRUNCATED"));
+        assertTrue(r.error.contains("output-token limit"));
+    }
+
     @Test public void errorCarriesTypedProviderMessage() {
         ApiError err = AnthropicApi.errorFrom(new HttpResponse(401,
             "{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}", null));

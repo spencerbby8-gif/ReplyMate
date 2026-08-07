@@ -46,4 +46,39 @@ public class ContactServiceTest {
         assertFalse(svc.createManualContact("  ", "", "", "", "").ok);
         assertTrue(svc.createManualContact("Amara", "", "", "", "").ok);
     }
+
+    /* ----------------- P-audit-deep: identity alias linking (no contact forks) ------- */
+
+    @Test public void legacyTitledChatRelinksToNativeIdWithoutForking() {
+        Fakes.ContactStoreFake store = new Fakes.ContactStoreFake();
+        ContactService svc = new ContactService(store, Fakes.FIXED_CLOCK);
+        // 1) contact created BEFORE the app published a native id (legacy title key)
+        Contact first = svc.ensureChannelContact(Channel.WHATSAPP, "amara", "Amara");
+        // 2) later the notification carries WhatsApp's own thread id → candidates
+        java.util.List<String> keys = java.util.Arrays.asList(
+            "cid:23480@s.whatsapp.net", "amara");
+        Contact again = svc.ensureChannelContact(
+            Channel.WHATSAPP, keys.get(0), "Amara", keys);
+        assertEquals("same contact, no fork on identity upgrade", first.id, again.id);
+        assertEquals(1, store.all().size());
+        // the stronger key is LINKED for direct future hits
+        assertNotNull(store.findChannel(Channel.WHATSAPP, "cid:23480@s.whatsapp.net"));
+        assertNotNull(store.findChannel(Channel.WHATSAPP, "amara"));
+        // 3) subsequent native-id-only notifications resolve straight to the contact
+        Contact direct = svc.ensureChannelContact(
+            Channel.WHATSAPP, "cid:23480@s.whatsapp.net", "Amara",
+            java.util.Arrays.asList("cid:23480@s.whatsapp.net", "amara"));
+        assertEquals(first.id, direct.id);
+    }
+
+    @Test public void differentNativeIdsStayDifferentContacts() {
+        Fakes.ContactStoreFake store = new Fakes.ContactStoreFake();
+        ContactService svc = new ContactService(store, Fakes.FIXED_CLOCK);
+        java.util.List<String> aKeys = java.util.Arrays.asList("cid:a@x", "amara");
+        java.util.List<String> bKeys = java.util.Arrays.asList("cid:b@x", "amara b");
+        Contact a = svc.ensureChannelContact(Channel.WHATSAPP, aKeys.get(0), "Amara", aKeys);
+        Contact b = svc.ensureChannelContact(Channel.WHATSAPP, bKeys.get(0), "Amara B", bKeys);
+        assertNotEquals("two chats with similar names but different native ids must not merge",
+            a.id, b.id);
+    }
 }

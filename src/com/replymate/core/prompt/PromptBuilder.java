@@ -25,10 +25,12 @@ public final class PromptBuilder {
         String appLabel = latest == null || latest.channel == null
                 || latest.channel == com.replymate.core.model.Channel.MANUAL
             ? null : com.replymate.core.listener.WatchedApps.labelFor(latest.channel);
+        com.replymate.core.model.ContentKind kind = latest == null
+            ? null : latest.effectiveKind();
         Turn task = TaskComposer.defaultTask(
             bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
             bundle.contact.displayName,
-            latest == null ? null : latest.body, appLabel);
+            latest == null ? null : latest.body, appLabel, kind);
         ChatRequest req = new ChatRequest(system, turns, task,
             GenerationOpts.of(VARIANT_COUNT, 0.8, 220));
         return TokenBudgeter.fit(req, TokenBudgeter.DEFAULT_MAX_INPUT);
@@ -50,11 +52,14 @@ public final class PromptBuilder {
         return found;
     }
 
+    /** Real readable text test (the generation gate): non-empty and NOT a stored
+     *  placeholder of ANY content kind (legacy or per-kind). A captioned media
+     *  message passes — its caption IS real text (the task discloses the media). */
     public static boolean usableText(String body) {
         if (body == null) return false;
         String t = body.trim();
         return !t.isEmpty()
-            && !com.replymate.core.listener.ListenerFilter.MEDIA_PLACEHOLDER.equals(t);
+            && !com.replymate.core.listener.ListenerFilter.isPlaceholder(t);
     }
 
     /** Audit snapshot of exactly what is sent (stored on each draft row). */
@@ -114,7 +119,19 @@ public final class PromptBuilder {
                 out.put("latestIncoming", JsonObj.create()
                     .put("text", ctx.latestText)
                     .put("channel", ctx.latestChannel)
-                    .put("at", ctx.latestAt));
+                    .put("app", ctx.latestPackage)
+                    .put("at", ctx.latestAt)
+                    .put("contentType", ctx.latestKind)
+                    .put("mediaRef", ctx.mediaRefAvailable
+                        ? "captured locally — never opened, never uploaded" : "none"));
+            }
+            if (!ctx.sourceIdentity.isEmpty()) {
+                out.put("source", JsonObj.create()
+                    .put("identity", ctx.sourceIdentity)
+                    .put("confidence", ctx.sourceConfidence));
+            }
+            if (!ctx.reason.isEmpty()) {
+                out.put("reason", ctx.reason);
             }
         }
         return out.toJson();

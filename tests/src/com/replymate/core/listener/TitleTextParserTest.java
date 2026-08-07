@@ -91,4 +91,32 @@ public class TitleTextParserTest {
     @Test public void nullRawFailsSafely() {
         assertEquals(NotifParser.Result.Kind.FAIL, slack.parse(null).kind);
     }
+
+    /* -------------------------- P-audit-deep: kinds + calls -------------------------- */
+
+    @Test public void slackSentAPhotoIsMediaNotText() {
+        // real Slack media notification: title = sender, text = the exact fallback label
+        RawNotif raw = ParserFixtures.titleText("com.Slack", "team-x", "sent a photo", "msg");
+        NotifEvent e = slack.parse(raw).events.get(0);
+        assertEquals(com.replymate.core.model.ContentKind.IMAGE, e.contentKind);
+        assertTrue(e.hasAttachment);
+    }
+
+    @Test public void slackSentenceMentioningAPhotoStaysText() {
+        RawNotif raw = ParserFixtures.titleText("com.Slack", "team-x", "did you like the photo?", "msg");
+        assertEquals(com.replymate.core.model.ContentKind.TEXT, slack.parse(raw).events.get(0).contentKind);
+    }
+
+    @Test public void discordMissedCallStoredAsCallEvent() {
+        RawNotif raw = ParserFixtures.titleText("com.discord", "Ada", "Missed voice call", "call");
+        NotifEvent e = slack.parse(raw).events.get(0);
+        assertEquals(com.replymate.core.model.ContentKind.CALL, e.contentKind);
+    }
+
+    @Test public void ongoingCallStateIgnoredForTitleTextApps() {
+        RawNotif raw = ParserFixtures.titleText("com.discord", "Ada", "Ongoing voice call", "call");
+        NotifParser.Result r = slack.parse(raw);
+        assertEquals(NotifParser.Result.Kind.IGNORE, r.kind);
+        assertTrue(r.reason.contains("call"));
+    }
 }

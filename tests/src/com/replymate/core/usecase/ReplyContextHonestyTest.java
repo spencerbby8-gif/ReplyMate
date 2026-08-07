@@ -189,4 +189,112 @@ public class ReplyContextHonestyTest {
         assertTrue(r.error.contains("Add at least one message"));
         assertEquals(0, provider.calls);
     }
+
+    // ---------- (e) P-audit-deep: KIND-SPECIFIC media honesty ----------
+
+    private void seedKindBlocked(com.replymate.core.model.ContentKind kind,
+                                 String mime, String uri) {
+        com.replymate.core.model.Message m = Fakes.msg(1, Direction.INCOMING, kind.placeholder());
+        m.channel = Channel.WHATSAPP;
+        m.contentKind = kind.wire;
+        m.mediaMime = mime == null ? "" : mime;
+        m.mediaUri = uri == null ? "" : uri;
+        messages.add(m);
+    }
+
+    @Test public void photoOnlyLatestIsCalledAPhotoWithSpecificExplanation() {
+        seed("we still on?", "yes o");
+        seedKindBlocked(com.replymate.core.model.ContentKind.IMAGE, "image/jpeg", "content://wa/1");
+        Fakes.FakeProvider provider = Fakes.FakeProvider.returning("nice!");
+        Result<DraftOutcome> r = service(new Fakes.GatewayFake(provider)).generateForContact(1);
+        assertFalse(r.ok);
+        assertTrue("kind must be named, got: " + r.error, r.error.contains("a photo"));
+        assertTrue("honest capability, got: " + r.error, r.error.contains("can't see photos"));
+        assertTrue(r.error.contains("WhatsApp"));
+        assertTrue(r.error.contains("won't invent"));
+        assertTrue("media reference honesty, got: " + r.error,
+            r.error.contains("stays on this phone") && r.error.contains("never opens or uploads"));
+        assertEquals(0, provider.calls);
+        assertTrue(drafts.saved.isEmpty());
+    }
+
+    @Test public void voiceNoteOnlyLatestNeverGeneratesAudioGuesses() {
+        seed("you free now?", "kind of, why");
+        seedKindBlocked(com.replymate.core.model.ContentKind.VOICE, "audio/ogg", "");
+        Fakes.FakeProvider provider = Fakes.FakeProvider.returning("sure!");
+        Result<DraftOutcome> r = service(new Fakes.GatewayFake(provider)).generateForContact(1);
+        assertFalse(r.ok);
+        assertTrue(r.error.contains("a voice note"));
+        assertTrue(r.error.contains("can't hear voice notes"));
+        assertEquals("provider must NOT guess at audio content", 0, provider.calls);
+        assertTrue(drafts.saved.isEmpty());
+    }
+
+    @Test public void videoOnlyLatestIsBlockedWithoutWatchingClaims() {
+        seed("seen the clip?", "not yet");
+        seedKindBlocked(com.replymate.core.model.ContentKind.VIDEO, "video/mp4", "");
+        Result<DraftOutcome> r = service(new Fakes.GatewayFake(
+            Fakes.FakeProvider.returning("lol nice vid"))).generateForContact(1);
+        assertFalse(r.ok);
+        assertTrue(r.error.contains("a video"));
+        assertTrue(r.error.contains("can't watch"));
+        assertTrue(drafts.saved.isEmpty());
+    }
+
+    @Test public void captionedPhotoGeneratesButDisclosesTheUnseenMedia() {
+        com.replymate.core.model.Message m = Fakes.msg(1, Direction.INCOMING, "rate this fit abeg");
+        m.channel = Channel.WHATSAPP;
+        m.contentKind = "image";
+        messages.add(m);
+        Fakes.FakeProvider provider = Fakes.FakeProvider.returning("clean");
+        Result<DraftOutcome> r = service(new Fakes.GatewayFake(provider)).generateForContact(1);
+        assertTrue("the caption IS readable text — generation must proceed: " + r.error, r.ok);
+        assertTrue("task must disclose the unseen media",
+            provider.lastRequest.task.text.contains("cannot see"));
+        assertTrue(provider.lastRequest.task.text.contains("rate this fit abeg"));
+        String snap = drafts.saved.get(0).promptSnapshotJson;
+        assertTrue(snap.contains("\"contentType\":\"image\""));
+    }
+
+    // ---------- (f) P-audit-deep: PROMPT AUDIT completeness ----------
+
+    @Test public void snapshotCarriesKindAppSourceIdentityAndReason() {
+        Contact a = contacts.get(1);
+        com.replymate.core.model.ContactChannel ch = new com.replymate.core.model.ContactChannel();
+        ch.contactId = a.id;
+        ch.channel = Channel.WHATSAPP;
+        ch.remoteKey = "amara";
+        contacts.channels.add(ch);
+
+        com.replymate.core.model.Message m = Fakes.msg(1, Direction.INCOMING, "you still coming Saturday?");
+        m.channel = Channel.WHATSAPP;
+        m.contentKind = "text";
+        messages.add(m);
+        Result<DraftOutcome> r = service(new Fakes.GatewayFake(
+            Fakes.FakeProvider.returning("yes pulling up"))).generateForContact(1);
+        assertTrue(r.ok);
+
+        String snap = drafts.saved.get(0).promptSnapshotJson;
+        assertTrue("content type of the answered item", snap.contains("\"contentType\":\"text\""));
+        assertTrue("source app package", snap.contains("\"app\":\"com.whatsapp\""));
+        assertTrue("source identity", snap.contains("\"source\":{\"identity\":\"amara\",\"confidence\":\"medium\"}"));
+        assertTrue("the plain-language reason", snap.contains("\"reason\":"));
+        assertTrue(snap.contains("Amara") && snap.contains("WhatsApp"));
+        assertTrue(snap.contains("mediaRef"));
+    }
+
+    // ---------- (g) P-audit-deep: the latest message reaches the WIRE body ----------
+
+    @Test public void latestIncomingIsInTheActualGeminiRequestBodyToo() {
+        seed("old stuff", "my reply", "her final question about Sunday?");
+        Fakes.FakeProvider provider = Fakes.FakeProvider.returning("sure");
+        Result<DraftOutcome> r = service(new Fakes.GatewayFake(provider)).generateForContact(1);
+        assertTrue(r.ok);
+        String wireBody = com.replymate.provider.gemini.GeminiPayloads.generateBody(
+            provider.lastRequest, true);
+        assertTrue("the LATEST incoming message must be inside the provider request body",
+            wireBody.contains("her final question about Sunday?"));
+        assertTrue(wireBody.contains("system_instruction"));
+        assertTrue(wireBody.contains("generationConfig"));
+    }
 }

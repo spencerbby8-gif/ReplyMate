@@ -25,14 +25,26 @@ public final class OpenAiParser {
                 return Result.err("PARSE — provider reply had no choices");
             }
             List<String> variants = new ArrayList<String>();
+            int truncated = 0;
             for (Object cRaw : (List<?>) choicesRaw) {
                 if (!(cRaw instanceof Map)) continue;
+                Object finishRaw = ((Map<?, ?>) cRaw).get("finish_reason");
+                // P-audit-deep: finish_reason "length" = cut off — never a draft.
+                boolean cut = "length".equals(finishRaw) || "max_tokens".equals(finishRaw);
                 Object msgRaw = ((Map<?, ?>) cRaw).get("message");
-                if (!(msgRaw instanceof Map)) continue;
+                if (!(msgRaw instanceof Map)) {
+                    if (cut) truncated++;
+                    continue;
+                }
                 Object content = ((Map<?, ?>) msgRaw).get("content");
+                if (cut) { truncated++; continue; }
                 if (content instanceof String && !((String) content).trim().isEmpty()) {
                     variants.add(((String) content).trim());
                 }
+            }
+            if (variants.isEmpty() && truncated > 0) {
+                return Result.err(com.replymate.provider.gemini.GeminiParser
+                    .truncationMessage(truncated, "finish_reason \"length\""));
             }
             if (variants.isEmpty()) {
                 return Result.err("PARSE — provider reply had no text");

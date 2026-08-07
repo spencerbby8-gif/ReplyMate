@@ -18,6 +18,15 @@ public final class TaskComposer {
      *  generic form is used then); @param appLabel e.g. "WhatsApp" (may be null). */
     public static Turn defaultTask(String ownerName, String partnerName,
                                    String latestIncomingText, String appLabel) {
+        return defaultTask(ownerName, partnerName, latestIncomingText, appLabel, null);
+    }
+
+    /** P-audit-deep overload: when the answered message came WITH media (captioned
+     *  photo etc.), the task says so honestly — the model replies to the caption,
+     *  never pretends to have seen the media (kind may be null/TEXT = no disclosure). */
+    public static Turn defaultTask(String ownerName, String partnerName,
+                                   String latestIncomingText, String appLabel,
+                                   com.replymate.core.model.ContentKind latestKind) {
         StringBuilder t = new StringBuilder("Read the conversation above and write ")
             .append(ownerName).append("'s next reply to ").append(partnerName).append('.');
         if (latestIncomingText != null && !latestIncomingText.trim().isEmpty()) {
@@ -26,6 +35,18 @@ public final class TaskComposer {
             t.append("\nThe message you're replying to — ").append(partnerName)
              .append("'s latest: \"").append(quoted)
              .append("\". Answer THAT message, not an older one.");
+            if (latestKind != null && latestKind.isMedia()) {
+                t.append("\nThat text was sent together with ").append(latestKind.label())
+                 .append(" — you cannot see ").append(
+                     latestKind == com.replymate.core.model.ContentKind.AUDIO
+                         || latestKind == com.replymate.core.model.ContentKind.VOICE
+                             ? "or hear it. Reply only to the text." : "it. Reply only to the text.");
+            }
+            if (latestKind == com.replymate.core.model.ContentKind.CALL) {
+                t.append("\n(Their latest item was a call event, not a typed message —"
+                    + " answer it as \"sorry I missed your call\"-style if it makes sense,"
+                    + " never invent what was said.)");
+            }
         }
         if (appLabel != null && !appLabel.trim().isEmpty()) {
             t.append("\nThis chat is on ").append(appLabel.trim()).append('.');

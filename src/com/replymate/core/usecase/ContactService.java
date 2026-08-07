@@ -65,6 +65,43 @@ public final class ContactService {
         }
     }
 
+    /** P-audit-deep: identity-candidate matching. The primary (most trusted) key is
+     *  tried first, then each alias in order; the FIRST existing channel row wins,
+     *  so a chat previously keyed by display title keeps its contact when the app
+     *  later publishes a native conversation id — the new key is then LINKED as an
+     *  additional channel row for the same contact (no fork, no lost history). */
+    public Contact ensureChannelContact(Channel channel, String remoteKey, String displayName,
+                                        java.util.List<String> aliasKeys) {
+        synchronized (ENSURE_LOCK) {
+            if (aliasKeys == null || aliasKeys.size() <= 1) {
+                return ensureLocked(channel, remoteKey, displayName);
+            }
+            Contact found = null;
+            String foundKey = null;
+            for (String key : aliasKeys) {
+                ContactChannel row = store.findChannel(channel, key);
+                if (row != null) {
+                    store.touchChannel(row.id, clock.now());
+                    Contact c = store.get(row.contactId);
+                    if (c != null) { found = c; foundKey = key; break; }
+                }
+            }
+            if (found == null) {
+                return ensureLocked(channel, remoteKey, displayName);
+            }
+            if (!remoteKey.equals(foundKey) && store.findChannel(channel, remoteKey) == null) {
+                // Link the stronger key to the SAME contact for future direct hits.
+                ContactChannel alias = new ContactChannel();
+                alias.contactId = found.id;
+                alias.channel = channel;
+                alias.remoteKey = remoteKey;
+                alias.lastSeenAt = clock.now();
+                store.upsertChannel(alias);
+            }
+            return found;
+        }
+    }
+
     private Contact ensureLocked(Channel channel, String remoteKey, String displayName) {
         ContactChannel existing = store.findChannel(channel, remoteKey);
         long now = clock.now();
