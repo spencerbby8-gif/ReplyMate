@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.os.Parcelable;
 import android.service.notification.StatusBarNotification;
 import com.replymate.core.listener.RawNotif;
+import java.util.List;
 
 /** THIN platform adapter (P3): StatusBarNotification → RawNotif.
  *
@@ -93,41 +94,65 @@ public final class NotifExtractor {
         return raw;
     }
 
-    /** P-background: dumb copy of notification actions for the capability check.
-     *  Reads ONLY shape (title / index / free-form RemoteInput + result key) —
-     *  never the PendingIntent, which the assistant re-resolves live at send time.
-     *  One malformed action degrades that action only. */
+    /** P-background (extended in P-background-3, docs-complete): dumb copy of
+     *  notification actions for the capability check. Quick-reply may legitimately
+     *  live in TWO documented places, so BOTH are scanned:
+     *    1. Notification.actions (standard, SRC_STANDARD)
+     *    2. Notification.WearableExtender actions (SRC_WEARABLE) — the channel
+     *       Android Auto/Wear reply through; several messengers put their ONLY
+     *       RemoteInput-bearing action here, with a plain UI-opening "Reply"
+     *       action in the standard array. Missing the wearable list is exactly
+     *       how a device can show "Reply" while a listener sees no usable action.
+     *  Reads ONLY shape (title / index / source / free-form RemoteInput + result
+     *  key) — never the PendingIntent, which the assistant re-resolves live at
+     *  send time. One malformed action degrades that action only. */
     private static void extractActions(Notification n, RawNotif raw) {
         Notification.Action[] acts;
         try {
             acts = n.actions;
         } catch (RuntimeException e) {
-            return;
+            acts = null;
         }
-        if (acts == null) return;
-        for (int i = 0; i < acts.length; i++) {
-            try {
-                Notification.Action a = acts[i];
-                if (a == null) continue;
-                RawNotif.ActionRef ref = new RawNotif.ActionRef();
-                ref.title = chars(a.title);
-                ref.index = i;
-                android.app.RemoteInput[] ris = a.getRemoteInputs();
-                if (ris != null) {
-                    for (android.app.RemoteInput ri : ris) {
-                        if (ri != null && ri.getAllowFreeFormInput()
-                                && ri.getResultKey() != null
-                                && !ri.getResultKey().trim().isEmpty()) {
-                            ref.remoteFreeForm = true;
-                            ref.resultKey = ri.getResultKey();
-                            break;
-                        }
+        if (acts != null) {
+            for (int i = 0; i < acts.length; i++) {
+                copyAction(acts[i], i, RawNotif.ActionRef.SRC_STANDARD, raw);
+            }
+        }
+        try {
+            List<Notification.Action> wearable =
+                new Notification.WearableExtender(n).getActions();
+            if (wearable != null) {
+                for (int i = 0; i < wearable.size(); i++) {
+                    copyAction(wearable.get(i), i, RawNotif.ActionRef.SRC_WEARABLE, raw);
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // absent/broken wearable extensions must never affect standard extraction
+        }
+    }
+
+    private static void copyAction(Notification.Action a, int index, int source, RawNotif raw) {
+        try {
+            if (a == null) return;
+            RawNotif.ActionRef ref = new RawNotif.ActionRef();
+            ref.title = chars(a.title);
+            ref.index = index;
+            ref.source = source;
+            android.app.RemoteInput[] ris = a.getRemoteInputs();
+            if (ris != null) {
+                for (android.app.RemoteInput ri : ris) {
+                    if (ri != null && ri.getAllowFreeFormInput()
+                            && ri.getResultKey() != null
+                            && !ri.getResultKey().trim().isEmpty()) {
+                        ref.remoteFreeForm = true;
+                        ref.resultKey = ri.getResultKey();
+                        break;
                     }
                 }
-                raw.actions.add(ref);
-            } catch (RuntimeException ignored) {
-                // keep scanning the remaining actions
             }
+            raw.actions.add(ref);
+        } catch (RuntimeException ignored) {
+            // keep scanning the remaining actions
         }
     }
 

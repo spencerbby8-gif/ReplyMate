@@ -24,8 +24,16 @@ public final class RawNotif {
      *  quick-reply capability check is pure JVM and unit-testable. We NEVER copy
      *  the PendingIntent (long-lived refs are resolved live at send time). */
     public static final class ActionRef {
+        /** Docs-complete action surfaces (P-background-3): quick-reply may live in
+         *  the standard actions array OR in WearableExtender (the channel Android
+         *  Auto/Wear reply through) — Signal/WhatsApp put it in one, the other,
+         *  or both, per official docs + observed app behavior. */
+        public static final int SRC_STANDARD = 0;
+        public static final int SRC_WEARABLE = 1;
+
         public String title;           // visible label, e.g. "Reply" (nullable)
-        public int index;              // position inside Notification.actions
+        public int index;              // position inside ITS OWN list (see source)
+        public int source = SRC_STANDARD;
         public boolean remoteFreeForm; // has a RemoteInput with allowFreeFormInput
         public String resultKey;       // first free-form RemoteInput result key (nullable)
 
@@ -33,6 +41,7 @@ public final class RawNotif {
             ActionRef a = new ActionRef();
             a.title = title;
             a.index = index;
+            a.source = source;
             a.remoteFreeForm = remoteFreeForm;
             a.resultKey = resultKey;
             return a;

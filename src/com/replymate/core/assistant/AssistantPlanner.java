@@ -29,20 +29,31 @@ public final class AssistantPlanner {
 
     /* ------------------------------------------------------------------ capability */
 
-    /** First action index whose RemoteInput accepts free-form text, else -1. */
-    public static int directActionIndex(List<RawNotif.ActionRef> actions) {
-        if (actions == null) return -1;
+    /** The best usable direct-reply action across BOTH documented surfaces
+     *  (standard + wearable), else null. Preference: standard surface first,
+     *  then wearable — both carry identical RemoteInput semantics per the docs. */
+    public static RawNotif.ActionRef directAction(List<RawNotif.ActionRef> actions) {
+        if (actions == null) return null;
+        RawNotif.ActionRef wearableHit = null;
         for (RawNotif.ActionRef a : actions) {
-            if (a != null && a.remoteFreeForm
-                    && a.resultKey != null && !a.resultKey.trim().isEmpty()) {
-                return a.index;
+            if (a == null) continue;
+            if (a.remoteFreeForm && a.resultKey != null && !a.resultKey.trim().isEmpty()) {
+                if (a.source == RawNotif.ActionRef.SRC_STANDARD) return a;
+                if (wearableHit == null) wearableHit = a;
             }
         }
-        return -1;
+        return wearableHit;
+    }
+
+    /** First action index whose RemoteInput accepts free-form text, else -1.
+     *  (Compat shim over directAction for older callers/tests.) */
+    public static int directActionIndex(List<RawNotif.ActionRef> actions) {
+        RawNotif.ActionRef a = directAction(actions);
+        return a == null ? -1 : a.index;
     }
 
     public static Capability classify(List<RawNotif.ActionRef> actions) {
-        return directActionIndex(actions) >= 0 ? Capability.DIRECT : Capability.NONE;
+        return directAction(actions) != null ? Capability.DIRECT : Capability.NONE;
     }
 
     /* ------------------------------------------------------------------ actions+copy */

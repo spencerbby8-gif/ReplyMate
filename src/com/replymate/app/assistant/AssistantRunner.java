@@ -171,9 +171,9 @@ public final class AssistantRunner {
             if (cap == AssistantPlanner.Capability.NONE) {
                 AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
                     AssistantEvent.Stage.NOTIFY,
-                    "no free-form quick-reply on the source notification",
+                    "no usable quick-reply — observed: " + safe(t.probe, 130),
                     "posted alert with honest Copy/Regenerate/Open fallback",
-                    "");
+                    "if the app DOES show Reply, tell support: its action hides behind a surface we don't read yet");
             }
 
             AssistantNotifier.ensureChannels(c.app());

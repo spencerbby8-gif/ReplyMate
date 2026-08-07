@@ -139,16 +139,17 @@ public final class AssistantReceiver extends BroadcastReceiver {
     }
 
     /** Fire the source app's reply action with the approved text as RemoteInput
-     *  results. Returns null on success, otherwise the honest failure reason. */
+     *  results. Resolves the action in the SAME documented list it was captured
+     *  from (standard array vs WearableExtender — P-background-3). Returns null on
+     *  success, otherwise the honest failure reason. */
     private String tryRemoteSend(Context ctx, StatusBarNotification sbn,
                                  AssistantTargetStore.Target t, String text) {
         try {
             Notification n = sbn.getNotification();
-            if (n == null || n.actions == null
-                    || t.actionIndex < 0 || t.actionIndex >= n.actions.length) {
+            Notification.Action action = resolveAction(n, t);
+            if (action == null) {
                 return "the reply action moved — the notification layout changed";
             }
-            Notification.Action action = n.actions[t.actionIndex];
             RemoteInput[] inputs = action.getRemoteInputs();
             if (inputs == null || inputs.length == 0 || action.actionIntent == null) {
                 return "the reply action is no longer a text reply";
@@ -167,6 +168,25 @@ public final class AssistantReceiver extends BroadcastReceiver {
             return "the reply box expired (the app closed that notification)";
         } catch (RuntimeException e) {
             return "the app rejected the reply (" + e.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /** Resolve the captured action in the SAME list the target came from, with the
+     *  geometry re-verified live. Null = layout drifted (caller falls back). */
+    private Notification.Action resolveAction(Notification n,
+                                              AssistantTargetStore.Target t) {
+        if (n == null || t.actionIndex < 0) return null;
+        try {
+            if (t.source == com.replymate.core.listener.RawNotif.ActionRef.SRC_WEARABLE) {
+                java.util.List<Notification.Action> wearable =
+                    new Notification.WearableExtender(n).getActions();
+                if (wearable == null || t.actionIndex >= wearable.size()) return null;
+                return wearable.get(t.actionIndex);
+            }
+            if (n.actions == null || t.actionIndex >= n.actions.length) return null;
+            return n.actions[t.actionIndex];
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

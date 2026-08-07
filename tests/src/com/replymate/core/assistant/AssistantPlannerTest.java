@@ -55,6 +55,51 @@ public final class AssistantPlannerTest {
         assertEquals(Capability.NONE, AssistantPlanner.classify(noKey));
     }
 
+    @Test public void wearableOnlyReplyCountsAsDirectPbackground3Regression() {
+        // The exact observed device failure: visible "Reply" lived ONLY in the
+        // WearableExtender surface (docs-legal), standard array had plain actions.
+        List<RawNotif.ActionRef> actions = new ArrayList<RawNotif.ActionRef>();
+        RawNotif.ActionRef plainReply = action(0, false, null);
+        plainReply.title = "Reply";                                  // UI-opening only
+        RawNotif.ActionRef markRead = action(1, false, null);
+        markRead.title = "Mark as read";
+        RawNotif.ActionRef wearReply = action(0, true, "key_text_reply");
+        wearReply.title = "Reply";
+        wearReply.source = RawNotif.ActionRef.SRC_WEARABLE;
+        actions.add(plainReply);
+        actions.add(markRead);
+        actions.add(wearReply);
+        assertEquals(Capability.DIRECT, AssistantPlanner.classify(actions));
+        RawNotif.ActionRef best = AssistantPlanner.directAction(actions);
+        assertNotNull(best);
+        assertEquals(RawNotif.ActionRef.SRC_WEARABLE, best.source);
+        assertEquals(0, best.index);
+        assertEquals("key_text_reply", best.resultKey);
+    }
+
+    @Test public void standardSurfaceIsPreferredWhenBothExposeReply() {
+        List<RawNotif.ActionRef> actions = new ArrayList<RawNotif.ActionRef>();
+        RawNotif.ActionRef wear = action(0, true, "key_text_reply");
+        wear.source = RawNotif.ActionRef.SRC_WEARABLE;
+        RawNotif.ActionRef std = action(2, true, "key_text_reply");
+        actions.add(wear);
+        actions.add(std);
+        RawNotif.ActionRef best = AssistantPlanner.directAction(actions);
+        assertEquals(RawNotif.ActionRef.SRC_STANDARD, best.source);
+        assertEquals(2, best.index);
+    }
+
+    @Test public void directActionReturnsNullWhenNothingUsable() {
+        assertNull(AssistantPlanner.directAction(null));
+        assertNull(AssistantPlanner.directAction(new ArrayList<RawNotif.ActionRef>()));
+        List<RawNotif.ActionRef> actions = new ArrayList<RawNotif.ActionRef>();
+        actions.add(action(0, false, null));
+        RawNotif.ActionRef wear = action(0, true, "  ");
+        wear.source = RawNotif.ActionRef.SRC_WEARABLE;
+        actions.add(wear);
+        assertNull(AssistantPlanner.directAction(actions));
+    }
+
     /* ------------------------------------------------------------- buttons + copy */
 
     @Test public void directShowsApproveSendFirst() {
