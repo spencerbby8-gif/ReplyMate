@@ -26,7 +26,7 @@ public final class SettingsActivity extends Activity {
 
     private AppContainer c;
     private LinearLayout root;
-    private LinearLayout providerRow, listenRow, waRow, tgRow, notifRow;
+    private LinearLayout providerRow, listenRow, notifRow;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -61,7 +61,7 @@ public final class SettingsActivity extends Activity {
         root.addView(voiceRow);
         root.addView(Ui.divider(this));
 
-        providerRow = Ui.row(this, "AI provider (Gemini)", "");
+        providerRow = Ui.row(this, "AI providers", "");
         providerRow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 startActivity(new Intent(SettingsActivity.this, ProviderActivity.class));
@@ -87,19 +87,6 @@ public final class SettingsActivity extends Activity {
             }
         });
         root.addView(sourcesRow);
-        root.addView(Ui.divider(this));
-
-        waRow = Ui.row(this, "Watch WhatsApp", "");
-        waRow.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { toggle("watch.whatsapp"); }
-        });
-        root.addView(waRow);
-
-        tgRow = Ui.row(this, "Watch Telegram", "");
-        tgRow.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { toggle("watch.telegram"); }
-        });
-        root.addView(tgRow);
         root.addView(Ui.divider(this));
 
         notifRow = Ui.row(this, "ReplyMate notifications", "");
@@ -277,24 +264,27 @@ public final class SettingsActivity extends Activity {
         if (requestCode == REQ_POST_NOTIF) refreshRows();
     }
 
-    private void toggle(String key) {
-        String cur = c.kv().get(key, "1");
-        c.kv().put(key, "1".equals(cur) ? "0" : "1");
-        refreshRows();
-    }
-
     private void refreshRows() {
         if (c == null) return;
-        Ui.setRowSub(providerRow, c.providerOrNull() != null
-            ? "configured ✓ (" + String.valueOf(c.activeModelOrNull()) + ")"
-            : "not configured — add your API key");
+        com.replymate.core.model.ProviderDef active = c.providers().active();
+        Ui.setRowSub(providerRow, active != null
+            ? providerSummary(active)
+            : "not configured — tap to add a provider");
         Ui.setRowSub(listenRow, ListenerStatus.isServiceEnabled(this)
             ? "enabled ✓ (read-only)" : "off — tap to open system settings");
-        Ui.setRowSub(waRow, "1".equals(c.kv().get("watch.whatsapp", "1")) ? "on" : "off");
-        Ui.setRowSub(tgRow, "1".equals(c.kv().get("watch.telegram", "1")) ? "on" : "off");
         Ui.setRowSub(notifRow, ListenerStatus.canPostNotifications(this)
             ? "allowed ✓ — ReplyMate can alert you about new messages"
             : "blocked — tap to allow (alerts stay silent otherwise)");
+    }
+
+    /** Active provider line for the Settings hub (friendly diagnostics, no secrets). */
+    private String providerSummary(com.replymate.core.model.ProviderDef d) {
+        String label = d.label.isEmpty() ? d.type.label : d.label;
+        if (d.type.needsKey && (d.keyRef.isEmpty() || !c.vault().hasSecret(d.keyRef))) {
+            return label + " — key missing, taps to fix";
+        }
+        if (d.modelName.isEmpty()) return label + " · no model selected yet";
+        return "active: " + label + " · " + d.modelName + " ✓";
     }
 
     private String buildDiagnostics() {

@@ -59,6 +59,39 @@ public final class GeminiParser {
         return Result.ok(new ChatReply(variants, tokensIn, tokensOut, RateLimitInfo.NONE));
     }
 
+    /** Model discovery parse: {models:[{name:"models/x",supportedGenerationMethods:[…]}]}
+     *  → bare model ids that can actually generateContent, sorted, prefix stripped. */
+    public static Result<java.util.List<String>> parseModels(String body) {
+        try {
+            JsonObj root = Json.parseObj(body);
+            Object modelsRaw = root.raw("models");
+            if (!(modelsRaw instanceof java.util.List)) {
+                return Result.err("PARSE — model list had no models array");
+            }
+            java.util.List<String> out = new java.util.ArrayList<String>();
+            for (Object mRaw : (java.util.List<?>) modelsRaw) {
+                if (!(mRaw instanceof java.util.Map)) continue;
+                java.util.Map<?, ?> m = (java.util.Map<?, ?>) mRaw;
+                boolean canGenerate = true;
+                Object methods = m.get("supportedGenerationMethods");
+                if (methods instanceof java.util.List) {
+                    canGenerate = ((java.util.List<?>) methods).contains("generateContent");
+                }
+                Object name = m.get("name");
+                if (canGenerate && name instanceof String) {
+                    String id = ((String) name).trim();
+                    if (id.startsWith("models/")) id = id.substring("models/".length());
+                    if (!id.isEmpty() && !out.contains(id)) out.add(id);
+                }
+            }
+            java.util.Collections.sort(out);
+            if (out.isEmpty()) return Result.err("Provider returned an empty model list");
+            return Result.ok(out);
+        } catch (RuntimeException boom) {
+            return Result.err("PARSE — " + boom.getMessage());
+        }
+    }
+
     /** Build a classified error from any non-2xx response (Retry-After header wins over body). */
     public static ApiError errorFrom(HttpResponse resp) {
         ApiError base = ApiError.of(resp.code, resp.body);

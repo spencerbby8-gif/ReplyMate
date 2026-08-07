@@ -14,7 +14,7 @@ import java.util.Map;
 
 /** Tiny blocking HTTPS client (no external deps). Timeouts per BLUEPRINT §2.2:
  *  connect 15s / read 45s. Used by providers from P1 onward. */
-public final class HttpClient {
+public class HttpClient {
     private static final Charset UTF8 = Charset.forName("UTF-8");
     private final int connectTimeoutMs;
     private final int readTimeoutMs;
@@ -48,6 +48,36 @@ public final class HttpClient {
             InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
             String body = readAll(in);
 
+            Map<String, String> respHeaders = new HashMap<String, String>();
+            for (Map.Entry<String, List<String>> e : conn.getHeaderFields().entrySet()) {
+                if (e.getKey() != null && e.getValue() != null && !e.getValue().isEmpty()) {
+                    respHeaders.put(e.getKey(), e.getValue().get(0));
+                }
+            }
+            return new HttpResponse(code, body, respHeaders);
+        } catch (IOException ioe) {
+            return HttpResponse.transportFailure(ioe.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /** Simple GET (model-discovery endpoints, P-polish provider abstraction). */
+    public HttpResponse get(String url, Map<String, String> headers) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(connectTimeoutMs);
+            conn.setReadTimeout(readTimeoutMs);
+            if (headers != null) {
+                for (Map.Entry<String, String> h : headers.entrySet()) {
+                    conn.setRequestProperty(h.getKey(), h.getValue());
+                }
+            }
+            int code = conn.getResponseCode();
+            InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            String body = readAll(in);
             Map<String, String> respHeaders = new HashMap<String, String>();
             for (Map.Entry<String, List<String>> e : conn.getHeaderFields().entrySet()) {
                 if (e.getKey() != null && e.getValue() != null && !e.getValue().isEmpty()) {

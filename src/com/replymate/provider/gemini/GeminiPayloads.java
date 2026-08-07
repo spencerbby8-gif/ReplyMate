@@ -19,9 +19,19 @@ public final class GeminiPayloads {
     }
 
     public static String endpoint(String baseUrl, String model) {
+        return trimBase(baseUrl) + "/v1beta/models/" + model + ":generateContent";
+    }
+
+    /** Official model discovery (ai.google.dev/gemini-api/docs/models): the returned
+     *  ids are prefixed "models/" by the API — callers strip the prefix. */
+    public static String modelsEndpoint(String baseUrl) {
+        return trimBase(baseUrl) + "/v1beta/models";
+    }
+
+    static String trimBase(String baseUrl) {
         String base = baseUrl == null ? "" : baseUrl.trim();
         while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-        return base + "/v1beta/models/" + model + ":generateContent";
+        return base;
     }
 
     public static String generateBody(ChatRequest req) {

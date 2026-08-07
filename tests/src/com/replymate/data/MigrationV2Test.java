@@ -46,7 +46,7 @@ public class MigrationV2Test {
             MigrationTest.JdbcExecSql db = v1DeviceDb(c);
             Migrations.migrate(db);
             assertEquals(Migrations.LATEST, db.getUserVersion());
-            assertEquals(3, db.getUserVersion());
+            assertEquals(Migrations.LATEST, db.getUserVersion());
 
             try (Statement st = c.createStatement();
                  ResultSet rs = st.executeQuery(

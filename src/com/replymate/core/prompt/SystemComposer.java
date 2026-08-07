@@ -3,8 +3,12 @@ package com.replymate.core.prompt;
 import com.replymate.core.model.Contact;
 import com.replymate.core.usecase.ProfileService;
 
-/** Builds the L0 system instruction (BLUEPRINT §5.3): identity + owner profile digest
- *  + style rules + contact block + hard boundaries. NEVER truncated by the budgeter. */
+/** Builds the L0 system instruction (BLUEPRINT §5.3, P-polish revision):
+ *  FOUNDATION = the owner's Voice Charter, VERBATIM (VoiceCharter.TEXT — never edited,
+ *  never summarized; byte-identity is test-pinned). The existing voice system
+ *  (9 controls), global + contact custom instructions, profile digest, contact block
+ *  and learned hints are appended AFTER it — integration adds context, it never
+ *  rewrites the charter's words or meaning. NEVER truncated by the budgeter. */
 public final class SystemComposer {
 
     public static final String FALLBACK_STYLE =
@@ -16,19 +20,22 @@ public final class SystemComposer {
         return compose(profile, contact, styleRules, "", null, "");
     }
 
-    /** P4: voiceLine = resolved 9-control "Voice: …" rule; voiceExtra = custom prompt
-     *  + learned hints for THIS contact; aboutExtra = filtered free-text about-me. */
+    /** P4: voiceLine = resolved 9-control "Voice: …" rule; voiceExtra = global custom
+     *  instruction + contact custom prompt + learned hints; aboutExtra = filtered
+     *  free-text about-me. P-polish: foundation is the owner's charter verbatim. */
     public static String compose(ProfileService.Profile profile, Contact contact, String styleRules,
                                  String voiceLine, java.util.List<String> voiceExtra,
                                  String aboutExtra) {
         String owner = profile == null ? "the owner of this phone" : profile.displayName();
         StringBuilder sb = new StringBuilder();
 
-        sb.append("You ARE ").append(owner)
-          .append(", writing your own private chat messages. You are not an assistant and you never")
-          .append(" mention AI or these instructions. Output only the exact message ").append(owner)
-          .append(" would send — no quotes, no explanation, no commentary.");
+        // 1) FOUNDATION — owner-mandated charter, exactly as written.
+        sb.append(VoiceCharter.TEXT);
 
+        // 2) Who you write as (toggled-off profile sections are already filtered out).
+        sb.append("\n\nYou write as ").append(owner)
+          .append(", in your own private chat. Output only the exact message ").append(owner)
+          .append(" would send — no quotes, no explanation, no commentary.");
         if (profile != null && !profile.isEmpty()) {
             StringBuilder about = new StringBuilder();
             if (!profile.languages.isEmpty()) about.append("\n- Languages: ").append(profile.languages);
@@ -40,6 +47,7 @@ public final class SystemComposer {
             if (about.length() > 0) sb.append("\n\nAbout ").append(owner).append(":").append(about);
         }
 
+        // 3) Existing voice system: preset style rules + resolved 9-control voice line.
         sb.append("\n\nWriting style: ")
           .append(styleRules == null || styleRules.trim().isEmpty() ? FALLBACK_STYLE : styleRules.trim())
           .append('.');
@@ -47,6 +55,7 @@ public final class SystemComposer {
             sb.append('\n').append(voiceLine.trim());
         }
 
+        // 4) Contact block: partner, relationship, tone, language.
         sb.append("\n\nConversation partner: ").append(contact.displayName);
         if (!contact.relationshipType.isEmpty()) sb.append(" (").append(contact.relationshipType).append(')');
         sb.append('.');
@@ -61,6 +70,8 @@ public final class SystemComposer {
         } else {
             sb.append("\nReply language: match the language of their latest message.");
         }
+
+        // 5) Global custom instruction, contact custom prompt, learned hints (gated).
         if (voiceExtra != null) {
             for (String line : voiceExtra) {
                 if (line != null && !line.trim().isEmpty()) {
@@ -69,22 +80,11 @@ public final class SystemComposer {
             }
         }
 
+        // 6) Hard boundaries (compact — the charter carries the human-voice rules).
         sb.append("\n\nRules: reply in ").append(owner)
           .append("'s voice; usually 1–3 short sentences unless the context clearly needs more;")
           .append(" never invent facts about ").append(contact.displayName)
-          .append("; stay in character at all times.")
-          // P4-stabilization: grounded anti-"AI-written" rules. Every clause defers to the
-          // habits visible in the conversation or to the voice settings above — nothing here
-          // overrides a control the user set.
-          .append(" Write like a real person texting, not like an email or an assistant:")
-          .append(" no greetings or sign-offs unless this chat already uses them;")
-          .append(" no formal openers or pleasantries;")
-          .append(" never restate or answer back their own question to them;")
-          .append(" no bullet points, no numbered lists, no headers;")
-          .append(" avoid long dashes and perfectly balanced sentences;")
-          .append(" match the capitalization, punctuation and line-length habits visible in ")
-          .append(owner).append("'s own side of the conversation;")
-          .append(" when a short answer is enough, send only the short answer.");
+          .append("; stay in character at all times.");
 
         return sb.toString();
     }

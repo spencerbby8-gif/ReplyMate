@@ -54,8 +54,10 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.json.JsonTest \
     com.replymate.core.util.ResultTest \
     com.replymate.core.model.ToneTransformTest \
+    com.replymate.core.model.ProviderTypeTest \
     com.replymate.core.prompt.PromptBuilderTest \
     com.replymate.core.prompt.P4PromptTest \
+    com.replymate.core.prompt.VoiceCharterTest \
     com.replymate.core.style.StyleSettingsTest \
     com.replymate.core.style.StyleServiceTest \
     com.replymate.core.learning.LearningEngineTest \
@@ -82,9 +84,13 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.provider.ApiErrorTest \
     com.replymate.provider.GeminiPayloadTest \
     com.replymate.provider.GeminiParserTest \
+    com.replymate.provider.OpenAiDialectTest \
+    com.replymate.provider.AnthropicApiTest \
+    com.replymate.provider.GeminiDiscoveryTest \
     com.replymate.data.MigrationTest \
     com.replymate.data.MigrationV2Test \
     com.replymate.data.MigrationV3Test \
+    com.replymate.data.MigrationV4Test \
     com.replymate.data.PragmaRowBehaviorTest \
     com.replymate.data.PlatformGuardTest \
     com.replymate.data.ManifestCatalogTest

@@ -74,7 +74,7 @@ public final class DraftService {
 
         AiProvider provider = gateway.active();
         if (provider == null) {
-            return Result.err("Set up your Gemini API key first (Settings → AI provider).");
+            return Result.err("Set up an AI provider first (Settings → AI providers) — add your API key.");
         }
 
         List<Message> thread = messages.lastMessages(contactId, 30);
@@ -156,6 +156,64 @@ public final class DraftService {
         return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
     }
 
+    /** P-polish: live voice PREVIEW — runs the real reply-generation prompt with the
+     *  currently saved voice (global only when contactId <= 0; else the contact's full
+     *  effective voice: overrides, custom prompt, gated learned hints) over a fixed
+     *  sample thread. Read-only: NO drafts are written and no messages are stored.
+     *  The call is still metered in usage — previews are real AI calls. */
+    public Result<ChatReply> previewVoice(long contactId) {
+        Contact c;
+        if (contactId <= 0) {
+            c = new Contact();                    // synthetic partner for global previews
+            c.id = -1;                            // no style_setting rows exist for id -1
+            c.displayName = "Tobi";
+        } else {
+            c = contacts.get(contactId);
+            if (c == null) return Result.err("Contact not found.");
+        }
+        if (c.privateMode) return Result.err("This contact is private — AI generation is disabled.");
+        if (!c.aiEnabled) return Result.err("AI replies are disabled for this contact.");
+        AiProvider provider = gateway.active();
+        if (provider == null) {
+            return Result.err("Set up an AI provider first (Settings → AI providers) — add your API key.");
+        }
+
+        List<Message> sample = new ArrayList<Message>();
+        Message in = new Message();
+        in.contactId = c.id;
+        in.direction = Direction.INCOMING;
+        in.body = "hey, you still coming through on Saturday?";
+        in.sentAt = clock.now();
+        sample.add(in);
+
+        String styleRules = "";
+        StyleProfile global = styles.get(Scope.GLOBAL, null);
+        if (global != null && global.derivedRules != null) styleRules = global.derivedRules;
+        com.replymate.core.style.StyleService.ComposedVoice voice =
+            styleService == null ? null : styleService.compose(c);
+        ChatRequest request = PromptBuilder.build(new PromptBundle(
+            profiles.loadFiltered(), c, styleRules, sample,
+            voice == null ? "" : voice.voiceLine,
+            voice == null ? null : voice.extraLines,
+            profiles.extraFiltered()));
+
+        long t0 = clock.now();
+        Result<ChatReply> reply = provider.generate(request);
+        if (!reply.ok) return Result.err(reply.error);
+        ChatReply r = reply.value;
+
+        UsageEvent u = new UsageEvent();
+        u.ts = clock.now();
+        u.model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        u.tokensIn = r.tokensIn;
+        u.tokensOut = r.tokensOut;
+        u.kind = UsageKind.REPLY;
+        usage.insert(u);
+        log.i("DraftService", "voice preview for contact " + contactId
+            + " in " + (clock.now() - t0) + "ms");
+        return Result.ok(r);
+    }
+
     /** P3: tone-transform ONE existing draft into new variant(s).
      *  Isolation: only the draft's own text crosses the wire — no other contact's
      *  data is ever read here. Audit: prompt snapshot stored on the new drafts. */
@@ -177,7 +235,7 @@ public final class DraftService {
 
         AiProvider provider = gateway.active();
         if (provider == null) {
-            return Result.err("Set up your Gemini API key first (Settings → AI provider).");
+            return Result.err("Set up an AI provider first (Settings → AI providers) — add your API key.");
         }
 
         String system = "You rewrite a single chat reply draft on request. "

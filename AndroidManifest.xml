@@ -52,6 +52,7 @@
         <activity android:name=".ui.ProfileActivity" android:exported="false" />
         <activity android:name=".ui.VoiceActivity" android:exported="false" />
         <activity android:name=".ui.ProviderActivity" android:exported="false" />
+        <activity android:name=".ui.ProviderEditActivity" android:exported="false" />
         <activity android:name=".ui.ContactEditActivity" android:exported="false" />
         <activity android:name=".ui.ConversationActivity" android:exported="false" />
         <activity android:name=".ui.SourcesActivity" android:exported="false" />

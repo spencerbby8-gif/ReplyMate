@@ -60,6 +60,41 @@ public final class ProviderDao {
         }
     }
 
+    /** Every configured provider, newest first (P-polish multi-provider list). */
+    public java.util.List<ProviderDef> all() {
+        Cursor c = helper.getReadableDatabase().query("provider_def", null, null,
+            null, null, null, "id DESC");
+        java.util.List<ProviderDef> out = new java.util.ArrayList<ProviderDef>();
+        try {
+            while (c.moveToNext()) out.add(def(c));
+            return out;
+        } finally {
+            c.close();
+        }
+    }
+
+    /** Switch the single active provider atomically. */
+    public void setActive(long id) {
+        android.database.sqlite.SQLiteDatabase db = helper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            ContentValues off = new ContentValues();
+            off.put("is_active", 0);
+            db.update("provider_def", off, null, null);
+            ContentValues on = new ContentValues();
+            on.put("is_active", 1);
+            db.update("provider_def", on, "id=?", new String[] {String.valueOf(id)});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    public void delete(long id) {
+        helper.getWritableDatabase().delete("provider_def", "id=?",
+            new String[] {String.valueOf(id)});
+    }
+
     private static ContentValues values(ProviderDef d) {
         ContentValues v = new ContentValues();
         v.put("type", d.type.wire);

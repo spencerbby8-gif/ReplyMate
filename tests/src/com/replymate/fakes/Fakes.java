@@ -369,6 +369,9 @@ public final class Fakes {
             return result;
         }
         @Override public Result<Boolean> validateKey() { return Result.ok(Boolean.TRUE); }
+        @Override public Result<java.util.List<String>> listModels() {
+            return Result.ok(java.util.Collections.singletonList("test-model"));
+        }
     }
 
     public static final class GatewayFake implements ProviderGateway {

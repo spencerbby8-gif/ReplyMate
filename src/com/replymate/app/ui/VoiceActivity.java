@@ -32,6 +32,10 @@ public final class VoiceActivity extends Activity {
     private final Map<String, String> rows = new HashMap<String, String>();
     private EditText custom;
     private TextView preview;
+    private TextView previewOut;
+    private Button previewBtn;
+    private Button reset;
+    private boolean previewBusy;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -64,12 +68,29 @@ public final class VoiceActivity extends Activity {
 
         root.addView(Ui.label(this, "YOUR OWN STYLE INSTRUCTIONS (OPTIONAL)"));
         root.addView(Ui.sub(this,
-            "Write anything the presets don't cover — e.g. \"I never use full stops\", \"always answer with one question back\". Saved automatically, added to every reply (max 400 characters)."));
+            "Write anything the presets don't cover. Saved automatically, added to every reply (max 400 characters)."));
         custom = Ui.field(this, "e.g. I never use full stops; keep energy high but short…", true);
         custom.setText(StyleSettings.customPrompt(rows));
         root.addView(custom);
 
-        Button reset = Ui.btn(this, "Reset all to defaults");
+        // Live preview (P-polish): real generation against a fixed sample chat using the
+        // CURRENTLY SAVED voice — proves the presets + instructions actually landed.
+        root.addView(Ui.label(this, "TRY IT LIVE"));
+        root.addView(Ui.sub(this,
+            "Runs one real AI reply over a sample chat using your saved voice (uses your configured provider; counted in usage)."));
+        previewOut = Ui.sub(this, "");
+        previewOut.setPadding(0, Ui.dp(this, 6), 0, 0);
+        root.addView(previewOut);
+        previewBtn = Ui.btn(this, "Preview replies with this voice");
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-1, -2);
+        plp.topMargin = Ui.dp(this, 8);
+        root.addView(previewBtn, plp);
+        previewBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { runPreview(); }
+        });
+
+        reset = Ui.btn(this, "Reset all to defaults");
+        reset.setTextColor(Ui.RED);      // destructive — visually distinct
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.topMargin = Ui.dp(this, 16);
         root.addView(reset, lp);
@@ -78,6 +99,40 @@ public final class VoiceActivity extends Activity {
         });
 
         refreshPreview();
+    }
+
+    private void runPreview() {
+        if (previewBusy) return;
+        persistCustom();               // preview what the user sees, not stale state
+        refreshPreview();
+        previewBusy = true;
+        previewBtn.setEnabled(false);
+        previewOut.setText("Generating preview…");
+        previewOut.setTextColor(Ui.ACCENT);
+        com.replymate.app.platform.Tasks.call(
+            new com.replymate.app.platform.Tasks.Job<com.replymate.core.util.Result<com.replymate.core.ai.ChatReply>>() {
+                @Override public com.replymate.core.util.Result<com.replymate.core.ai.ChatReply> run() {
+                    return c.draftService().previewVoice(-1);   // -1 = global voice only
+                }
+            },
+            new com.replymate.app.platform.Tasks.Done<com.replymate.core.util.Result<com.replymate.core.ai.ChatReply>>() {
+                @Override public void accept(com.replymate.core.util.Result<com.replymate.core.ai.ChatReply> r) {
+                    previewBusy = false;
+                    previewBtn.setEnabled(true);
+                    if (!r.ok) {
+                        previewOut.setText("Preview failed: " + r.error);
+                        previewOut.setTextColor(Ui.RED);
+                        return;
+                    }
+                    StringBuilder sb = new StringBuilder("Sample chat — “you still coming on Saturday?”\nYour voice says:\n");
+                    int n = 1;
+                    for (String v : r.value.variants) {
+                        sb.append(n++).append(") ").append(v).append('\n');
+                    }
+                    previewOut.setText(sb.toString().trim());
+                    previewOut.setTextColor(Ui.GREEN);
+                }
+            });
     }
 
     @Override protected void onPause() {

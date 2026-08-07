@@ -291,6 +291,38 @@ public final class ConversationActivity extends Activity {
         card.addView(Ui.sub(this, favMark + draft.model + " · "
             + TimeFmt.dayTime(draft.createdAt) + " · " + draft.status.wire));
 
+        // Expandable "Why this reply?" panel (owner ask): which voice settings, contact
+        // overrides, custom instructions and learning signals shaped THIS reply — read
+        // from the same immutable snapshot the audit screen uses.
+        final TextView whyBody = Ui.sub(this, "");
+        whyBody.setVisibility(View.GONE);
+        whyBody.setPadding(0, Ui.dp(this, 2), 0, Ui.dp(this, 4));
+        card.addView(whyBody);
+        final TextView whyToggle = Ui.tv(this, "▸ Why this reply?", 12, Ui.ACCENT);
+        whyToggle.setPadding(0, Ui.dp(this, 2), 0, 0);
+        card.addView(whyToggle);
+        whyToggle.setOnClickListener(new View.OnClickListener() {
+            boolean open;
+            @Override public void onClick(View v) {
+                open = !open;
+                if (open) {
+                    java.util.List<String> lines = WhyLines.from(draft.promptSnapshotJson);
+                    if (lines.isEmpty()) {
+                        whyBody.setText("(generated before prompt auditing — no notes recorded)");
+                    } else {
+                        StringBuilder sb = new StringBuilder();
+                        for (String w : lines) sb.append("• ").append(w).append('\n');
+                        whyBody.setText(sb.toString().trim());
+                    }
+                    whyBody.setVisibility(View.VISIBLE);
+                    whyToggle.setText("▾ Why this reply?");
+                } else {
+                    whyBody.setVisibility(View.GONE);
+                    whyToggle.setText("▸ Why this reply?");
+                }
+            }
+        });
+
         // Action row: Copy · ☆/★ · Regen · Delete · Open-in-app.
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -306,7 +338,7 @@ public final class ConversationActivity extends Activity {
         addAction(actions, "Re-gen", new View.OnClickListener() {
             @Override public void onClick(View v) { generate(); }
         });
-        addAction(actions, "Delete", new View.OnClickListener() {
+        addActionColored(actions, "Delete", Ui.RED, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 c.drafts().delete(draft.id);
                 // P4 learning: deleting a draft without copying = rejection.
@@ -358,7 +390,13 @@ public final class ConversationActivity extends Activity {
 
     private TextView addAction(LinearLayout parent, String label,
                                View.OnClickListener listener) {
-        TextView a = Ui.tv(this, label, 12, Ui.DIM);
+        return addActionColored(parent, label, Ui.DIM, listener);
+    }
+
+    /** Destructive actions get the danger color (owner ask: visually distinct). */
+    private TextView addActionColored(LinearLayout parent, String label, int color,
+                                      View.OnClickListener listener) {
+        TextView a = Ui.tv(this, label, 12, color);
         a.setTypeface(Typeface.DEFAULT_BOLD);
         int hp = Ui.dp(this, 8), vp = Ui.dp(this, 6);
         a.setPadding(hp, vp, hp, vp);

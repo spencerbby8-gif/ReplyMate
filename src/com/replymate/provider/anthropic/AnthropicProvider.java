@@ -1,9 +1,7 @@
-package com.replymate.provider.gemini;
+package com.replymate.provider.anthropic;
 
 import com.replymate.core.ai.ChatReply;
 import com.replymate.core.ai.ChatRequest;
-import com.replymate.core.ai.GenerationOpts;
-import com.replymate.core.ai.Turn;
 import com.replymate.core.ports.AiProvider;
 import com.replymate.core.util.Logger;
 import com.replymate.core.util.Result;
@@ -11,12 +9,13 @@ import com.replymate.provider.http.ApiError;
 import com.replymate.provider.http.HttpClient;
 import com.replymate.provider.http.HttpResponse;
 import com.replymate.provider.http.RetryPolicy;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
-/** Gemini AiProvider (BLUEPRINT §5.2/§5.5): HTTPS call with retry/backoff honoring
- *  Retry-After, classified ApiError → user-readable Result errors. */
-public final class GeminiProvider implements AiProvider {
+/** Anthropic adapter (P-polish provider abstraction). Dialect: Messages API.
+ *  Note: /v1/messages returns ONE completion per call (no n parameter), so Anthropic
+ *  providers yield a single variant per generation — honest adapter limitation. */
+public final class AnthropicProvider implements AiProvider {
 
     private final String baseUrl;
     private final String model;
@@ -25,41 +24,38 @@ public final class GeminiProvider implements AiProvider {
     private final RetryPolicy retry;
     private final Logger log;
 
-    public GeminiProvider(String baseUrl, String model, String apiKey,
-                          HttpClient http, RetryPolicy retry, Logger log) {
-        // P-polish: no hardcoded defaults — ProviderType supplies the default base URL
-        // at config time; the model always comes from live discovery or user input.
+    public AnthropicProvider(String baseUrl, String model, String apiKey,
+                             HttpClient http, RetryPolicy retry, Logger log) {
         this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
         this.model = model == null ? "" : model.trim();
-        this.apiKey = apiKey == null ? "" : apiKey;
+        this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.http = http;
         this.retry = retry;
         this.log = log;
     }
 
-    @Override public String type() { return "gemini"; }
+    @Override public String type() { return "anthropic"; }
 
     public String model() { return model; }
 
     @Override public Result<ChatReply> generate(ChatRequest request) {
         if (apiKey.isEmpty()) return Result.err("AUTH — no API key configured");
-        if (baseUrl.isEmpty()) return Result.err("No provider base URL configured — open Settings → AI providers");
         if (model.isEmpty()) return Result.err("No model selected — pick one in Settings → AI providers");
-        final String url = GeminiPayloads.endpoint(baseUrl, model);
-        final Map<String, String> headers = GeminiPayloads.headers(apiKey);
-        final String body = GeminiPayloads.generateBody(request);
+        final String url = AnthropicApi.messagesEndpoint(baseUrl);
+        final Map<String, String> headers = AnthropicApi.headers(apiKey);
+        final String body = AnthropicApi.messagesBody(request, model);
 
         int attempt = 0;
         while (true) {
             attempt++;
             HttpResponse resp = http.post(url, headers, body);
             if (resp.code >= 200 && resp.code < 300) {
-                return GeminiParser.parseReply(resp.body);
+                return AnthropicApi.parseReply(resp.body);
             }
-            ApiError err = GeminiParser.errorFrom(resp);
+            ApiError err = AnthropicApi.errorFrom(resp);
             if (retry.shouldRetry(err, attempt)) {
                 long wait = retry.sleepMillis(attempt - 1, err.retryAfterSeconds);
-                log.w("Gemini", err.type + " (attempt " + attempt + ") — retrying in " + wait + "ms");
+                log.w("anthropic", err.type + " (attempt " + attempt + ") — retrying in " + wait + "ms");
                 if (!sleepMs(wait)) {
                     return Result.err(err.type + " — interrupted while retrying");
                 }
@@ -70,21 +66,19 @@ public final class GeminiProvider implements AiProvider {
     }
 
     @Override public Result<Boolean> validateKey() {
-        // Free probe: the models endpoint only verifies credentials, it never burns a
-        // generation token (replaces the old 1-token probe).
-        Result<java.util.List<String>> models = listModels();
+        Result<List<String>> models = listModels();
         if (models.ok) return Result.ok(Boolean.TRUE);
         return Result.err(models.error);
     }
 
-    @Override public Result<java.util.List<String>> listModels() {
+    @Override public Result<List<String>> listModels() {
         if (baseUrl.isEmpty()) return Result.err("No provider base URL configured");
-        HttpResponse resp = http.get(GeminiPayloads.modelsEndpoint(baseUrl),
-            GeminiPayloads.headers(apiKey));
+        HttpResponse resp = http.get(AnthropicApi.modelsEndpoint(baseUrl),
+            AnthropicApi.headers(apiKey));
         if (resp.code >= 200 && resp.code < 300) {
-            return GeminiParser.parseModels(resp.body);
+            return AnthropicApi.parseModels(resp.body);
         }
-        ApiError err = GeminiParser.errorFrom(resp);
+        ApiError err = AnthropicApi.errorFrom(resp);
         return Result.err(err.type + " — " + err.message);
     }
 

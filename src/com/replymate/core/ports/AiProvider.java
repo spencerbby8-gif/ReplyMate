@@ -13,6 +13,10 @@ public interface AiProvider {
     /** Run one generation call (implementation handles HTTP, retries, error mapping). */
     Result<ChatReply> generate(ChatRequest request);
 
-    /** Cheap probe that the configured credentials work (1-token call). */
+    /** Cheap probe that the configured credentials work (light endpoint, no generation). */
     Result<Boolean> validateKey();
+
+    /** Live model discovery (P-polish): query the provider's official models endpoint
+     *  and return the available model ids. Never cached/hardcoded — errors are friendly. */
+    Result<java.util.List<String>> listModels();
 }

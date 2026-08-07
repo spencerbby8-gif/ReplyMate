@@ -44,15 +44,15 @@ public class PromptBuilderTest {
         assertTrue(req.system.contains("natural, human"));
     }
 
-    @Test public void naturalTextingRulesGuardRepliesFromAiTells() {
-        // P4-stabilization: the anti-"AI-written" rule block must stay wired into
-        // every generated reply prompt (and defer to the user's own chat habits).
+    @Test public void charterFoundationReplacesOldIdentity() {
+        // P-polish: the owner's charter now founds every reply prompt (see
+        // VoiceCharterTest for the byte-exact pin); the old hand-written identity
+        // preamble is gone, plumbing (style/rules/contact) survives.
         ChatRequest req = PromptBuilder.build(new PromptBundle(
             profile("K"), Fakes.contact(1, "Bo"), "", new ArrayList<Message>()));
-        assertTrue(req.system.contains("real person texting"));
-        assertTrue(req.system.contains("no bullet points"));
-        assertTrue(req.system.contains("visible in K's own side"));
-        assertTrue(req.system.contains("short answer is enough"));
+        assertTrue(req.system.startsWith(VoiceCharter.TEXT));
+        assertTrue(req.system.contains("Rules: reply in K's voice"));
+        assertTrue(req.system.contains("Conversation partner: Bo"));
     }
 
     @Test public void turnsAreNamePrefixedAndRoleMapped() {

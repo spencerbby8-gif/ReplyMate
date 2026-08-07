@@ -20,6 +20,8 @@ import com.replymate.core.util.Result;
 
 public final class ContactEditActivity extends Activity {
     public static final String EXTRA_CONTACT_ID = "contact_id";
+    private static final String[] REL_CHIPS =
+        {"friend", "close friend", "family", "partner", "work", "client"};
     private AppContainer c;
     private long contactId = -1;
     private Contact existing;
@@ -34,7 +36,14 @@ public final class ContactEditActivity extends Activity {
     private android.widget.TextView learningStats;
     private EditText name;
     private EditText notes;
+    private boolean previewBusy;
+    private android.widget.Button previewBtn;
+    private android.widget.TextView previewOut;
+    private LinearLayout relChips;
+    private final java.util.List<android.widget.TextView> relChipViews =
+        new java.util.ArrayList<android.widget.TextView>();
     private EditText relType;
+    private String selectedRel = "";
     private EditText tone;
 
     @Override // android.app.Activity
@@ -58,15 +67,30 @@ public final class ContactEditActivity extends Activity {
             }
         });
         linearLayout.addView(tv);
-        linearLayout.addView(Ui.sub(this, "Who is this person to you? Relationship and tone shape how the AI replies to them."));
+        linearLayout.addView(Ui.sub(this, "Who is this person to you? This context shapes how the AI replies to them."));
+        // SECTION 1 — about them
+        linearLayout.addView(Ui.label(this, "ABOUT THEM"));
         linearLayout.addView(Ui.label(this, "Name *"));
         EditText field = Ui.field(this, "e.g. Amara", false);
         this.name = field;
         linearLayout.addView(field);
-        linearLayout.addView(Ui.label(this, "Relationship"));
-        EditText field2 = Ui.field(this, "e.g. close friend, sister, client", false);
-        this.relType = field2;
-        linearLayout.addView(field2);
+        linearLayout.addView(Ui.label(this, "Relationship — tap one"));
+        this.relChips = new LinearLayout(this);
+        this.relChips.setOrientation(LinearLayout.HORIZONTAL);
+        linearLayout.addView(this.relChips);
+        String[] rels = {"friend", "close friend", "family", "partner", "work", "client"};
+        for (final String rel : rels) {
+            TextView chip = relChip(rel);
+            this.relChips.addView(chip, relChipLp());
+        }
+        LinearLayout otherWrap = new LinearLayout(this);
+        otherWrap.setOrientation(LinearLayout.HORIZONTAL);
+        TextView otherChip = relChip("Other…");
+        otherWrap.addView(otherChip, relChipLp());
+        linearLayout.addView(otherWrap);
+        this.relType = Ui.field(this, "type the relationship (e.g. sister)", false);
+        this.relType.setVisibility(View.GONE);
+        linearLayout.addView(this.relType);
         linearLayout.addView(Ui.label(this, "Notes about them (context for the AI)"));
         EditText field3 = Ui.field(this, "e.g. runs a logistics business in PH; we met at uni…", true);
         this.notes = field3;
@@ -82,10 +106,12 @@ public final class ContactEditActivity extends Activity {
         Contact contact = this.existing;
         if (contact != null) {
             this.name.setText(contact.displayName);
-            this.relType.setText(this.existing.relationshipType);
+            selectRelationship(this.existing.relationshipType);
             this.notes.setText(this.existing.relationshipNotes);
             this.tone.setText(this.existing.toneOverride);
             this.language.setText(this.existing.languagePref);
+        } else {
+            selectRelationship("");
         }
         // P4: per-contact customization + learning — needs a saved contact id.
         if (this.existing != null) {
@@ -107,14 +133,14 @@ public final class ContactEditActivity extends Activity {
             public void onClick(View view) {
                 if (ContactEditActivity.this.existing != null) {
                     ContactEditActivity.this.existing.displayName = ContactEditActivity.this.name.getText().toString().trim();
-                    ContactEditActivity.this.existing.relationshipType = ContactEditActivity.this.relType.getText().toString().trim();
+                    ContactEditActivity.this.existing.relationshipType = ContactEditActivity.this.relationshipValue();
                     ContactEditActivity.this.existing.relationshipNotes = ContactEditActivity.this.notes.getText().toString().trim();
                     ContactEditActivity.this.existing.toneOverride = ContactEditActivity.this.tone.getText().toString().trim();
                     ContactEditActivity.this.existing.languagePref = ContactEditActivity.this.language.getText().toString().trim();
                     ContactEditActivity.this.c.contactService().update(ContactEditActivity.this.existing);
                     ContactEditActivity.this.persistCustomPrompt();
                 } else {
-                    Result<Contact> createManualContact = ContactEditActivity.this.c.contactService().createManualContact(ContactEditActivity.this.name.getText().toString(), ContactEditActivity.this.relType.getText().toString(), ContactEditActivity.this.notes.getText().toString(), ContactEditActivity.this.tone.getText().toString(), ContactEditActivity.this.language.getText().toString());
+                    Result<Contact> createManualContact = ContactEditActivity.this.c.contactService().createManualContact(ContactEditActivity.this.name.getText().toString(), ContactEditActivity.this.relationshipValue(), ContactEditActivity.this.notes.getText().toString(), ContactEditActivity.this.tone.getText().toString(), ContactEditActivity.this.language.getText().toString());
                     if (!createManualContact.ok) {
                         Toast.makeText(ContactEditActivity.this, createManualContact.error, 1).show();
                         return;
@@ -129,6 +155,7 @@ public final class ContactEditActivity extends Activity {
         // inline confirm — no dialog framework needed.
         if (this.existing != null) {
             final Button delete = Ui.btn(this, "Delete contact");
+            delete.setTextColor(Ui.RED);   // destructive — visually distinct
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
             dlp.topMargin = Ui.dp(this, 8);
             linearLayout.addView(delete, dlp);
@@ -154,6 +181,53 @@ public final class ContactEditActivity extends Activity {
         persistCustomPrompt();      // custom prompt survives the ‹ back path too
     }
 
+    /* -------------------------------------------------- relationship chips */
+
+    private TextView relChip(final String rel) {
+        final TextView chip = Ui.tv(this, rel, 12, Ui.DIM);
+        chip.setBackgroundResource(R.drawable.bg_field);
+        chip.setGravity(android.view.Gravity.CENTER);
+        chip.setPadding(Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10));
+        chip.setTag(rel);
+        chip.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { selectRelationship(rel); }
+        });
+        this.relChipViews.add(chip);
+        return chip;
+    }
+
+    private LinearLayout.LayoutParams relChipLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        lp.setMargins(Ui.dp(this, 2), Ui.dp(this, 2), Ui.dp(this, 2), 0);
+        return lp;
+    }
+
+    /** Select a relationship chip; an unknown value selects "Other…" with free text. */
+    private void selectRelationship(String value) {
+        String v = value == null ? "" : value.trim();
+        boolean preset = false;
+        for (String r : REL_CHIPS) if (r.equals(v)) preset = true;
+        this.selectedRel = preset ? v : (v.isEmpty() ? "" : "Other…");
+        for (TextView chip : this.relChipViews) {
+            boolean sel = chip.getTag().equals(this.selectedRel)
+                || (!preset && "Other…".equals(chip.getTag()) && !v.isEmpty());
+            chip.setTextColor(sel ? Ui.ACCENT : Ui.DIM);
+        }
+        boolean other = !preset && !v.isEmpty();
+        if (other) this.selectedRel = "Other…";
+        this.relType.setVisibility("Other…".equals(this.selectedRel) ? View.VISIBLE : View.GONE);
+        if (other) this.relType.setText(v);
+    }
+
+    /** Effective relationship value for saving (chip value or Other's free text). */
+    private String relationshipValue() {
+        if ("Other…".equals(this.selectedRel)) {
+            return this.relType.getText().toString().trim();
+        }
+        return this.selectedRel == null ? "" : this.selectedRel;
+    }
+
     /* ------------------------------------------------------ P4: customization */
 
     private void buildCustomization(LinearLayout root) {
@@ -169,6 +243,19 @@ public final class ContactEditActivity extends Activity {
             root.addView(overrideRow(control));
             root.addView(Ui.divider(this));
         }
+
+        // Live preview (P-polish): real generation over a sample chat using THIS
+        // contact's effective voice (overrides + custom prompt + learned hints).
+        this.previewOut = Ui.sub(this, "");
+        this.previewOut.setPadding(0, Ui.dp(this, 6), 0, 0);
+        root.addView(this.previewOut);
+        this.previewBtn = Ui.btn(this, "Preview replies with this voice");
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-1, -2);
+        plp.topMargin = Ui.dp(this, 6);
+        root.addView(this.previewBtn, plp);
+        this.previewBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { runVoicePreview(); }
+        });
 
         root.addView(Ui.label(this, "Special instruction for this chat (custom prompt)"));
         this.customPrompt = Ui.field(this,
@@ -215,6 +302,41 @@ public final class ContactEditActivity extends Activity {
         Integer g = StyleSettings.level(this.globalRows, control.key);
         int base = g != null ? g.intValue() : StyleControls.defaultLevel(control.key);
         return "Inherit: " + control.levelLabel(base);
+    }
+
+    private void runVoicePreview() {
+        if (this.previewBusy) return;
+        persistCustomPrompt();             // preview what the user just typed too
+        this.previewBusy = true;
+        this.previewBtn.setEnabled(false);
+        this.previewOut.setText("Generating preview…");
+        this.previewOut.setTextColor(Ui.ACCENT);
+        com.replymate.app.platform.Tasks.call(
+            new com.replymate.app.platform.Tasks.Job<com.replymate.core.util.Result<com.replymate.core.ai.ChatReply>>() {
+                @Override public com.replymate.core.util.Result<com.replymate.core.ai.ChatReply> run() {
+                    return ContactEditActivity.this.c.draftService()
+                        .previewVoice(ContactEditActivity.this.contactId);
+                }
+            },
+            new com.replymate.app.platform.Tasks.Done<com.replymate.core.util.Result<com.replymate.core.ai.ChatReply>>() {
+                @Override public void accept(com.replymate.core.util.Result<com.replymate.core.ai.ChatReply> r) {
+                    ContactEditActivity.this.previewBusy = false;
+                    ContactEditActivity.this.previewBtn.setEnabled(true);
+                    if (!r.ok) {
+                        ContactEditActivity.this.previewOut.setText("Preview failed: " + r.error);
+                        ContactEditActivity.this.previewOut.setTextColor(Ui.RED);
+                        return;
+                    }
+                    StringBuilder sb = new StringBuilder(
+                        "Sample chat — “you still coming on Saturday?”\nThis voice says:\n");
+                    int n = 1;
+                    for (String v : r.value.variants) {
+                        sb.append(n++).append(") ").append(v).append('\n');
+                    }
+                    ContactEditActivity.this.previewOut.setText(sb.toString().trim());
+                    ContactEditActivity.this.previewOut.setTextColor(Ui.GREEN);
+                }
+            });
     }
 
     /** Custom prompt box → style_setting (empty removes the row). */
@@ -362,6 +484,7 @@ public final class ContactEditActivity extends Activity {
         blp.topMargin = Ui.dp(this, 8);
         blp.rightMargin = Ui.dp(this, 8);
         Button reset = Ui.btn(this, "Reset learning");
+        reset.setTextColor(Ui.RED);        // destructive — visually distinct
         buttons.addView(reset, blp);
         Button export = Ui.btn(this, "Export (copy)");
         buttons.addView(export, new LinearLayout.LayoutParams(blp));

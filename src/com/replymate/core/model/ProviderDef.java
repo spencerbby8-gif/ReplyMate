@@ -5,9 +5,10 @@ package com.replymate.core.model;
 public class ProviderDef {
     public long id;
     public ProviderType type = ProviderType.GEMINI;
-    public String label = "Gemini";
-    public String baseUrl = "https://generativelanguage.googleapis.com";
-    public String modelName = "gemini-2.5-flash";
+    public String label = "";
+    public String baseUrl = "";
+    /** NEVER defaulted/hardcoded — set from live model discovery or user input. */
+    public String modelName = "";
     public String keyRef = "";
     public boolean isActive;
     public long createdAt;

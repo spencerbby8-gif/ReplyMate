@@ -78,7 +78,8 @@ public class ManifestCatalogTest {
         for (String cls : new String[] {
                 ".ui.HomeActivity", ".ui.SettingsActivity", ".ui.ProfileActivity",
                 ".ui.VoiceActivity",
-                ".ui.ProviderActivity", ".ui.ContactEditActivity", ".ui.ConversationActivity",
+                ".ui.ProviderActivity", ".ui.ProviderEditActivity",
+                ".ui.ContactEditActivity", ".ui.ConversationActivity",
                 ".ui.SourcesActivity", ".ui.UsageActivity", ".ui.PromptAuditActivity"}) {
             assertTrue("activity missing from manifest: " + cls, xml.contains(cls));
         }

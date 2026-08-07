@@ -11,4 +11,7 @@ public final class SqlProviderStore implements ProviderStore {
 
     @Override public long upsertActive(ProviderDef def) { return dao.upsertActive(def); }
     @Override public ProviderDef active() { return dao.active(); }
+    @Override public java.util.List<ProviderDef> all() { return dao.all(); }
+    @Override public void setActive(long id) { dao.setActive(id); }
+    @Override public void delete(long id) { dao.delete(id); }
 }

@@ -42,7 +42,7 @@ public class MigrationV3Test {
         try (Connection c = memoryDb()) {
             MigrationTest.JdbcExecSql db = v2DeviceDb(c);
             Migrations.migrate(db);
-            assertEquals(3, db.getUserVersion());
+            assertEquals(Migrations.LATEST, db.getUserVersion());
             try (Statement st = c.createStatement();
                  ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM contact")) {
                 assertTrue(rs.next());
@@ -63,7 +63,7 @@ public class MigrationV3Test {
         try (Connection c = memoryDb()) {
             MigrationTest.JdbcExecSql db = new MigrationTest.JdbcExecSql(c);
             Migrations.migrate(db);
-            assertEquals(3, db.getUserVersion());
+            assertEquals(Migrations.LATEST, db.getUserVersion());
         }
     }
 
@@ -129,13 +129,13 @@ public class MigrationV3Test {
         try (Connection c = memoryDb()) {
             MigrationTest.JdbcExecSql db = v2DeviceDb(c);
             Migrations.migrate(db);
-            assertEquals(3, db.getUserVersion());
+            assertEquals(Migrations.LATEST, db.getUserVersion());
             try (Statement st = c.createStatement()) {
                 st.executeUpdate("INSERT INTO style_setting(contact_id,key,value,updated_at)"
                     + " VALUES(NULL,'tone','1',1)");
             }
             Migrations.migrate(db);          // second pass must be a no-op
-            assertEquals(3, db.getUserVersion());
+            assertEquals(Migrations.LATEST, db.getUserVersion());
             try (Statement st = c.createStatement();
                  ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM style_setting")) {
                 assertTrue(rs.next());

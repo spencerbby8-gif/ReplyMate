@@ -136,13 +136,18 @@ public final class AppContainer {
         String secret;
         try {
             ProviderDef active = this.providerStore.active();
-            if (active != null && (secret = this.secretVault.getSecret(active.keyRef)) != null) {
-                if (!secret.trim().isEmpty()) {
-                    String str = active.baseUrl + "|" + active.modelName + "|" + secret;
+            if (active != null) {
+                secret = active.keyRef.isEmpty()
+                    ? "" : this.secretVault.getSecret(active.keyRef);
+                // keyless providers (Ollama) don't need a vault secret
+                if (secret != null && (active.type.needsKey ? !secret.trim().isEmpty() : true)) {
+                    String str = active.type.wire + "|" + active.baseUrl + "|"
+                        + active.modelName + "|" + secret;
                     if (this.cachedProvider == null || !str.equals(this.cachedSignature)) {
-                        this.cachedProvider = new GeminiProvider(active.baseUrl, active.modelName, secret, new HttpClient(), new RetryPolicy(), this.logger);
+                        this.cachedProvider = com.replymate.provider.ProviderFactory.build(
+                            active, secret, new HttpClient(), new RetryPolicy(), this.logger);
                         this.cachedSignature = str;
-                        registerSensitive(secret);
+                        if (!secret.trim().isEmpty()) registerSensitive(secret);
                     }
                     return this.cachedProvider;
                 }

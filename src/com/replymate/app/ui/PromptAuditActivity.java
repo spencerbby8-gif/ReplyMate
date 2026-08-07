@@ -85,9 +85,9 @@ public final class PromptAuditActivity extends Activity {
         meta2.setPadding(0, Ui.dp(this, 2), 0, Ui.dp(this, 6));
         card.addView(meta2);
 
-        // P4 audit surface: "why a reply sounded the way it did" (recorded with the
-        // snapshot at generation time — voice decisions, toggles, learning state).
-        java.util.List<String> why = whyNotes(d.promptSnapshotJson);
+        // "Why a reply sounded the way it did" (recorded with the snapshot at
+        // generation time — voice decisions, toggles, learning state).
+        java.util.List<String> why = WhyLines.from(d.promptSnapshotJson);
         if (!why.isEmpty()) {
             TextView whyHeader = Ui.tv(this, "Why it sounded this way", 12, Ui.ACCENT);
             whyHeader.setTypeface(Typeface.DEFAULT_BOLD);
@@ -131,23 +131,6 @@ public final class PromptAuditActivity extends Activity {
             }
         });
         return card;
-    }
-
-    /** P4: the snapshot's "why" array, exactly as recorded at generation time. */
-    private static java.util.List<String> whyNotes(String snapshotJson) {
-        java.util.List<String> out = new java.util.ArrayList<String>();
-        if (snapshotJson == null || snapshotJson.isEmpty()) return out;
-        try {
-            Object raw = com.replymate.core.json.Json.parseObj(snapshotJson).raw("why");
-            if (raw instanceof java.util.List) {
-                for (Object o : (java.util.List<?>) raw) {
-                    if (o != null) out.add(String.valueOf(o));
-                }
-            }
-        } catch (RuntimeException ignore) {
-            // legacy/corrupt snapshot — the audit view stays read-only and quiet.
-        }
-        return out;
     }
 
     /** Display-only light formatting of the stored JSON snapshot; content unchanged. */
