@@ -66,10 +66,41 @@ public final class RmNotificationListener extends NotificationListenerService {
     @Override public void onListenerConnected() {
         super.onListenerConnected();
         ACTIVE = this;
-        AppContainer c = ReplyMateApp.containerOf(this);
-        if (c != null) {
-            c.kv().put("listener.connected_at", String.valueOf(c.clock().now()));
-            c.logger().i("NLS", "listener connected");
+        final AppContainer c = ReplyMateApp.containerOf(this);
+        if (c == null) return;
+        c.kv().put("listener.connected_at", String.valueOf(c.clock().now()));
+        c.logger().i("NLS", "listener connected");
+        // P-background-4 (restart self-heal): on every (re)bind, re-run the watched
+        // pipeline once over everything still ACTIVE. Notifications posted while we
+        // were dead (OEM kill, update, reboot) are caught up NOW instead of never.
+        // Dedupe makes this idempotent: already-captured messages are skipped BEFORE
+        // any ping/draft/job, so nothing re-alerts and nothing regenerates.
+        Tasks.bg(new Runnable() {
+            @Override public void run() {
+                StatusBarNotification[] active;
+                try {
+                    active = getActiveNotifications();
+                } catch (RuntimeException e) {
+                    active = null;
+                }
+                reconcile(c, active);
+            }
+        });
+    }
+
+    /** Restart/re-bind catch-up (test seam): run a snapshot of still-active
+     *  notifications through the SAME guarded pipeline as live arrivals. */
+    static void reconcile(AppContainer c, StatusBarNotification[] active) {
+        if (c == null || active == null) return;
+        int seen = 0;
+        for (StatusBarNotification sbn : active) {
+            if (sbn == null) continue;
+            if (getPackageName(c).equals(pkgOf(sbn))) continue;   // never ingest our own
+            seen++;
+            process(sbn, c);
+        }
+        if (seen > 0) {
+            ringLine(c, "listener (re)connected · reconciled " + seen + " active notif(s)");
         }
     }
 
@@ -159,7 +190,16 @@ public final class RmNotificationListener extends NotificationListenerService {
             // Last-resort guard: the listener service itself must never crash.
             try {
                 bump(c, KV_PARSE_ERRORS);
+                ringLine(c, "pipeline error · " + pkg + " · " + e.getClass().getSimpleName());
                 c.logger().e("NLS", "listener pipeline failure", e);
+            } catch (RuntimeException ignored) { }
+        } catch (Throwable t) {
+            // P-background-4: even an Error (OEM-patched framework linkage failures)
+            // must never silently kill a capture — count it and keep listening.
+            try {
+                bump(c, KV_PARSE_ERRORS);
+                ringLine(c, "pipeline error · " + pkg + " · " + t.getClass().getSimpleName());
+                c.logger().e("NLS", "listener pipeline failure (error)", t instanceof Exception ? (Exception) t : new Exception(t));
             } catch (RuntimeException ignored) { }
         }
     }

@@ -126,8 +126,11 @@ public final class NotifExtractor {
                     copyAction(wearable.get(i), i, RawNotif.ActionRef.SRC_WEARABLE, raw);
                 }
             }
-        } catch (RuntimeException ignored) {
-            // absent/broken wearable extensions must never affect standard extraction
+        } catch (Throwable ignored) {
+            // absent/broken wearable extensions must never affect standard extraction.
+            // Throwable (not just RuntimeException): OEM skins have thrown Errors from
+            // vendor-patched framework paths (P-background-4) — the wearable list is an
+            // OPTIONAL enrichment; capture must survive whatever it does.
         }
     }
 

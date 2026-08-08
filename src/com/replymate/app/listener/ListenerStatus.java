@@ -30,6 +30,20 @@ public final class ListenerStatus {
             == PackageManager.PERMISSION_GRANTED;
     }
 
+    /** Battery: is ReplyMate exempt from battery optimization (i.e. background
+     *  work not throttled)? READ-ONLY system call (no permission needed); false
+     *  when the platform can't answer. Diagnostics surfaces this so a killed
+     *  pipeline is one glance away from its most common OEM cause. */
+    public static boolean batteryWhitelisted(Context ctx) {
+        try {
+            android.os.PowerManager pm =
+                (android.os.PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     /** Deep-link to the system toggle screen for our listener. */
     public static void openAccessSettings(Context ctx) {
         Intent i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);

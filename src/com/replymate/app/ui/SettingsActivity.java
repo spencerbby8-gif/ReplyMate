@@ -340,6 +340,8 @@ public final class SettingsActivity extends Activity {
         sb.append("Listener:\n");
         sb.append("  enabled in system: ").append(ListenerStatus.isServiceEnabled(this)).append('\n');
         sb.append("  own notifications: ").append(ListenerStatus.canPostNotifications(this)).append('\n');
+        sb.append("  battery optimization ignored: ").append(ListenerStatus.batteryWhitelisted(this))
+          .append("  (false + delivery trouble = set Battery → Unrestricted)").append('\n');
         sb.append("  connected at: ").append(tsLine("listener.connected_at")).append('\n');
         sb.append("  disconnected at: ").append(tsLine("listener.disconnected_at")).append('\n');
         sb.append("  watch whatsapp: ").append(c.kv().get("watch.whatsapp", "1"))
