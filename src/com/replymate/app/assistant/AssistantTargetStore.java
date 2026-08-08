@@ -74,6 +74,33 @@ public final class AssistantTargetStore {
         return s.length() <= 180 ? s : s.substring(0, 180);
     }
 
+    /** P-background-6 (first-draft Approve): when capture-time raw carried no usable
+     *  reply action, re-scan THIS APP's live notifications once at generate time and
+     *  adopt the first one that really exposes RemoteInput (target + probe updated
+     *  in place). Returns true when the target became usable. */
+    public static boolean refreshFromLive(
+            KvStore kv, long contactId, String packageName,
+            android.service.notification.StatusBarNotification[] actives) {
+        if (kv == null || packageName == null || packageName.isEmpty() || actives == null) {
+            return false;
+        }
+        for (android.service.notification.StatusBarNotification sbn : actives) {
+            if (sbn == null || !packageName.equals(sbn.getPackageName())) continue;
+            RawNotif raw;
+            try {
+                raw = com.replymate.app.listener.NotifExtractor.toRaw(sbn);
+            } catch (RuntimeException e) {
+                continue;
+            }
+            if (raw == null) continue;
+            if (AssistantPlanner.directAction(raw.actions) != null) {
+                save(kv, contactId, raw, System.currentTimeMillis());
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Load — tolerant: missing/corrupt json yields an unusable (NONE) target. */
     public static Target load(KvStore kv, long contactId) {
         Target t = new Target();

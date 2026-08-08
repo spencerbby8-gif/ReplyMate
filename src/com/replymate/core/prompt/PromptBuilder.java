@@ -29,14 +29,40 @@ public final class PromptBuilder {
             ? null : com.replymate.core.listener.WatchedApps.labelFor(latest.channel);
         com.replymate.core.model.ContentKind kind = latest == null
             ? null : latest.effectiveKind();
-        Turn task = TaskComposer.defaultTask(
-            bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
-            bundle.contact.displayName,
-            latest == null ? null : latest.body, appLabel, kind,
-            latest == null ? null : latest.senderName);
+        // P-background-6: a rapid-fire unread tail is answered ONCE as a burst —
+        // summarizing it into its single point — not message by message.
+        java.util.List<String> burst = burstTailUsableIncoming(bundle.thread, 6);
+        Turn task = burst.size() >= 2
+            ? TaskComposer.burstTask(
+                bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
+                bundle.contact.displayName, burst, appLabel)
+            : TaskComposer.defaultTask(
+                bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
+                bundle.contact.displayName,
+                latest == null ? null : latest.body, appLabel, kind,
+                latest == null ? null : latest.senderName);
         ChatRequest req = new ChatRequest(system, turns, task,
             GenerationOpts.of(VARIANT_COUNT, 0.8, 220));
         return TokenBudgeter.fit(req, TokenBudgeter.DEFAULT_MAX_INPUT);
+    }
+
+    /** The unread burst tail: consecutive INCOMING usable-text messages counting
+     *  back from the thread end, stopping at the owner's last OUTGOING (that ends
+     *  the burst logically) or at {@code max} items. Oldest-first in the result. */
+    public static java.util.List<String> burstTailUsableIncoming(
+            java.util.List<com.replymate.core.model.Message> thread, int max) {
+        java.util.LinkedList<String> out = new java.util.LinkedList<String>();
+        if (thread == null) return out;
+        for (int i = thread.size() - 1; i >= 0 && out.size() < max; i--) {
+            com.replymate.core.model.Message m = thread.get(i);
+            if (m == null) continue;
+            if (m.direction == com.replymate.core.model.Direction.OUTGOING) break;
+            if (m.direction == com.replymate.core.model.Direction.INCOMING
+                    && usableText(m.body)) {
+                out.addFirst(m.body.trim());
+            }
+        }
+        return out;
     }
 
     /** The message a reply would answer: the LATEST incoming message whose body carries

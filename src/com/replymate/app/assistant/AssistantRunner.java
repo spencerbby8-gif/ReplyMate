@@ -43,6 +43,11 @@ public final class AssistantRunner {
 
     public static final String KV_ENABLED = "assistant.enabled";
 
+    /** P-background-6: extra settle time ON TOP of the shared 5s batch window —
+     *  a rapid burst coalesces into ONE scheduled job (rolling re-arm on every new
+     *  ping), keeping "collect for a short window after the last message" true. */
+    private static final long SETTLE_EXTRA_MS = 1500;
+
     /** Delay timer ONLY — work never runs on this thread. */
     private static final Handler TIMER = new Handler(Looper.getMainLooper());
     private static final Map<Long, Runnable> PENDING = new HashMap<Long, Runnable>();
@@ -90,7 +95,7 @@ public final class AssistantRunner {
             PENDING.put(contactId, fire);
         }
         long due = BatchWindow.dueAt(ping.latestTs);
-        long delay = BatchWindow.delayFrom(System.currentTimeMillis(), due) + 300;
+        long delay = BatchWindow.delayFrom(System.currentTimeMillis(), due) + SETTLE_EXTRA_MS;
         TIMER.postDelayed(fire, delay);
     }
 
@@ -166,6 +171,24 @@ public final class AssistantRunner {
             Draft d = r.value.drafts.get(0);
             String appLabel = WatchedApps.labelFor(lastIncoming.channel);
             AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
+            if (!t.usable()) {
+                // P-background-6: the FIRST draft must show Approve & send whenever the
+                // app really exposes RemoteInput — Regenerate must never be the way to
+                // reveal it. The capture-time raw can predate the visible actions
+                // (WhatsApp often posts first, attaches actions a beat later), so
+                // re-probe the live shade once at generate time.
+                com.replymate.app.listener.RmNotificationListener l =
+                    com.replymate.app.listener.RmNotificationListener.active();
+                if (l != null && AssistantTargetStore.refreshFromLive(
+                        c.kv(), contactId, t.packageName, l.safeActiveNotifications())) {
+                    t = AssistantTargetStore.load(c.kv(), contactId);
+                    AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                        AssistantEvent.Stage.NOTIFY,
+                        "capture-time raw carried no usable reply action",
+                        "live re-probe found the app's real reply action — Approve & send is on the first draft",
+                        "");
+                }
+            }
             AssistantPlanner.Capability cap = t.usable()
                 ? AssistantPlanner.Capability.DIRECT : AssistantPlanner.Capability.NONE;
             if (cap == AssistantPlanner.Capability.NONE) {

@@ -68,4 +68,30 @@ public final class TaskComposer {
         t.append("\nOutput only the reply text.");
         return Turn.user(t.toString());
     }
+
+    /** P-background-6: rapid incoming texts are ONE burst, not N separate questions.
+     *  The unread tail (consecutive incoming since the owner's last outgoing) is
+     *  quoted as a numbered burst; the model summarizes it into its single point and
+     *  writes ONE reply to that point. Token discipline: max 6 items, 180 chars each. */
+    public static Turn burstTask(String ownerName, String partnerName,
+                                 java.util.List<String> burstTexts, String appLabel) {
+        StringBuilder t = new StringBuilder("Read the conversation above and write ")
+            .append(ownerName).append("'s next reply to ").append(partnerName).append('.');
+        t.append("\n").append(partnerName).append(" fired ")
+            .append(burstTexts.size()).append(" messages in quick succession (a burst):");
+        int i = 1;
+        for (String m : burstTexts) {
+            String q = m == null ? "" : m.trim();
+            if (q.length() > 180) q = q.substring(0, 180) + "…";
+            t.append("\n").append(i++).append(") \"").append(q).append("\"");
+        }
+        t.append("\nSummarize the burst into its single point and write ONE reply that"
+            + " answers that point (the latest message leads). Do NOT answer each"
+            + " message separately, and do not reply to an older turn.");
+        if (appLabel != null && !appLabel.trim().isEmpty()) {
+            t.append("\nThis chat is on ").append(appLabel.trim()).append('.');
+        }
+        t.append("\nOutput only the reply text.");
+        return Turn.user(t.toString());
+    }
 }

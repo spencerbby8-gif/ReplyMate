@@ -48,6 +48,16 @@ public final class RmNotificationListener extends NotificationListenerService {
         return ACTIVE;
     }
 
+    /** Guarded snapshot of every active notification the system shows us
+     *  (null when the shade link can't answer right now). */
+    public StatusBarNotification[] safeActiveNotifications() {
+        try {
+            return getActiveNotifications();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     /** Live lookup of a still-posted notification by its sbn key; null if gone. */
     public StatusBarNotification findActive(String sbnKey) {
         if (sbnKey == null || sbnKey.isEmpty()) return null;

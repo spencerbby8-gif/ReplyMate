@@ -130,9 +130,23 @@ public final class SettingsActivity extends Activity {
                 @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
                     c.kv().put(
                         com.replymate.app.assistant.AssistantRunner.KV_ENABLED, on ? "1" : "0");
+                    // P-background-6: toggling ON drives Android's proper approval
+                    // flow (notification access / show-notifications / battery),
+                    // each explained; the subtitle keeps any gap honest.
+                    if (on) runAssistantApprovalFlow();
                     refreshRows();
                 }
             });
+        assistantRow.row.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                // blocked-state re-entry: tap the row itself to re-run the flow
+                if (com.replymate.app.assistant.AssistantRunner.enabled(c)
+                        && !com.replymate.app.assistant.AssistantPrereq
+                            .missing(SettingsActivity.this).isEmpty()) {
+                    runAssistantApprovalFlow();
+                }
+            }
+        });
         root.addView(assistantRow.row);
         root.addView(Ui.divider(this));
 
@@ -295,6 +309,48 @@ public final class SettingsActivity extends Activity {
 
 
 
+    /** P-background-6: drive Android's proper approval flow for background
+     *  generation — every missing approval is explained in plain words, the
+     *  in-app approval (show-notifications) is requested here, and the button
+     *  opens the first screen-backed fix. Switch = master intent (kv); the
+     *  subtitle carries the real capability. */
+    private void runAssistantApprovalFlow() {
+        java.util.EnumSet<com.replymate.app.assistant.AssistantPrereq.Need> missing =
+            com.replymate.app.assistant.AssistantPrereq.missing(this);
+        if (missing.isEmpty()) return;
+        if (missing.contains(com.replymate.app.assistant.AssistantPrereq.Need.POST_NOTIFICATIONS)
+                && android.os.Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(new String[] {"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIF);
+        }
+        StringBuilder msg = new StringBuilder(
+            "Background generation needs these Android approvals:\n\n");
+        com.replymate.app.assistant.AssistantPrereq.Need firstScreen = null;
+        for (com.replymate.app.assistant.AssistantPrereq.Need n : missing) {
+            msg.append("• ").append(com.replymate.app.assistant.AssistantPrereq.explain(n)).append('\n');
+            if (firstScreen == null
+                    && com.replymate.app.assistant.AssistantPrereq.screenIntent(n) != null) {
+                firstScreen = n;
+            }
+        }
+        msg.append("\nReplyMate stays read-only and local-first —"
+            + " nothing is ever sent without your Approve.");
+        if (firstScreen == null) return;   // only the in-app request was missing
+        final android.content.Intent screen =
+            com.replymate.app.assistant.AssistantPrereq.screenIntent(firstScreen);
+        final String label = com.replymate.app.assistant.AssistantPrereq.chip(firstScreen);
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Allow background generation")
+            .setMessage(msg.toString())
+            .setPositiveButton("Open " + label + " settings",
+                new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        try { startActivity(screen); } catch (RuntimeException ignored) { }
+                    }
+                })
+            .setNegativeButton("Later", null)
+            .show();
+    }
+
     private void refreshRows() {
         if (c == null) return;
         com.replymate.core.model.ProviderDef active = c.providers().active();
@@ -307,13 +363,31 @@ public final class SettingsActivity extends Activity {
             ? "allowed ✓ — ReplyMate can alert you about new messages"
             : "blocked — tap to allow (alerts stay silent otherwise)");
         if (assistantRow != null) {
-            boolean canPost = ListenerStatus.canPostNotifications(this);
-            assistantRow.sw.setEnabled(canPost);
-            Ui.setRowSub(assistantRow.row, !canPost
-                ? "needs the notification permission above first"
-                : com.replymate.app.assistant.AssistantRunner.enabled(c)
-                    ? "on ✓ — drafts on new pings; you approve every send"
-                    : "off — new pings only alert, nothing is drafted");
+            // P-background-6: switch = the master intent (real kv state); subtitle =
+            // the REAL capability — any missing Android approval is named, and the
+            // row is tappable to fix it. Never a fake "on".
+            assistantRow.sw.setEnabled(true);
+            assistantRow.sw.setChecked(
+                com.replymate.app.assistant.AssistantRunner.enabled(c));
+            if (!com.replymate.app.assistant.AssistantRunner.enabled(c)) {
+                Ui.setRowSub(assistantRow.row,
+                    "off — new pings only alert, nothing is drafted");
+            } else {
+                java.util.EnumSet<com.replymate.app.assistant.AssistantPrereq.Need> missing =
+                    com.replymate.app.assistant.AssistantPrereq.missing(this);
+                if (missing.isEmpty()) {
+                    Ui.setRowSub(assistantRow.row,
+                        "on ✓ — access ✓ notifications ✓ battery ✓ · you approve every send");
+                } else {
+                    StringBuilder chips = new StringBuilder();
+                    for (com.replymate.app.assistant.AssistantPrereq.Need n : missing) {
+                        if (chips.length() > 0) chips.append(" · ");
+                        chips.append(com.replymate.app.assistant.AssistantPrereq.chip(n));
+                    }
+                    Ui.setRowSub(assistantRow.row,
+                        "on — blocked by: " + chips + " (tap to fix)");
+                }
+            }
         }
         com.replymate.core.auth.AuthSession s = c.sessions().get();
         Ui.setRowSub(accountRow, s == null
