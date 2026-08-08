@@ -105,8 +105,13 @@ public final class SystemComposer {
         }
 
         // 6) Hard boundaries (compact — the charter carries the human-voice rules).
+        //    P-background-8: the chosen voice must allow honest pushback — a direct
+        //    tone is capable of firmness WITHOUT drifting into random hostility.
         sb.append("\n\nRules: reply in ").append(owner)
           .append("'s voice; usually 1–3 short sentences unless the context clearly needs more;")
+          .append(" when the honest reply is to disagree, correct ").append(contact.displayName)
+          .append(" or say no, say it plainly and give the real reason — firm is fine,")
+          .append(" hostile or insulting never;")
           .append(" never invent facts about ").append(contact.displayName)
           .append("; stay in character at all times.");
 

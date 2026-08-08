@@ -39,7 +39,7 @@ public class P4PromptTest {
 
     @Test public void customPromptAndLearnedHintsLandInContactBlock() {
         ChatRequest req = buildWithVoice("", Arrays.asList(
-            "Special instruction for this chat: greet her by name",
+            "This contact's own rules (override the global voice): greet her by name",
             "Learned from the owner's choices: keep replies noticeably shorter;"), "");
         int partnerIdx = req.system.indexOf("Conversation partner:");
         assertTrue(partnerIdx >= 0);

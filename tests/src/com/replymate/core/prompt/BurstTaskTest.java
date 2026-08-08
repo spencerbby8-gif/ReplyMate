@@ -56,6 +56,68 @@ public class BurstTaskTest {
         assertTrue(task.contains("Output only the reply text."));
     }
 
+    /* -------------------------------------------- P-background-8 human-burst rules */
+
+    @Test public void burstTaskForbidsPerMessageRepliesAndNamesHumanRules() {
+        Contact c = Fakes.contact(1, "Ada");
+        List<Message> thread = new ArrayList<Message>();
+        thread.add(in(1, "are you coming"));
+        thread.add(in(1, "?"));
+        thread.add(in(1, "need an answer by 5"));
+        String task = PromptBuilder.build(
+            new PromptBundle(profile(), c, "", thread)).task.text;
+        assertTrue("one natural reply only", task.contains("ONE reply"));
+        assertTrue("the burst is summarized, not enumerated",
+            task.contains("single point"));
+        assertTrue("corrections win", task.contains("the correction wins"));
+        assertTrue("topic shifts anchor on the newest",
+            task.contains("answer the newest topic"));
+        assertTrue("filler ignored", task.contains("filler"));
+    }
+
+    @Test public void questionFollowedByACorrectionKeepsBothQuoted() {
+        Contact c = Fakes.contact(1, "Ada");
+        List<Message> thread = new ArrayList<Message>();
+        thread.add(in(1, "can you pick up 4 bottles"));
+        thread.add(in(1, "no wait, 6"));
+        ChatRequest req = PromptBuilder.build(
+            new PromptBundle(profile(), c, "", thread));
+        assertTrue(req.task.text.contains("can you pick up 4 bottles"));
+        assertTrue(req.task.text.contains("no wait, 6"));
+        assertTrue("the correction rule must reach the prompt",
+            req.task.text.contains("correction wins"));
+    }
+
+    @Test public void midBurstTopicChangeIsStillOneReply() {
+        Contact c = Fakes.contact(1, "Ada");
+        List<Message> thread = new ArrayList<Message>();
+        thread.add(in(1, "did you see the match"));
+        thread.add(in(1, "crazy game"));
+        thread.add(in(1, "anyway can you send that document"));
+        String task = PromptBuilder.build(
+            new PromptBundle(profile(), c, "", thread)).task.text;
+        assertTrue(task.contains("did you see the match"));
+        assertTrue(task.contains("anyway can you send that document"));
+        assertTrue("topic-shift rule must reach the prompt",
+            task.contains("newest topic"));
+        assertTrue(task.contains("ONE reply"));
+    }
+
+    @Test public void repeatedMessagesCollapseIntoOneBurstTask() {
+        Contact c = Fakes.contact(1, "Ada");
+        List<Message> thread = new ArrayList<Message>();
+        thread.add(in(1, "you there"));
+        thread.add(in(1, "hello"));
+        thread.add(in(1, "hello"));
+        thread.add(in(1, "??"));
+        String task = PromptBuilder.build(
+            new PromptBundle(profile(), c, "", thread)).task.text;
+        assertTrue("repeats are still ONE burst, not 4 replies",
+            task.contains("a burst"));
+        assertTrue("filler-repeat rule must reach the prompt",
+            task.contains("Ignore pure filler repeats"));
+    }
+
     @Test public void singleIncomingKeepsTheOriginalTaskShape() {
         Contact c = Fakes.contact(1, "Ada");
         List<Message> thread = new ArrayList<Message>();

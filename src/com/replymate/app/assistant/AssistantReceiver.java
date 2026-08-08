@@ -15,23 +15,33 @@ import com.replymate.app.di.AppContainer;
 import com.replymate.app.listener.RmNotificationListener;
 import com.replymate.app.platform.Tasks;
 import com.replymate.core.assistant.AssistantEvent;
+import com.replymate.core.assistant.AssistantLearning;
 import com.replymate.core.assistant.AssistantPlanner;
 import com.replymate.core.model.Contact;
 import com.replymate.core.model.DraftStatus;
 
-/** P-background-2: the three notification buttons. Approve is the ONLY send path —
- *  it delivers the draft through the source app's own quick-reply contract
- *  (RemoteInput results → the action's PendingIntent), re-resolved LIVE from the
+/** P-background-2: the notification buttons. Approve is the ONLY send path — it
+ *  delivers the draft through the source app's own quick-reply contract
+ *  (RemoteInput results → the action's PendingIntent), re-resolved from the
  *  status bar at tap time. Every failure leaves a structured AssistantEvent record
  *  (conversation / provider / model / alert id / stage / reason / action / fix).
- *  If the reply target is gone (dismissed notification, dead listener, deleted
- *  conversation, OEM weirdness) we never pretend: the draft is copied instead and
- *  the alert says exactly what happened. */
+ *
+ *  P-background-8 approve order (owner's blocking audit, dismissal-hardened):
+ *    1. the ORIGINAL notification still live (exact sbn key) → send there;
+ *    2. it was dismissed, but the SAME conversation is live again under a NEW key
+ *       (strict conversationId/title identity match) → resolve the reply action on
+ *       the FRESH notification, send, and adopt its geometry;
+ *    3. else the CACHED reply PendingIntent (system token) → fire it; the settled
+ *       card says plainly that delivery couldn't be watched (no fake certainty);
+ *    4. else honest copy fallback — draft preserved, never a fake "Sent ✓".
+ *  P-background-8 learning: approve/copy/regenerate/dismiss all record the SAME
+ *  signal kinds as the manual screen (AssistantLearning), per-contact gated. */
 public final class AssistantReceiver extends BroadcastReceiver {
 
     public static final String ACTION_SEND = "com.replymate.app.assistant.SEND";
     public static final String ACTION_COPY = "com.replymate.app.assistant.COPY";
     public static final String ACTION_REGEN = "com.replymate.app.assistant.REGEN";
+    public static final String ACTION_DISMISS = "com.replymate.app.assistant.DISMISS";
 
     public static final String EXTRA_CONTACT_ID = "contactId";
     public static final String EXTRA_NAME = "name";
@@ -64,11 +74,16 @@ public final class AssistantReceiver extends BroadcastReceiver {
             @Override public void run() {
                 try {
                     if (ACTION_REGEN.equals(action)) {
+                        // P-background-8 learning: the Regenerate button = "another take".
+                        Contact contact = c.contacts().get(contactId);
+                        AssistantLearning.onRegenerate(c.learningService(), contact);
                         AssistantRunner.regenerateNow(c, contactId, name);
                     } else if (ACTION_COPY.equals(action)) {
                         copyAndSettle(ctx, c, contactId, name, appLabel, text, draftId, null);
                     } else if (ACTION_SEND.equals(action)) {
                         approveAndSend(ctx, c, contactId, name, appLabel, text, draftId);
+                    } else if (ACTION_DISMISS.equals(action)) {
+                        noteDismissed(c, contactId, draftId);
                     }
                 } catch (RuntimeException e) {
                     AssistantNotifier.settled(ctx, contactId,
@@ -82,7 +97,32 @@ public final class AssistantReceiver extends BroadcastReceiver {
         });
     }
 
+    /* ----------------------------------------------------------------- dismiss */
+
+    /** ANY dismissal of the draft card (swipe OR the auto-cancel that follows an
+     *  action/body tap) re-arms the heads-up flag so the NEXT genuinely new burst
+     *  pops again. Deliberately NOT a learning signal: auto-cancel fires this same
+     *  delete-intent on Approve/Copy/Open taps, so a swipe can never be told apart
+     *  from an action tap — recording a "rejection" here would corrupt learning
+     *  with false positives. True rejections come from the conversation screen's
+     *  Delete button, which has unambiguous provenance. No UI. */
+    private void noteDismissed(AppContainer c, long contactId, long draftId) {
+        c.kv().put(AssistantPlanner.alertedKvKey(contactId), "0");
+        AssistantDiag.record(c, contactId, "#" + contactId,
+            AssistantPlanner.notifTag(contactId), "",
+            AssistantEvent.Stage.NOTIFY,
+            "the draft alert left the shade (dismissed or replaced by an action)",
+            "heads-up re-armed for the next genuinely new burst"
+                + " (not a rejection signal — a swipe and a button tap look identical here)",
+            "");
+    }
+
     /* ------------------------------------------------------------------ approve */
+
+    /** Send flavor — decides how decisive the settled card is allowed to sound. */
+    private static final int HOW_LIVE = 0;         // original notification, observed after
+    private static final int HOW_CONVERSATION = 1; // re-posted same conversation, live
+    private static final int HOW_CACHED = 3;       // cached PendingIntent, unwatchable
 
     private void approveAndSend(Context ctx, AppContainer c, long contactId, String name,
                                 String appLabel, String text, long draftId) {
@@ -91,6 +131,7 @@ public final class AssistantReceiver extends BroadcastReceiver {
         String tag = AssistantPlanner.notifTag(contactId);
         String why = null;
         String sbnKey = "";
+        int how = HOW_LIVE;
 
         // Conversation deleted since the alert was posted? Nothing to reply into.
         Contact contact = c.contacts().get(contactId);
@@ -115,24 +156,68 @@ public final class AssistantReceiver extends BroadcastReceiver {
             if (sbn != null) {
                 why = tryRemoteSend(ctx, c, contactId, who, tag, sbn, t, text);
             } else {
-                // P-background-7: the user cleared the original notification (or our
-                // shade link is gone) BEFORE approving. Send through the CACHED reply
-                // PendingIntent when it remains valid — never fake, expire honestly.
-                why = tryCachedSend(ctx, c, contactId, who, tag, app, t, text,
-                    listener == null
-                        ? "ReplyMate's link to the notification shade was recycled"
-                        : "the original " + app + " notification was dismissed");
+                // The original sbn key is gone (dismissed/churned). TWO more honest
+                // attempts before any fallback (P-background-8 ordering):
+                String liveMissReason = listener == null
+                    ? "ReplyMate's link to the notification shade was recycled"
+                    : "the original " + app + " notification was dismissed";
+
+                // (2) SAME conversation, re-posted under a NEW key → fresh send target.
+                StatusBarNotification reposted = listener == null
+                    ? null : AssistantTargetStore.findConversationMatch(
+                        t, listener.safeActiveNotifications());
+                if (reposted != null) {
+                    String whyReposted = tryRemoteSend(ctx, c, contactId, who, tag,
+                        reposted, t, text);
+                    if (whyReposted == null) {
+                        how = HOW_CONVERSATION;
+                        // Adopt the fresher geometry + cache its PI for next time.
+                        adoptLiveTarget(c, contactId, reposted);
+                        sbnKey = reposted.getKey();
+                    } else {
+                        // the re-post didn't pan out — the cached target is next
+                        AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                            AssistantEvent.Stage.APPROVE_RESOLVE,
+                            "a re-posted same-conversation notification was found but unusable: "
+                                + whyReposted,
+                            "moving on to the cached reply target", "");
+                    }
+                }
+                if (how != HOW_CONVERSATION) {
+                    // (3) CACHED reply PendingIntent — fired with the official results
+                    //     wire; success is ledgered as UNWATCHED (no fake certainty).
+                    why = tryCachedSend(ctx, c, contactId, who, tag, app, t, text,
+                        liveMissReason);
+                    if (why == null) how = HOW_CACHED;
+                }
             }
         }
 
+        // This draft cycle is over either way — the NEXT fresh burst may pop again.
+        c.kv().put(AssistantPlanner.alertedKvKey(contactId), "0");
+
         if (why == null) {
             if (draftId > 0) c.drafts().updateStatus(draftId, DraftStatus.SENT);
+            AssistantLearning.onQuickSent(c.learningService(), contact,
+                draftId > 0 ? Long.valueOf(draftId) : null);
+            String handoff = how == HOW_CACHED
+                ? "fired through " + app + "'s cached quick-reply target (unwatched)"
+                : how == HOW_CONVERSATION
+                    ? "delivered through " + app + "'s quick-reply on the re-posted notification"
+                    : "approved text delivered through " + app + "'s quick-reply";
             AssistantDiag.record(c, contactId, who, tag, sbnKey,
-                AssistantEvent.Stage.REMOTE_SEND, "—",
-                "approved text delivered through " + app + "'s quick-reply", "");
-            AssistantNotifier.settled(ctx, contactId, "Sent ✓",
-                "Delivered through " + app + "'s quick-reply as you approved:\n" + text,
-                false);
+                AssistantEvent.Stage.REMOTE_SEND, "—", handoff, "");
+            if (how == HOW_CACHED) {
+                AssistantNotifier.settled(ctx, contactId, "Sent ✓ via cached target",
+                    "ReplyMate fired " + app + "'s saved reply action with your text —"
+                        + " the original alert was already gone, so ReplyMate couldn't"
+                        + " watch it land. Check the chat if you want to be sure:\n" + text,
+                    true);
+            } else {
+                AssistantNotifier.settled(ctx, contactId, "Sent ✓",
+                    "Delivered through " + app + "'s quick-reply as you approved:\n" + text,
+                    false);
+            }
         } else {
             AssistantDiag.record(c, contactId, who, tag, sbnKey,
                 AssistantEvent.Stage.REMOTE_SEND, why,
@@ -142,11 +227,25 @@ public final class AssistantReceiver extends BroadcastReceiver {
         }
     }
 
+    /** Adopt a re-posted notification as the new live target (geometry + cache). */
+    private void adoptLiveTarget(AppContainer c, long contactId, StatusBarNotification sbn) {
+        try {
+            com.replymate.core.listener.RawNotif raw =
+                com.replymate.app.listener.NotifExtractor.toRaw(sbn);
+            if (raw == null) return;
+            if (AssistantPlanner.directAction(raw.actions) == null) return;
+            AssistantTargetStore.save(c.kv(), contactId, raw, System.currentTimeMillis());
+            AssistantTargetStore.cachePendingIntent(c.kv(), contactId, sbn);
+        } catch (RuntimeException ignored) {
+            // adoption is opportunistic — the send itself already succeeded
+        }
+    }
+
     /** Fire the source app's reply action with the approved text as RemoteInput
      *  results. Resolves the action in the SAME documented list it was captured
      *  from — matched by the EXACT stored result key (layout drift only re-orders
-     *  actions; the key is stable), with the stored index as the first guess.
-     *  Every stage is ledgered (owner's P-background-5 audit list). Returns null
+     *  actions; the key is stable), with either surface accepted if the app moved
+     *  it. Every stage is ledgered (owner's P-background-5 audit list). Returns null
      *  on success, otherwise the honest failure reason. */
     private String tryRemoteSend(Context ctx, AppContainer c, long contactId, String who,
                                  String tag, StatusBarNotification sbn,
@@ -170,17 +269,19 @@ public final class AssistantReceiver extends BroadcastReceiver {
                     keys.append(ri.getResultKey());
                 }
             }
+            boolean sameKey = sbn.getKey() != null && sbn.getKey().equals(t.sbnKey);
             AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
                 AssistantEvent.Stage.APPROVE_RESOLVE,
-                "resolved '" + String.valueOf(action.title) + "' @"
-                    + (t.source == com.replymate.core.listener.RawNotif.ActionRef.SRC_WEARABLE
-                        ? "wearable" : "standard") + " key-match=" + t.resultKey,
+                "resolved '" + String.valueOf(action.title) + "' on "
+                    + (sameKey ? "the original notification"
+                               : "a RE-POSTED copy of this conversation")
+                    + " key-match=" + t.resultKey,
                 "filling RemoteInput results [" + keys + "] and firing the app's own PendingIntent",
                 "");
             Intent fillIn = new Intent();
             RemoteInput.addResultsToIntent(inputs, fillIn, results);
             action.actionIntent.send(ctx, 0, fillIn);
-            notePostSendObservation(c, contactId, who, tag, t.sbnKey);
+            notePostSendObservation(c, contactId, who, tag, sbn.getKey());
             return null;   // delivered — the source app treats it as a typed reply
         } catch (PendingIntent.CanceledException canceled) {
             return "the reply box expired (the app closed that notification)";
@@ -241,9 +342,9 @@ public final class AssistantReceiver extends BroadcastReceiver {
             AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
                 AssistantEvent.Stage.APPROVE_RESOLVE, liveMissReason,
                 "sending via " + app + "'s cached reply PendingIntent (result key "
-                    + t.resultKey + ")", "");
+                    + t.resultKey + ") — delivery can't be watched after dismissal", "");
             pi.send(ctx, 0, fillIn);
-            return null;   // cached target still valid — delivered
+            return null;   // cached target fired — handed to the app unwatched
         } catch (PendingIntent.CanceledException gone) {
             return app + " closed that reply box (the cached target expired too)";
         } catch (RuntimeException e) {
@@ -256,7 +357,7 @@ public final class AssistantReceiver extends BroadcastReceiver {
     private Notification.Action resolveAction(Notification n,
                                               AssistantTargetStore.Target t) {
         if (t == null || t.actionIndex < 0) return null;
-        return ReplyActionResolver.select(n, t.source, t.resultKey, t.actionIndex);
+        return ReplyActionResolver.selectAnySurface(n, t.source, t.resultKey, t.actionIndex);
     }
 
     /* ------------------------------------------------------------------ copy */
@@ -273,7 +374,12 @@ public final class AssistantReceiver extends BroadcastReceiver {
         String line = (why == null)
             ? "Copied ✓ — paste it in " + app + " when you're ready."
             : "Couldn't quick-send (" + why + "). Copied instead ✓ — paste it in " + app + ".";
+        c.kv().put(AssistantPlanner.alertedKvKey(contactId), "0");
         if (why == null) {
+            // a straight Copy tap = as-is approval (manual-screen parity)
+            Contact contact = c.contacts().get(contactId);
+            AssistantLearning.onCopied(c.learningService(), contact,
+                draftId > 0 ? Long.valueOf(draftId) : null);
             AssistantDiag.record(c, contactId, who, AssistantPlanner.notifTag(contactId), "",
                 AssistantEvent.Stage.COPY_FALLBACK,
                 "this app exposes no quick-reply box (by evidence)",

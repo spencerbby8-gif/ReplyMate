@@ -263,7 +263,7 @@ public final class ContactEditActivity extends Activity {
             @Override public void onClick(View v) { runVoicePreview(); }
         });
 
-        root.addView(Ui.label(this, "Special instruction for this chat (custom prompt)"));
+        root.addView(Ui.label(this, "This contact's own rules (custom instruction — overrides the global voice when they clash)"));
         this.customPrompt = Ui.field(this,
             "e.g. never bring up work; keep replies playful; she's planning a surprise party…", true);
         this.customPrompt.setText(StyleSettings.customPrompt(this.contactRows));

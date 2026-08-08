@@ -11,8 +11,14 @@ import java.util.Map;
 /** P-background (hardened in P-background-3): captures WHERE a conversation's
  *  quick-reply action lives — WHICH documented list (standard vs wearable), the
  *  index inside that list, the RemoteInput result key, and the live sbn key — so
- *  the approve-tap can resolve it later. The PendingIntent itself is NEVER stored;
- *  it is re-read from the live StatusBarNotification at send time.
+ *  the approve-tap can resolve it later. The PendingIntent is ALSO cached as a
+ *  system token (P-background-7) so approval survives notification dismissal.
+ *
+ *  P-background-8: the target now also carries the conversation IDENTITY
+ *  (conversationId / conversationTitle / title). After a dismissal, the source
+ *  app may re-post the same chat under a NEW sbn key; findConversationMatch
+ *  re-attaches approval to the FRESH notification via strict identity equality
+ *  before ever touching the cached PendingIntent.
  *
  *  Also records a compact PROBE string of every action observed (title + remote
  *  input shape, both lists) — when capability is NONE the ledger shows exactly
@@ -31,27 +37,56 @@ public final class AssistantTargetStore {
         public String probe = "";             // observed geometry (diagnostics)
         public String cachedPiB64 = "";       // P-background-7: cached reply PendingIntent
         public long capturedAtMs;
+        /* P-background-8 identity fields (any may be "" when the app doesn't say): */
+        public String conversationId = "";
+        public String convTitle = "";
+        public String title = "";
 
         public boolean usable() {
             return actionIndex >= 0 && !sbnKey.isEmpty() && !resultKey.isEmpty();
+        }
+
+        public boolean identifiable() {
+            return com.replymate.core.listener.ConversationMatch.identifiable(
+                conversationId, convTitle, title);
         }
     }
 
     /** Save the best reply target found on this raw notification for this contact. */
     public static void save(KvStore kv, long contactId, RawNotif raw, long nowMs) {
         if (kv == null || raw == null) return;
-        Map<String, Object> m = new LinkedHashMap<String, Object>();
-        m.put("pkg", raw.packageName == null ? "" : raw.packageName);
-        m.put("sbnKey", raw.sbnKey == null ? "" : raw.sbnKey);
+        Target t = new Target();
+        t.packageName = raw.packageName == null ? "" : raw.packageName;
+        t.sbnKey = raw.sbnKey == null ? "" : raw.sbnKey;
         RawNotif.ActionRef best = AssistantPlanner.directAction(raw.actions);
-        m.put("actionIndex", Long.valueOf(best == null ? -1 : best.index));
-        m.put("source", Long.valueOf(best == null
-            ? (long) RawNotif.ActionRef.SRC_STANDARD : (long) best.source));
-        m.put("resultKey", best == null || best.resultKey == null ? "" : best.resultKey);
-        m.put("probe", probeOf(raw.actions));
-        m.put("cachedPi", "");            // geometry changed → drop any stale cached target
-        m.put("capturedAt", Long.valueOf(nowMs));
-        kv.put(AssistantPlanner.targetKvKey(contactId), Json.write(m));
+        t.actionIndex = best == null ? -1 : best.index;
+        t.source = best == null ? RawNotif.ActionRef.SRC_STANDARD : best.source;
+        t.resultKey = best == null || best.resultKey == null ? "" : best.resultKey;
+        t.probe = probeOf(raw.actions);
+        t.cachedPiB64 = "";            // geometry changed → drop any stale cached target
+        t.capturedAtMs = nowMs;
+        t.conversationId = raw.conversationId == null ? "" : raw.conversationId;
+        t.convTitle = raw.convTitle == null ? "" : raw.convTitle;
+        t.title = raw.title == null ? "" : raw.title;
+        kv.put(AssistantPlanner.targetKvKey(contactId), Json.write(toMap(t)));
+    }
+
+    /** Single source of truth for the persisted shape — save() and
+     *  cachePendingIntent() MUST never drift (they did before this helper existed). */
+    private static Map<String, Object> toMap(Target t) {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("pkg", t.packageName);
+        m.put("sbnKey", t.sbnKey);
+        m.put("actionIndex", Long.valueOf(t.actionIndex));
+        m.put("source", Long.valueOf(t.source));
+        m.put("resultKey", t.resultKey);
+        m.put("probe", t.probe);
+        m.put("cachedPi", t.cachedPiB64 == null ? "" : t.cachedPiB64);
+        m.put("capturedAt", Long.valueOf(t.capturedAtMs));
+        m.put("convId", t.conversationId == null ? "" : t.conversationId);
+        m.put("convTitle", t.convTitle == null ? "" : t.convTitle);
+        m.put("title", t.title == null ? "" : t.title);
+        return m;
     }
 
     /** P-background-7 (approve AFTER dismissal): resolve the stored target's reply
@@ -66,23 +101,15 @@ public final class AssistantTargetStore {
         if (kv == null || sbn == null) return;
         Target t = load(kv, contactId);
         if (!t.usable()) return;
-        android.app.Notification.Action a = ReplyActionResolver.select(
+        android.app.Notification.Action a = ReplyActionResolver.selectAnySurface(
             sbn.getNotification(), t.source, t.resultKey, t.actionIndex);
         if (a == null || a.actionIntent == null) return;
         android.os.Parcel p = android.os.Parcel.obtain();
         try {
             android.app.PendingIntent.writePendingIntentOrNullToParcel(a.actionIntent, p);
             byte[] bytes = p.marshall();
-            java.util.Map<String, Object> m = new LinkedHashMap<String, Object>();
-            m.put("pkg", t.packageName);
-            m.put("sbnKey", t.sbnKey);
-            m.put("actionIndex", Long.valueOf(t.actionIndex));
-            m.put("source", Long.valueOf(t.source));
-            m.put("resultKey", t.resultKey);
-            m.put("probe", t.probe);
-            m.put("cachedPi", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP));
-            m.put("capturedAt", Long.valueOf(t.capturedAtMs));
-            kv.put(AssistantPlanner.targetKvKey(contactId), Json.write(m));
+            t.cachedPiB64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+            kv.put(AssistantPlanner.targetKvKey(contactId), Json.write(toMap(t)));
         } catch (RuntimeException ignored) {
             // cache is an opportunistic fallback — absence is handled honestly
         } finally {
@@ -104,6 +131,33 @@ public final class AssistantTargetStore {
         } finally {
             p.recycle();
         }
+    }
+
+    /** P-background-8: find a LIVE notification from the same app that the stored
+     *  identity fields say is THE SAME conversation (posted under a new key after
+     *  the original was dismissed). Strict official-fields match only
+     *  (conversationId > conversationTitle > title) — never a fuzzy guess.
+     *  Returns the most recent match, or null (honest: no live same-chat alert). */
+    public static android.service.notification.StatusBarNotification findConversationMatch(
+            Target t, android.service.notification.StatusBarNotification[] actives) {
+        if (t == null || actives == null || !t.identifiable()
+                || t.packageName == null || t.packageName.isEmpty()) return null;
+        android.service.notification.StatusBarNotification best = null;
+        for (android.service.notification.StatusBarNotification sbn : actives) {
+            if (sbn == null || !t.packageName.equals(sbn.getPackageName())) continue;
+            RawNotif live;
+            try {
+                live = com.replymate.app.listener.NotifExtractor.toRaw(sbn);
+            } catch (RuntimeException e) {
+                continue;
+            }
+            if (live == null) continue;
+            if (!com.replymate.core.listener.ConversationMatch.same(
+                    t.packageName, t.conversationId, t.convTitle, t.title,
+                    live.packageName, live.conversationId, live.convTitle, live.title)) continue;
+            if (best == null || sbn.getPostTime() >= best.getPostTime()) best = sbn;
+        }
+        return best;
     }
 
     /** Compact observed-geometry line, e.g.
@@ -170,6 +224,9 @@ public final class AssistantTargetStore {
             t.probe = o.str("probe", "");
             t.cachedPiB64 = o.str("cachedPi", "");
             t.capturedAtMs = o.lng("capturedAt", 0L);
+            t.conversationId = o.str("convId", "");
+            t.convTitle = o.str("convTitle", "");
+            t.title = o.str("title", "");
         } catch (RuntimeException ignored) {
             // corrupt/absent → unusable target (callers fall back honestly)
         }

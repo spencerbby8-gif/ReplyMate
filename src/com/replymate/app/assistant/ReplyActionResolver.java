@@ -51,6 +51,18 @@ public final class ReplyActionResolver {
         }
     }
 
+    /** P-background-8: try the CAPTURED surface first, then the other one. Apps
+     *  occasionally move the reply action between standard/wearable across
+     *  re-posts — the result KEY is still the identity; the surface is a hint. */
+    public static Notification.Action selectAnySurface(Notification n, int sourceFirst,
+                                                       String resultKey, int indexHint) {
+        Notification.Action a = select(n, sourceFirst, resultKey, indexHint);
+        if (a != null) return a;
+        int other = sourceFirst == RawNotif.ActionRef.SRC_WEARABLE
+            ? RawNotif.ActionRef.SRC_STANDARD : RawNotif.ActionRef.SRC_WEARABLE;
+        return select(n, other, resultKey, indexHint);
+    }
+
     /** True when the action carries a free-form RemoteInput with EXACTLY this key. */
     public static boolean hasFreeFormKey(Notification.Action a, String key) {
         if (a == null || key == null) return false;

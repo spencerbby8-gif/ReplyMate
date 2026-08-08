@@ -88,7 +88,10 @@ public final class TaskComposer {
         t.append("\nSummarize the burst into its single point and write ONE reply that"
             + " answers that point (the latest message leads). Ignore pure filler"
             + " repeats (a second \"?\", \"you there\", duplicated lines) — answer the"
-            + " thought, not the noise. Do NOT answer each message separately, and"
+            + " thought, not the noise. If they correct themselves mid-burst (\"no wait\","
+            + " \"I meant\"), the correction wins over the earlier line. If the topic"
+            + " shifts mid-burst, answer the newest topic — the earlier one may already"
+            + " be settled. Do NOT answer each message separately, and"
             + " do not reply to an older turn.");
         if (appLabel != null && !appLabel.trim().isEmpty()) {
             t.append("\nThis chat is on ").append(appLabel.trim()).append('.');

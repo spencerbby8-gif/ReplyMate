@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- P-background-8: ReplyMate's status-bar small icon. Monochrome white glyph
+     (the system's alpha-mask contract for small icons) — the launcher vector has
+     a full-bleed background square which would render as a blob in the bar.
+     Same bold-block "R" geometry as the launcher for one recognizable identity. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,84 L38,24 L58,24 C70,24 78,31 78,41 C78,49 73,55 65,57 L80,84 L65,84 L53,60 L49,60 L49,84 Z M49,36 L49,49 L58,49 C64,49 67,46 67,42 C67,38 64,36 58,36 Z" />
+</vector>

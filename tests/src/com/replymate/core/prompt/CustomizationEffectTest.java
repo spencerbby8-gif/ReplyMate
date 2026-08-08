@@ -128,6 +128,51 @@ public class CustomizationEffectTest {
         assertFalse(rb.system.contains("never use the word busy"));
     }
 
+    /* ------------------------------------------------ P-background-8: rules matter */
+
+    @Test public void contactRulesAreFramedAsOverridingTheGlobalVoice() {
+        // the owner's scenario: "never call her bro" must be a hard rule, not a hint
+        settings.put(1L, StyleSettings.CUSTOM_PROMPT_KEY, "never call her bro");
+        ChatRequest req = buildFor(Fakes.contact(1, "Ada"), null);
+        assertTrue("the rule text reaches the provider prompt",
+            req.system.contains("never call her bro"));
+        assertTrue("framed as overriding the global voice, not a soft note",
+            req.system.contains("This contact's own rules"));
+        assertTrue("override framing explicit",
+            req.system.contains("override the global voice"));
+    }
+
+    @Test public void relationshipTypeDifferentiatesPromptsAcrossContacts() {
+        // professional vs friend: the relationship line must visibly differ
+        Contact client = Fakes.contact(1, "Mr. Balogun");
+        client.relationshipType = "client";
+        client.toneOverride = "respectful and precise";
+        Contact friend = Fakes.contact(2, "Chidi");
+        friend.relationshipType = "best friend";
+        ChatRequest rc = buildFor(client, null);
+        ChatRequest rf = buildFor(friend, null);
+        assertTrue(rc.system.contains("client"));
+        assertTrue(rc.system.contains("respectful and precise"));
+        assertTrue(rf.system.contains("best friend"));
+        assertFalse("client facts must not bleed into the friend's prompt",
+            rf.system.contains("Mr. Balogun"));
+        StyleService.ComposedVoice vc = style.compose(client);
+        assertTrue("audit credits the contact profile:\n" + join(vc.why),
+            join(vc.why).contains("contact profile applied (relationship: client)"));
+        assertTrue("audit credits the tone note:\n" + join(vc.why),
+            join(vc.why).contains("contact tone note applied"));
+    }
+
+    @Test public void directnessIsPermittedButHostilityIsForbidden() {
+        // P-background-8 item 6: disagreement/refusal must be available in the
+        // default voice — without randomly turning hostile.
+        ChatRequest req = buildFor(Fakes.contact(1, "Ada"), null);
+        assertTrue("the honest-pushback rule reaches the prompt",
+            req.system.contains("disagree, correct Ada or say no"));
+        assertTrue("firmness bounded explicitly",
+            req.system.contains("firm is fine, hostile or insulting never"));
+    }
+
     /* ------------------------------------------------ memory + learned style */
 
     @Test public void memoryLinesReachOnlyTheirContactsPrompt() {

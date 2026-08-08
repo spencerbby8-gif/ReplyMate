@@ -200,7 +200,16 @@ public final class AssistantRunner {
             }
 
             AssistantNotifier.ensureChannels(c.app());
-            AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap);
+            // P-background-8 heads-up discipline: ONE audible pop per draft cycle.
+            // A scheduled (non-forced) generation alerts only when this conversation
+            // hasn't claimed the current cycle yet — burst updates + Regenerate
+            // refresh the SAME alert silently. Approve/Copy/fallback and any
+            // dismissal of the card clear the flag, so the next genuinely new
+            // burst pops again. force (the Regenerate button) never re-pops.
+            String alertedKey = AssistantPlanner.alertedKvKey(contactId);
+            boolean fresh = !force && !"1".equals(c.kv().get(alertedKey, "0"));
+            AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap, fresh);
+            if (fresh) c.kv().put(alertedKey, "1");
         } catch (RuntimeException e) {
             AssistantDiag.record(c, contactId, who, tag, "",
                 AssistantEvent.Stage.GENERATE,

@@ -83,7 +83,9 @@ public final class StyleService {
         why.addAll(overrides);
 
         // 2) owner's own standing style instruction (global, applies to every chat),
-        //    then the custom prompt box (this contact only).
+        //    then the custom prompt box (this contact only). P-background-8: the
+        //    contact box carries the HARD rules for this chat ("never call her bro")
+        //    — it must be framed as overriding the global voice, not as a soft hint.
         String globalCustom = StyleSettings.customPrompt(global);
         if (!globalCustom.isEmpty()) {
             extra.add("The owner's own standing style instruction (applies to every chat): "
@@ -92,10 +94,15 @@ public final class StyleService {
         }
         String custom = StyleSettings.customPrompt(contactRows);
         if (!custom.isEmpty()) {
-            extra.add("Special instruction for this chat: " + custom);
+            extra.add("This contact's own rules (they override the global voice wherever"
+                + " the two clash — follow them exactly): " + custom);
             why.add("custom prompt for " + contact.displayName + " applied ("
                 + custom.length() + " chars)");
         }
+
+        // 2.5) P-background-8: About Them + contact profile must be visible in the
+        //      audit trail too — Prompt Audit shows exactly which context applied.
+        why.addAll(contactProfileNotes(contact));
 
         // 3) learned hints — through the SAME gate as recording.
         if (learning != null && learning.openFor(contact)) {
@@ -115,6 +122,34 @@ public final class StyleService {
         }
 
         return new ComposedVoice(voiceLine, extra, why);
+    }
+
+    /** Audit credits for the About-Them / contact-profile block (when non-default).
+     *  The block text itself is written by SystemComposer — these notes make the
+     *  same facts visible in Prompt Audit's "why". */
+    static List<String> contactProfileNotes(Contact contact) {
+        List<String> notes = new ArrayList<String>();
+        if (contact == null) return notes;
+        if (!contact.relationshipType.isEmpty() || !contact.relationshipNotes.isEmpty()) {
+            StringBuilder n = new StringBuilder("contact profile applied (");
+            if (!contact.relationshipType.isEmpty()) {
+                n.append("relationship: ").append(contact.relationshipType);
+            }
+            if (!contact.relationshipNotes.isEmpty()) {
+                if (n.charAt(n.length() - 1) != '(') n.append("; ");
+                n.append("about them: ").append(contact.relationshipNotes.trim().length())
+                 .append(" chars");
+            }
+            n.append(')');
+            notes.add(n.toString());
+        }
+        if (!contact.toneOverride.isEmpty()) {
+            notes.add("contact tone note applied (" + contact.toneOverride + ")");
+        }
+        if (!contact.languagePref.isEmpty()) {
+            notes.add("contact language preference applied (" + contact.languagePref + ")");
+        }
+        return notes;
     }
 
     private String learningGateNote(Contact contact) {

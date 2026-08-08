@@ -96,6 +96,14 @@ public final class AssistantPlanner {
         return "assistant.hash." + contactId;
     }
 
+    /** kv key for the per-conversation "already heads-up alerted" flag
+     *  (P-background-8): one audible pop per fresh draft cycle; burst updates and
+     *  regenerations refresh the SAME alert silently; approving/copying/dismissing
+     *  clears the flag so the NEXT genuinely new burst pops again. */
+    public static String alertedKvKey(long contactId) {
+        return "assistant.alerted." + contactId;
+    }
+
     /* ------------------------------------------------------------------ trigger */
 
     /** Battery/dedupe rule: background-generate only for an incoming message we

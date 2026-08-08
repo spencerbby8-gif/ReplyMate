@@ -147,6 +147,10 @@ public final class AssistantPlannerTest {
         assertTrue(AssistantPlanner.hashKvKey(7).endsWith("7"));
         assertFalse(AssistantPlanner.targetKvKey(7).equals(AssistantPlanner.targetKvKey(8)));
         assertFalse(AssistantPlanner.targetKvKey(7).equals(AssistantPlanner.hashKvKey(7)));
+        // P-background-8: the per-conversation "already popped heads-up" flag key
+        assertTrue(AssistantPlanner.alertedKvKey(7).endsWith("7"));
+        assertFalse(AssistantPlanner.alertedKvKey(7).equals(AssistantPlanner.alertedKvKey(8)));
+        assertFalse(AssistantPlanner.alertedKvKey(7).equals(AssistantPlanner.hashKvKey(7)));
     }
 
     /* ------------------------------------------------------------- trigger + hash */
