@@ -52,6 +52,7 @@ public class BurstTaskTest {
         assertTrue(task.contains("single point"));
         assertTrue(task.contains("ONE reply"));
         assertTrue(task.contains("Do NOT answer each message separately"));
+        assertTrue("filler repeats are ignored", task.contains("filler"));
         assertTrue(task.contains("Output only the reply text."));
     }
 

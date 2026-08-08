@@ -62,6 +62,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.model.ContentKindTest \
     com.replymate.core.prompt.PromptBuilderTest \
     com.replymate.core.prompt.BurstTaskTest \
+    com.replymate.core.prompt.CustomizationEffectTest \
     com.replymate.core.prompt.P4PromptTest \
     com.replymate.core.prompt.ThreadMapperTest \
     com.replymate.core.prompt.PromptAuditCompletenessTest \

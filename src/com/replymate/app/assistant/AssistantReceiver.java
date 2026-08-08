@@ -108,16 +108,20 @@ public final class AssistantReceiver extends BroadcastReceiver {
         RmNotificationListener listener = RmNotificationListener.active();
         AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
         sbnKey = t.sbnKey;
-        if (listener == null) {
-            why = "ReplyMate's link to the notification shade was recycled";
-        } else if (!t.usable()) {
+        if (!t.usable()) {
             why = "this notification never offered a quick-reply box";
         } else {
-            StatusBarNotification sbn = listener.findActive(t.sbnKey);
-            if (sbn == null) {
-                why = "the original " + app + " notification was dismissed";
-            } else {
+            StatusBarNotification sbn = listener == null ? null : listener.findActive(t.sbnKey);
+            if (sbn != null) {
                 why = tryRemoteSend(ctx, c, contactId, who, tag, sbn, t, text);
+            } else {
+                // P-background-7: the user cleared the original notification (or our
+                // shade link is gone) BEFORE approving. Send through the CACHED reply
+                // PendingIntent when it remains valid — never fake, expire honestly.
+                why = tryCachedSend(ctx, c, contactId, who, tag, app, t, text,
+                    listener == null
+                        ? "ReplyMate's link to the notification shade was recycled"
+                        : "the original " + app + " notification was dismissed");
             }
         }
 
@@ -216,56 +220,43 @@ public final class AssistantReceiver extends BroadcastReceiver {
         }, 1500);
     }
 
-    /** Resolve the captured action in the SAME list the target came from — matched
-     *  by RESULT KEY (stable across re-orders/updates), never by a drift-prone bare
-     *  index, so we can never fire the wrong app's action. Null = honest fallback. */
-    private Notification.Action resolveAction(Notification n,
-                                              AssistantTargetStore.Target t) {
-        if (n == null || t.actionIndex < 0 || t.resultKey == null || t.resultKey.isEmpty()) {
-            return null;
+    /** P-background-7: dismissal-proof send — the original notification is gone,
+     *  so fire the CACHED reply PendingIntent with the official RemoteInput results
+     *  structure rebuilt from the stored key. If the app canceled/cleared that
+     *  target (or none was cached), return the honest reason — the caller keeps the
+     *  draft and offers Copy/Open. Never claims a send that didn't fire. */
+    private String tryCachedSend(Context ctx, AppContainer c, long contactId, String who,
+                                 String tag, String app, AssistantTargetStore.Target t,
+                                 String text, String liveMissReason) {
+        PendingIntent pi = AssistantTargetStore.readCachedPi(t);
+        if (pi == null) {
+            return liveMissReason + " — no cached reply target survived either";
         }
         try {
-            if (t.source == com.replymate.core.listener.RawNotif.ActionRef.SRC_WEARABLE) {
-                java.util.List<Notification.Action> wear;
-                try {
-                    wear = new Notification.WearableExtender(n).getActions();
-                } catch (Throwable unreadable) {
-                    return null;   // hostile/unreadable wearable extras → honest fallback
-                }
-                if (wear == null) return null;
-                if (t.actionIndex < wear.size() && hasFreeFormKey(wear.get(t.actionIndex), t.resultKey)) {
-                    return wear.get(t.actionIndex);
-                }
-                for (Notification.Action a : wear) {
-                    if (hasFreeFormKey(a, t.resultKey)) return a;
-                }
-                return null;
-            }
-            Notification.Action[] std = n.actions;
-            if (std == null) return null;
-            if (t.actionIndex < std.length && hasFreeFormKey(std[t.actionIndex], t.resultKey)) {
-                return std[t.actionIndex];
-            }
-            for (Notification.Action a : std) {
-                if (hasFreeFormKey(a, t.resultKey)) return a;
-            }
-            return null;
+            RemoteInput[] inputs = ReplyActionResolver.rebuiltInputs(t.resultKey);
+            Bundle results = new Bundle();
+            results.putCharSequence(t.resultKey, text);
+            Intent fillIn = new Intent();
+            RemoteInput.addResultsToIntent(inputs, fillIn, results);
+            AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                AssistantEvent.Stage.APPROVE_RESOLVE, liveMissReason,
+                "sending via " + app + "'s cached reply PendingIntent (result key "
+                    + t.resultKey + ")", "");
+            pi.send(ctx, 0, fillIn);
+            return null;   // cached target still valid — delivered
+        } catch (PendingIntent.CanceledException gone) {
+            return app + " closed that reply box (the cached target expired too)";
         } catch (RuntimeException e) {
-            return null;
+            return "the cached reply target failed (" + e.getClass().getSimpleName() + ")";
         }
     }
 
-    /** True when the action carries a free-form RemoteInput with EXACTLY this key. */
-    private static boolean hasFreeFormKey(Notification.Action a, String key) {
-        if (a == null) return false;
-        android.app.RemoteInput[] ris = a.getRemoteInputs();
-        if (ris == null) return false;
-        for (android.app.RemoteInput ri : ris) {
-            if (ri != null && ri.getAllowFreeFormInput() && key.equals(ri.getResultKey())) {
-                return true;
-            }
-        }
-        return false;
+    /** Resolve the captured action on a live notification — shared key-matched logic
+     *  (ReplyActionResolver); kept as a thin named seam for existing regression tests. */
+    private Notification.Action resolveAction(Notification n,
+                                              AssistantTargetStore.Target t) {
+        if (t == null || t.actionIndex < 0) return null;
+        return ReplyActionResolver.select(n, t.source, t.resultKey, t.actionIndex);
     }
 
     /* ------------------------------------------------------------------ copy */

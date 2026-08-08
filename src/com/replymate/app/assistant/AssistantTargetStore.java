@@ -29,6 +29,7 @@ public final class AssistantTargetStore {
         public int source = RawNotif.ActionRef.SRC_STANDARD;
         public String resultKey = "";
         public String probe = "";             // observed geometry (diagnostics)
+        public String cachedPiB64 = "";       // P-background-7: cached reply PendingIntent
         public long capturedAtMs;
 
         public boolean usable() {
@@ -48,8 +49,61 @@ public final class AssistantTargetStore {
             ? (long) RawNotif.ActionRef.SRC_STANDARD : (long) best.source));
         m.put("resultKey", best == null || best.resultKey == null ? "" : best.resultKey);
         m.put("probe", probeOf(raw.actions));
+        m.put("cachedPi", "");            // geometry changed → drop any stale cached target
         m.put("capturedAt", Long.valueOf(nowMs));
         kv.put(AssistantPlanner.targetKvKey(contactId), Json.write(m));
+    }
+
+    /** P-background-7 (approve AFTER dismissal): resolve the stored target's reply
+     *  action on the LIVE notification and cache its PendingIntent (parcel → base64
+     *  in kv). PendingIntents are system tokens that survive our process death and
+     *  often the notification itself; the approve path sends through this cache when
+     *  the original notification is gone. Best-effort: any failure just leaves the
+     *  cache empty and approval falls back honestly. */
+    public static void cachePendingIntent(
+            KvStore kv, long contactId,
+            android.service.notification.StatusBarNotification sbn) {
+        if (kv == null || sbn == null) return;
+        Target t = load(kv, contactId);
+        if (!t.usable()) return;
+        android.app.Notification.Action a = ReplyActionResolver.select(
+            sbn.getNotification(), t.source, t.resultKey, t.actionIndex);
+        if (a == null || a.actionIntent == null) return;
+        android.os.Parcel p = android.os.Parcel.obtain();
+        try {
+            android.app.PendingIntent.writePendingIntentOrNullToParcel(a.actionIntent, p);
+            byte[] bytes = p.marshall();
+            java.util.Map<String, Object> m = new LinkedHashMap<String, Object>();
+            m.put("pkg", t.packageName);
+            m.put("sbnKey", t.sbnKey);
+            m.put("actionIndex", Long.valueOf(t.actionIndex));
+            m.put("source", Long.valueOf(t.source));
+            m.put("resultKey", t.resultKey);
+            m.put("probe", t.probe);
+            m.put("cachedPi", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP));
+            m.put("capturedAt", Long.valueOf(t.capturedAtMs));
+            kv.put(AssistantPlanner.targetKvKey(contactId), Json.write(m));
+        } catch (RuntimeException ignored) {
+            // cache is an opportunistic fallback — absence is handled honestly
+        } finally {
+            p.recycle();
+        }
+    }
+
+    /** Decode the cached reply PendingIntent (null when none/corrupt/expired bytes). */
+    public static android.app.PendingIntent readCachedPi(Target t) {
+        if (t == null || t.cachedPiB64 == null || t.cachedPiB64.isEmpty()) return null;
+        android.os.Parcel p = android.os.Parcel.obtain();
+        try {
+            byte[] bytes = android.util.Base64.decode(t.cachedPiB64, android.util.Base64.NO_WRAP);
+            p.unmarshall(bytes, 0, bytes.length);
+            p.setDataPosition(0);
+            return android.app.PendingIntent.readPendingIntentOrNullFromParcel(p);
+        } catch (RuntimeException e) {
+            return null;
+        } finally {
+            p.recycle();
+        }
     }
 
     /** Compact observed-geometry line, e.g.
@@ -95,6 +149,7 @@ public final class AssistantTargetStore {
             if (raw == null) continue;
             if (AssistantPlanner.directAction(raw.actions) != null) {
                 save(kv, contactId, raw, System.currentTimeMillis());
+                cachePendingIntent(kv, contactId, sbn);   // P-background-7
                 return true;
             }
         }
@@ -113,6 +168,7 @@ public final class AssistantTargetStore {
             t.source = (int) o.lng("source", 0L);
             t.resultKey = o.str("resultKey", "");
             t.probe = o.str("probe", "");
+            t.cachedPiB64 = o.str("cachedPi", "");
             t.capturedAtMs = o.lng("capturedAt", 0L);
         } catch (RuntimeException ignored) {
             // corrupt/absent → unusable target (callers fall back honestly)

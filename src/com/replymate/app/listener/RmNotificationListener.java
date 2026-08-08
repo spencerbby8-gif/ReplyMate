@@ -189,6 +189,11 @@ public final class RmNotificationListener extends NotificationListenerService {
                     // assistant never sends by itself — a human Approve is required.
                     com.replymate.app.assistant.AssistantTargetStore.save(
                         c.kv(), ping.contactId, raw, c.clock().now());
+                    // P-background-7: cache the reply PendingIntent while the
+                    // notification is definitely live — approval must survive the
+                    // user clearing the shade before tapping Approve.
+                    com.replymate.app.assistant.AssistantTargetStore.cachePendingIntent(
+                        c.kv(), ping.contactId, sbn);
                     com.replymate.app.assistant.AssistantRunner.schedule(c, ping);
                 }
             } catch (RuntimeException e) {

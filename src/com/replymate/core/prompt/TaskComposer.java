@@ -86,8 +86,10 @@ public final class TaskComposer {
             t.append("\n").append(i++).append(") \"").append(q).append("\"");
         }
         t.append("\nSummarize the burst into its single point and write ONE reply that"
-            + " answers that point (the latest message leads). Do NOT answer each"
-            + " message separately, and do not reply to an older turn.");
+            + " answers that point (the latest message leads). Ignore pure filler"
+            + " repeats (a second \"?\", \"you there\", duplicated lines) — answer the"
+            + " thought, not the noise. Do NOT answer each message separately, and"
+            + " do not reply to an older turn.");
         if (appLabel != null && !appLabel.trim().isEmpty()) {
             t.append("\nThis chat is on ").append(appLabel.trim()).append('.');
         }
