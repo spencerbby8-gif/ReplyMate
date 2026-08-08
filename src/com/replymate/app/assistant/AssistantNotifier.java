@@ -52,8 +52,14 @@ public final class AssistantNotifier {
             .setShowWhen(true);
 
         for (AssistantPlanner.Btn btn : AssistantPlanner.buttonsFor(cap)) {
-            b.addAction(new Notification.Action.Builder(null, label(btn),
-                actionPi(ctx, btn, contactId, name, appLabel, draftText, draftId, cap)).build());
+            // P-background-5: the OPEN button must OPEN the conversation — it was
+            // wired to the receiver broadcast like the other buttons, which made it
+            // regenerate instead (a button that lies). Preview vs send stays split:
+            // OPEN/تap-body → ConversationActivity; APPROVE/COPY/REGEN → receiver.
+            android.app.PendingIntent pi = btn == AssistantPlanner.Btn.OPEN
+                ? openPi(ctx, contactId)
+                : actionPi(ctx, btn, contactId, name, appLabel, draftText, draftId, cap);
+            b.addAction(new Notification.Action.Builder(null, label(btn), pi).build());
         }
         nm.notify(AssistantPlanner.notifTag(contactId), NOTIF_ID, b.build());
     }

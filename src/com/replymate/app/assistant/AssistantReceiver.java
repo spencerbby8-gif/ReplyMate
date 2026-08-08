@@ -117,7 +117,7 @@ public final class AssistantReceiver extends BroadcastReceiver {
             if (sbn == null) {
                 why = "the original " + app + " notification was dismissed";
             } else {
-                why = tryRemoteSend(ctx, sbn, t, text);
+                why = tryRemoteSend(ctx, c, contactId, who, tag, sbn, t, text);
             }
         }
 
@@ -140,9 +140,12 @@ public final class AssistantReceiver extends BroadcastReceiver {
 
     /** Fire the source app's reply action with the approved text as RemoteInput
      *  results. Resolves the action in the SAME documented list it was captured
-     *  from (standard array vs WearableExtender — P-background-3). Returns null on
-     *  success, otherwise the honest failure reason. */
-    private String tryRemoteSend(Context ctx, StatusBarNotification sbn,
+     *  from — matched by the EXACT stored result key (layout drift only re-orders
+     *  actions; the key is stable), with the stored index as the first guess.
+     *  Every stage is ledgered (owner's P-background-5 audit list). Returns null
+     *  on success, otherwise the honest failure reason. */
+    private String tryRemoteSend(Context ctx, AppContainer c, long contactId, String who,
+                                 String tag, StatusBarNotification sbn,
                                  AssistantTargetStore.Target t, String text) {
         try {
             Notification n = sbn.getNotification();
@@ -155,14 +158,25 @@ public final class AssistantReceiver extends BroadcastReceiver {
                 return "the reply action is no longer a text reply";
             }
             Bundle results = new Bundle();
+            StringBuilder keys = new StringBuilder();
             for (RemoteInput ri : inputs) {
                 if (ri != null && ri.getResultKey() != null) {
                     results.putCharSequence(ri.getResultKey(), text);
+                    if (keys.length() > 0) keys.append(',');
+                    keys.append(ri.getResultKey());
                 }
             }
+            AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                AssistantEvent.Stage.APPROVE_RESOLVE,
+                "resolved '" + String.valueOf(action.title) + "' @"
+                    + (t.source == com.replymate.core.listener.RawNotif.ActionRef.SRC_WEARABLE
+                        ? "wearable" : "standard") + " key-match=" + t.resultKey,
+                "filling RemoteInput results [" + keys + "] and firing the app's own PendingIntent",
+                "");
             Intent fillIn = new Intent();
             RemoteInput.addResultsToIntent(inputs, fillIn, results);
             action.actionIntent.send(ctx, 0, fillIn);
+            notePostSendObservation(c, contactId, who, tag, t.sbnKey);
             return null;   // delivered — the source app treats it as a typed reply
         } catch (PendingIntent.CanceledException canceled) {
             return "the reply box expired (the app closed that notification)";
@@ -171,23 +185,87 @@ public final class AssistantReceiver extends BroadcastReceiver {
         }
     }
 
-    /** Resolve the captured action in the SAME list the target came from, with the
-     *  geometry re-verified live. Null = layout drifted (caller falls back). */
+    /** Best-effort corroboration that the source app consumed the reply: shortly
+     *  after the send, re-check whether the original notification closed itself.
+     *  Recorded as an OBSERVATION, never as proof. */
+    private void notePostSendObservation(final AppContainer c, final long contactId,
+                                         final String who, final String tag,
+                                         final String sbnKey) {
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override public void run() {
+                Tasks.bg(new Runnable() {
+                    @Override public void run() {
+                        RmNotificationListener l = RmNotificationListener.active();
+                        String note;
+                        String meaning;
+                        if (l == null) {
+                            note = "post-send check: shade link gone, can't re-check";
+                            meaning = "check the chat to confirm it landed";
+                        } else if (l.findActive(sbnKey) == null) {
+                            note = "post-send check: source notification closed itself";
+                            meaning = "strong sign the app accepted the reply";
+                        } else {
+                            note = "post-send check: source notification still visible";
+                            meaning = "some apps keep it; check the chat to confirm";
+                        }
+                        AssistantDiag.record(c, contactId, who, tag, sbnKey,
+                            AssistantEvent.Stage.REMOTE_SEND, note, meaning, "");
+                    }
+                });
+            }
+        }, 1500);
+    }
+
+    /** Resolve the captured action in the SAME list the target came from — matched
+     *  by RESULT KEY (stable across re-orders/updates), never by a drift-prone bare
+     *  index, so we can never fire the wrong app's action. Null = honest fallback. */
     private Notification.Action resolveAction(Notification n,
                                               AssistantTargetStore.Target t) {
-        if (n == null || t.actionIndex < 0) return null;
+        if (n == null || t.actionIndex < 0 || t.resultKey == null || t.resultKey.isEmpty()) {
+            return null;
+        }
         try {
             if (t.source == com.replymate.core.listener.RawNotif.ActionRef.SRC_WEARABLE) {
-                java.util.List<Notification.Action> wearable =
-                    new Notification.WearableExtender(n).getActions();
-                if (wearable == null || t.actionIndex >= wearable.size()) return null;
-                return wearable.get(t.actionIndex);
+                java.util.List<Notification.Action> wear;
+                try {
+                    wear = new Notification.WearableExtender(n).getActions();
+                } catch (Throwable unreadable) {
+                    return null;   // hostile/unreadable wearable extras → honest fallback
+                }
+                if (wear == null) return null;
+                if (t.actionIndex < wear.size() && hasFreeFormKey(wear.get(t.actionIndex), t.resultKey)) {
+                    return wear.get(t.actionIndex);
+                }
+                for (Notification.Action a : wear) {
+                    if (hasFreeFormKey(a, t.resultKey)) return a;
+                }
+                return null;
             }
-            if (n.actions == null || t.actionIndex >= n.actions.length) return null;
-            return n.actions[t.actionIndex];
+            Notification.Action[] std = n.actions;
+            if (std == null) return null;
+            if (t.actionIndex < std.length && hasFreeFormKey(std[t.actionIndex], t.resultKey)) {
+                return std[t.actionIndex];
+            }
+            for (Notification.Action a : std) {
+                if (hasFreeFormKey(a, t.resultKey)) return a;
+            }
+            return null;
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /** True when the action carries a free-form RemoteInput with EXACTLY this key. */
+    private static boolean hasFreeFormKey(Notification.Action a, String key) {
+        if (a == null) return false;
+        android.app.RemoteInput[] ris = a.getRemoteInputs();
+        if (ris == null) return false;
+        for (android.app.RemoteInput ri : ris) {
+            if (ri != null && ri.getAllowFreeFormInput() && key.equals(ri.getResultKey())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /* ------------------------------------------------------------------ copy */
