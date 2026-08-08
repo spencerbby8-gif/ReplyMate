@@ -60,11 +60,14 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.assistant.AssistantLearningTest \
     com.replymate.core.listener.ConversationMatchTest \
     com.replymate.core.usecase.ChatRankerTest \
+    com.replymate.core.understanding.BurstSignalsTest \
+    com.replymate.core.understanding.ConversationContextBuilderTest \
     com.replymate.core.model.ToneTransformTest \
     com.replymate.core.model.ProviderTypeTest \
     com.replymate.core.model.ContentKindTest \
     com.replymate.core.prompt.PromptBuilderTest \
     com.replymate.core.prompt.BurstTaskTest \
+    com.replymate.core.prompt.PromptUnderstandingTest \
     com.replymate.core.prompt.CustomizationEffectTest \
     com.replymate.core.prompt.P4PromptTest \
     com.replymate.core.prompt.ThreadMapperTest \
@@ -72,6 +75,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.prompt.VoiceCharterTest \
     com.replymate.core.style.StyleSettingsTest \
     com.replymate.core.style.StyleServiceTest \
+    com.replymate.core.learning.ManualSendLearnerTest \
     com.replymate.core.learning.LearningEngineTest \
     com.replymate.core.learning.LearningServiceTest \
     com.replymate.core.learning.StyleProfilerTest \

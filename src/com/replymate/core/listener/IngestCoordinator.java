@@ -144,6 +144,19 @@ public final class IngestCoordinator {
             // outgoing messages (ours) are context only; groups are store-only by policy.
             boolean pingEligible = v == ListenerFilter.Verdict.STORE_AND_PING
                 && dir == Direction.INCOMING;
+            if (dir == Direction.OUTGOING) {
+                // P-intelligence-1: a freshly-stored owner-typed row MAY be a manual
+                // answer to a live draft — flag the contact for the learner (once
+                // per batch, dupes never reach this line).
+                boolean seen = false;
+                for (IngestReport.PingRequest pr : rep.outgoing) {
+                    if (pr.contactId == contact.id) { seen = true; break; }
+                }
+                if (!seen) {
+                    rep.outgoing.add(new IngestReport.PingRequest(
+                        contact.id, contact.displayName, body, ts));
+                }
+            }
             if (pingEligible) {
                 PingAgg agg = aggByContact.get(contact.id);
                 if (agg == null) {

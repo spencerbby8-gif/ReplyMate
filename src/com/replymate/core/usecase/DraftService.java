@@ -138,12 +138,32 @@ public final class DraftService {
             }
         }
 
-        ChatRequest request = PromptBuilder.build(new PromptBundle(
+        // P-intelligence-1 (message understanding): the model consumes a CLEAN
+        // conversation object, not raw notification text — sender, app, message type,
+        // burst state + mechanics, the owner's last reply and the cold-start flag are
+        // assembled once here, shape the prompt, and are credited in Prompt Audit.
+        com.replymate.core.understanding.ConversationContext understanding =
+            com.replymate.core.understanding.ConversationContextBuilder.build(
+                c, thread, PromptBuilder.burstTailUsableIncoming(thread, 6),
+                styleService == null
+                    ? java.util.Collections.<String, String>emptyMap()
+                    : styleService.globalRows(),
+                styleService == null
+                    ? java.util.Collections.<String, String>emptyMap()
+                    : styleService.contactRows(contactId),
+                voice == null ? null : voice.extraLines,
+                mem == null ? null : mem.lines,
+                learningService == null ? 0 : learningService.counters(contactId).total());
+        why.addAll(understanding.whyLines());
+
+        PromptBundle bundle = new PromptBundle(
             profiles.loadFiltered(), c, styleRules, thread,
             voice == null ? "" : voice.voiceLine,
             voice == null ? null : voice.extraLines,
             profiles.extraFiltered(),
-            mem == null ? null : mem.lines));
+            mem == null ? null : mem.lines);
+        bundle.understanding = understanding;
+        ChatRequest request = PromptBuilder.build(bundle);
 
         long t0 = clock.now();
         Result<ChatReply> reply = provider.generate(request);

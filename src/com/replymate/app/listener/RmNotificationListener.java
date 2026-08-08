@@ -196,6 +196,30 @@ public final class RmNotificationListener extends NotificationListenerService {
                         c.kv(), ping.contactId, sbn);
                     com.replymate.app.assistant.AssistantRunner.schedule(c, ping);
                 }
+                // P-intelligence-1: learn from replies the owner typed by hand inside
+                // the chat app (the same MessagingStyle history that just stored an
+                // OUTGOING row). Guarded: a learner hiccup must never hurt ingestion.
+                for (IngestReport.PingRequest notice : rep.outgoing) {
+                    try {
+                        com.replymate.core.learning.ManualSendLearner.Result lr =
+                            com.replymate.core.learning.ManualSendLearner.evaluate(
+                                c.contacts().get(notice.contactId), c.messages(), c.drafts(),
+                                c.learningService(), c.kv(), c.clock());
+                        if (lr.outcome
+                                == com.replymate.core.learning.ManualSendLearner
+                                    .Outcome.LEARNED_APPROVED) {
+                            ringLine(c, "learned · " + notice.displayName
+                                + " · manual send matched the draft word-for-word");
+                        } else if (lr.outcome
+                                == com.replymate.core.learning.ManualSendLearner
+                                    .Outcome.LEARNED_EDITED) {
+                            ringLine(c, "learned · " + notice.displayName
+                                + " · manual send corrected the draft (" + lr.detail + ")");
+                        }
+                    } catch (RuntimeException boom) {
+                        ringLine(c, "learn error · " + boom.getClass().getSimpleName());
+                    }
+                }
             } catch (RuntimeException e) {
                 bump(c, KV_PARSE_ERRORS);
                 ringLine(c, "ingest error · " + pkg + " · " + e.getClass().getSimpleName());

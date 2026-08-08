@@ -34,6 +34,17 @@ public final class SystemComposer {
     public static String compose(ProfileService.Profile profile, Contact contact, String styleRules,
                                  String voiceLine, java.util.List<String> voiceExtra,
                                  String aboutExtra, java.util.List<String> memoryLines) {
+        return compose(profile, contact, styleRules, voiceLine, voiceExtra, aboutExtra,
+            memoryLines, null);
+    }
+
+    /** P-intelligence-1: situationLines = grounded situational preamble (today: the
+     *  explicit cold-start line from the understanding layer). Appended after the
+     *  voice extras, before the hard Rules. */
+    public static String compose(ProfileService.Profile profile, Contact contact, String styleRules,
+                                 String voiceLine, java.util.List<String> voiceExtra,
+                                 String aboutExtra, java.util.List<String> memoryLines,
+                                 java.util.List<String> situationLines) {
         String owner = profile == null ? "the owner of this phone" : profile.displayName();
         StringBuilder sb = new StringBuilder();
 
@@ -98,6 +109,15 @@ public final class SystemComposer {
         // 5) Global custom instruction, contact custom prompt, learned hints (gated).
         if (voiceExtra != null) {
             for (String line : voiceExtra) {
+                if (line != null && !line.trim().isEmpty()) {
+                    sb.append('\n').append(line.trim());
+                }
+            }
+        }
+
+        // 5.5) P-intelligence-1: grounded situational preamble (cold-start line).
+        if (situationLines != null) {
+            for (String line : situationLines) {
                 if (line != null && !line.trim().isEmpty()) {
                     sb.append('\n').append(line.trim());
                 }

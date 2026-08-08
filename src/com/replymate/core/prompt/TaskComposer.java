@@ -75,6 +75,16 @@ public final class TaskComposer {
      *  writes ONE reply to that point. Token discipline: max 6 items, 180 chars each. */
     public static Turn burstTask(String ownerName, String partnerName,
                                  java.util.List<String> burstTexts, String appLabel) {
+        return burstTask(ownerName, partnerName, burstTexts, appLabel, null);
+    }
+
+    /** P-intelligence-1 (understood path): the burst task PLUS grounded mechanical
+     *  annotations from the understanding layer, appended BEFORE the closing
+     *  instructions — but ONLY where a signal actually fired; without annotations the
+     *  task text stays byte-identical to the legacy form. */
+    public static Turn burstTask(String ownerName, String partnerName,
+                                 java.util.List<String> burstTexts, String appLabel,
+                                 java.util.List<String> annotations) {
         StringBuilder t = new StringBuilder("Read the conversation above and write ")
             .append(ownerName).append("'s next reply to ").append(partnerName).append('.');
         t.append("\n").append(partnerName).append(" fired ")
@@ -93,6 +103,13 @@ public final class TaskComposer {
             + " shifts mid-burst, answer the newest topic — the earlier one may already"
             + " be settled. Do NOT answer each message separately, and"
             + " do not reply to an older turn.");
+        // P-intelligence-1: mechanical annotations land AFTER the generic guidance,
+        // so a grounded signal always reads as the freshest, most specific instruction.
+        if (annotations != null) {
+            for (String line : annotations) {
+                if (line != null && !line.trim().isEmpty()) t.append('\n').append(line.trim());
+            }
+        }
         if (appLabel != null && !appLabel.trim().isEmpty()) {
             t.append("\nThis chat is on ").append(appLabel.trim()).append('.');
         }

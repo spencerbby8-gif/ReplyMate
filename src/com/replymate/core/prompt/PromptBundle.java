@@ -20,6 +20,10 @@ public final class PromptBundle {
     public final String aboutExtra;        // filtered free-text "About me" box
     /* P-memory-audit (all may be empty): */
     public final List<String> memoryLines; // LTM lines: facts, rolling summary, learned style
+    /* P-intelligence-1 (optional, never required): the clean conversation reading.
+     *  Mutable by design — DraftService fills it after construction; legacy paths
+     *  (previews, transforms, old tests) leave it null and get the legacy task. */
+    public com.replymate.core.understanding.ConversationContext understanding;
 
     public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
                         List<Message> thread) {

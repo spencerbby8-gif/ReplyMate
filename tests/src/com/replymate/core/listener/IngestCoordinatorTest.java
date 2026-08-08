@@ -293,6 +293,28 @@ public class IngestCoordinatorTest {
         assertEquals(Direction.INCOMING, thread.get(1).direction);
     }
 
+    /* ------------------------------------------------ manual-send learning hook */
+
+    @Test public void outgoingRowsFlagTheContactForTheManualSendLearner() {
+        // owner typed this themselves inside WhatsApp (sender == owner ⇒ OUTGOING)
+        NotifEvent mine = ev(Channel.WHATSAPP, "Ada", "Me", "Me", "sent it myself", 1000L, false, false);
+        IngestReport rep = engine.handle(list(mine), allOn());
+        assertEquals(1, rep.stored);
+        assertEquals("outgoing rows never ping", 0, rep.pings.size());
+        assertEquals("the contact is flagged for the learner exactly once",
+            1, rep.outgoing.size());
+        IngestReport rep2 = engine.handle(list(mine), allOn());
+        assertTrue("a duplicate repost is a dupe, not a fresh flag",
+            rep2.duplicates >= 1 && rep2.outgoing.isEmpty());
+    }
+
+    @Test public void incomingRowsStayPingOnly() {
+        NotifEvent in = ev(Channel.WHATSAPP, "Ada", "Ada", "Me", "real question?", 1000L, false, false);
+        IngestReport rep = engine.handle(list(in), allOn());
+        assertEquals(1, rep.pings.size());
+        assertTrue("incoming rows never enter the manual-send channel", rep.outgoing.isEmpty());
+    }
+
     private int countMessages(long contactId) {
         return messages.countByContact(contactId);
     }

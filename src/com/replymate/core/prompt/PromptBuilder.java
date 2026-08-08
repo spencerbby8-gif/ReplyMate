@@ -16,8 +16,20 @@ public final class PromptBuilder {
     private PromptBuilder() { }
 
     public static ChatRequest build(PromptBundle bundle) {
+        // P-intelligence-1: when understanding is present, the system prompt carries
+        // the explicit cold-start situation line and burst tasks get grounded
+        // mechanical annotations; when it is absent every byte is the legacy prompt.
+        com.replymate.core.understanding.ConversationContext ud = bundle.understanding;
+        java.util.List<String> situationLines = new java.util.ArrayList<String>();
+        if (ud != null) {
+            String coldLine =
+                com.replymate.core.understanding.ConversationContextBuilder
+                    .coldStartPromptLine(ud);
+            if (!coldLine.isEmpty()) situationLines.add(coldLine);
+        }
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
-            bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines);
+            bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines,
+            situationLines);
         List<Turn> turns = ThreadMapper.map(bundle.thread, bundle.contact.displayName);
         // P-context-honesty: the task turn quotes the exact message being answered and
         // names the app, so the model can never reply from the contact name alone.
@@ -35,7 +47,11 @@ public final class PromptBuilder {
         Turn task = burst.size() >= 2
             ? TaskComposer.burstTask(
                 bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
-                bundle.contact.displayName, burst, appLabel)
+                bundle.contact.displayName, burst, appLabel,
+                ud == null
+                    ? null
+                    : com.replymate.core.understanding.ConversationContextBuilder
+                        .burstAnnotations(ud))
             : TaskComposer.defaultTask(
                 bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
                 bundle.contact.displayName,

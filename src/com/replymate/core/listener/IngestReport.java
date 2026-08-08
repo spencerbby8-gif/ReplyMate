@@ -25,6 +25,10 @@ public final class IngestReport {
     public int duplicates;
     public int filtered;
     public final List<PingRequest> pings = new ArrayList<PingRequest>();
+    /** P-intelligence-1: contacts where a NEW outgoing (owner-typed, e.g. sent by
+     *  hand inside the chat app) row was just stored — the manual-send learning
+     *  hook evaluates exactly these contacts (one entry per contact per batch). */
+    public final List<PingRequest> outgoing = new ArrayList<PingRequest>();
 
     public String summary() {
         return "stored=" + stored + " dupes=" + duplicates + " filtered=" + filtered

@@ -125,18 +125,27 @@ public final class StyleService {
         //    customization, zero profile and zero learned signal must be LABELED
         //    as such in Prompt Audit — the reply is generated from neutral defaults
         //    and the thread alone, never pretended to be personalized.
-        if (extra.isEmpty()
-                && !anyNonDefault(global)
-                && overrides.isEmpty()
-                && contact.relationshipType.isEmpty()
-                && contact.relationshipNotes.isEmpty()
-                && contact.toneOverride.isEmpty()
-                && contact.languagePref.isEmpty()) {
+        if (isColdStart(contact, global, contactRows, extra)) {
             why.add("cold start — new contact, neutral assumptions"
                 + " (no voice override, profile, rules or learned signals yet)");
         }
 
         return new ComposedVoice(voiceLine, extra, why);
+    }
+
+    /** P-intelligence-1: the EXACT cold-start condition, shared by composition (audit
+     *  credit) and the understanding layer (prompt line) — one source of truth so a
+     *  "cold start" always means the same thing everywhere it is claimed. */
+    public static boolean isColdStart(Contact contact, Map<String, String> global,
+                                      Map<String, String> contactRows,
+                                      java.util.List<String> extraLines) {
+        return (extraLines == null || extraLines.isEmpty())
+            && !anyNonDefault(global)
+            && StyleSettings.overrideNotes(global, contactRows).isEmpty()
+            && contact.relationshipType.isEmpty()
+            && contact.relationshipNotes.isEmpty()
+            && contact.toneOverride.isEmpty()
+            && contact.languagePref.isEmpty();
     }
 
     /** Audit credits for the About-Them / contact-profile block (when non-default).
