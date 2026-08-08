@@ -99,6 +99,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.listener.ChatLinkTest \
     com.replymate.core.supabase.SupabaseConfigTest \
     com.replymate.provider.RetryPolicyTest \
+    com.replymate.provider.HttpDefaultsTest \
     com.replymate.provider.ApiErrorTest \
     com.replymate.provider.GeminiPayloadTest \
     com.replymate.provider.GeminiParserTest \

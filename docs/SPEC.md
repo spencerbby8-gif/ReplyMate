@@ -1,6 +1,9 @@
 # ReplyMate — Technical Specification & Phased Roadmap
 **Status:** APPROVED v1.1 — decisions locked 2026-07-17. Build governed by `docs/BLUEPRINT.md`.
 **Date:** 2026-07-17 · **Type:** Personal, Android-first, local-first AI reply assistant
+**Platform rule (locked P-background-10, 2026-08-08):** Android-only. Capture rides Android's
+NotificationListenerService; quick-reply delivery rides RemoteInput + PendingIntent. There is no
+iOS path for those primitives — an iPhone product would be a separate build, not this codebase.
 
 ---
 

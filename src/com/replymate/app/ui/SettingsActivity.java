@@ -309,10 +309,14 @@ public final class SettingsActivity extends Activity {
 
 
 
-    /** P-background-6: drive Android's proper approval flow for background
-     *  generation — every missing approval is explained in plain words, the
-     *  in-app approval (show-notifications) is requested here, and the button
-     *  opens the first screen-backed fix. Switch = master intent (kv); the
+    /** P-background-6 (repaired P-background-10): drive Android's proper approval
+     *  flow for background generation — every missing approval is explained in
+     *  plain words WITH the exact tap the user must make, the in-app approval
+     *  (show-notifications) is requested here, and the button opens the FOCUSED
+     *  system approval for the first screen-backed need (battery now opens the
+     *  per-app "always run in background?" dialog, never the generic all-apps
+     *  list; a maker battery screen is offered as an extra button only when it
+     *  really resolves on this device). Switch = master intent (kv); the
      *  subtitle carries the real capability. */
     private void runAssistantApprovalFlow() {
         java.util.EnumSet<com.replymate.app.assistant.AssistantPrereq.Need> missing =
@@ -322,33 +326,72 @@ public final class SettingsActivity extends Activity {
                 && android.os.Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[] {"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIF);
         }
+        boolean oemAvailable = missing.contains(
+            com.replymate.app.assistant.AssistantPrereq.Need.BATTERY)
+            && com.replymate.app.assistant.AssistantPrereq.oemBackgroundIntent(this) != null;
         StringBuilder msg = new StringBuilder(
             "Background generation needs these Android approvals:\n\n");
         com.replymate.app.assistant.AssistantPrereq.Need firstScreen = null;
         for (com.replymate.app.assistant.AssistantPrereq.Need n : missing) {
             msg.append("• ").append(com.replymate.app.assistant.AssistantPrereq.explain(n)).append('\n');
             if (firstScreen == null
-                    && com.replymate.app.assistant.AssistantPrereq.screenIntent(n) != null) {
+                    && com.replymate.app.assistant.AssistantPrereq.screenIntent(this, n) != null) {
                 firstScreen = n;
             }
+        }
+        String how = com.replymate.app.assistant.AssistantPrereq.howTo(
+            firstScreen == null
+                ? com.replymate.app.assistant.AssistantPrereq.Need.POST_NOTIFICATIONS
+                : firstScreen);
+        if (!how.isEmpty()) msg.append('\n').append(how).append('\n');
+        if (oemAvailable) {
+            msg.append("\nThis maker adds a SECOND background switch in its own battery"
+                + " manager — \"Maker battery settings\" opens it; turn it on there too"
+                + " if background delivery still stops.");
         }
         msg.append("\nReplyMate stays read-only and local-first —"
             + " nothing is ever sent without your Approve.");
         if (firstScreen == null) return;   // only the in-app request was missing
-        final android.content.Intent screen =
-            com.replymate.app.assistant.AssistantPrereq.screenIntent(firstScreen);
+        final com.replymate.app.assistant.AssistantPrereq.Need fixNeed = firstScreen;
         final String label = com.replymate.app.assistant.AssistantPrereq.chip(firstScreen);
-        new android.app.AlertDialog.Builder(this)
+        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this)
             .setTitle("Allow background generation")
             .setMessage(msg.toString())
-            .setPositiveButton("Open " + label + " settings",
+            .setPositiveButton(
+                fixNeed == com.replymate.app.assistant.AssistantPrereq.Need.BATTERY
+                    ? "Allow in background" : ("Open " + label + " settings"),
                 new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
-                        try { startActivity(screen); } catch (RuntimeException ignored) { }
+                        if (fixNeed == com.replymate.app.assistant.AssistantPrereq.Need.BATTERY) {
+                            String opened = com.replymate.app.assistant.AssistantPrereq
+                                .openBatteryApprovalFlow(SettingsActivity.this);
+                            Toast.makeText(SettingsActivity.this,
+                                opened.isEmpty()
+                                    ? "No battery screen found — open ReplyMate's app info"
+                                        + " and set Battery → Unrestricted by hand."
+                                    : "Opened: " + opened,
+                                Toast.LENGTH_LONG).show();
+                        } else {
+                            com.replymate.app.assistant.AssistantPrereq.launch(
+                                SettingsActivity.this,
+                                com.replymate.app.assistant.AssistantPrereq
+                                    .screenIntent(SettingsActivity.this, fixNeed));
+                        }
                     }
                 })
-            .setNegativeButton("Later", null)
-            .show();
+            .setNegativeButton("Later", null);
+        if (oemAvailable) {
+            b.setNeutralButton("Maker battery settings",
+                new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        com.replymate.app.assistant.AssistantPrereq.launch(
+                            SettingsActivity.this,
+                            com.replymate.app.assistant.AssistantPrereq
+                                .oemBackgroundIntent(SettingsActivity.this));
+                    }
+                });
+        }
+        b.show();
     }
 
     private void refreshRows() {

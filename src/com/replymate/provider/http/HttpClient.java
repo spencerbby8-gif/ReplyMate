@@ -13,13 +13,17 @@ import java.util.List;
 import java.util.Map;
 
 /** Tiny blocking HTTPS client (no external deps). Timeouts per BLUEPRINT §2.2:
- *  connect 15s / read 45s. Used by providers from P1 onward. */
+ *  connect 15s / read 45s — patient enough for slow mobile networks (no early
+ *  give-up), bounded enough to never hang the assistant forever. The values are
+ *  public constants pinned by HttpDefaultsTest. Used by providers from P1 on. */
 public class HttpClient {
+    public static final int DEFAULT_CONNECT_MS = 15_000;
+    public static final int DEFAULT_READ_MS = 45_000;
     private static final Charset UTF8 = Charset.forName("UTF-8");
     private final int connectTimeoutMs;
     private final int readTimeoutMs;
 
-    public HttpClient() { this(15_000, 45_000); }
+    public HttpClient() { this(DEFAULT_CONNECT_MS, DEFAULT_READ_MS); }
 
     public HttpClient(int connectTimeoutMs, int readTimeoutMs) {
         this.connectTimeoutMs = connectTimeoutMs;

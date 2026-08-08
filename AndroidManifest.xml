@@ -10,6 +10,12 @@
     <!-- For OUR OWN "new message" pings (Android 13+ runtime grant). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Lets us show the FOCUSED "always run in background?" approval dialog
+         (Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) instead of dumping
+         the user into the generic all-apps battery list. It only opens that one
+         system dialog — it never grants anything by itself. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Android 11+ package visibility: without these entries the OS makes
          getPackageInfo()/getLaunchIntentForPackage() pretend the app is absent,
          which broke Sources detection + deep-link fallback on real devices.
