@@ -122,6 +122,24 @@ public final class ConversationContextBuilderTest {
         assertTrue(joined.contains("cold start"));
     }
 
+    /** P-intelligence-2 (audit-vs-prompt parity): a SINGLE message with a correction
+     *  marker gets the plain task with NO signal annotation — so Prompt Audit must
+     *  not claim a "burst signal" that never reached the provider prompt. */
+    @Test public void singleMessageNeverClaimsABurstSignalItDidNotSend() {
+        Contact c = contact(8, "Temi");
+        List<Message> thread = new ArrayList<Message>();
+        thread.add(msg(8, Direction.INCOMING, "no wait, next friday instead", 1000));
+        ConversationContext single = ConversationContextBuilder.build(c, thread,
+            java.util.Collections.singletonList("no wait, next friday instead"),
+            none(), none(), null, null, 0);
+        assertTrue("the marker IS detected in the object…",
+            single.signals.hasCorrection());
+        assertEquals("…but no annotation reaches a single-message task",
+            0, ConversationContextBuilder.burstAnnotations(single).size());
+        assertFalse("…so the audit must not pretend otherwise",
+            single.whyLines().toString().contains("burst signal"));
+    }
+
     @Test public void groupSenderIsAttributedNotTheGroupTitle() {
         Contact c = contact(5, "Family group");
         Message m = msg(5, Direction.INCOMING, "make we go 7am", 1000);

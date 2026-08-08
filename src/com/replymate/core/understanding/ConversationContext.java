@@ -65,15 +65,19 @@ public final class ConversationContext {
             head.append(" (type: ").append(newestContentKind).append(')');
         }
         out.add(head.toString());
-        if (signals != null && signals.hasCorrection()) {
+        // P-intelligence-2 (audit-vs-prompt parity): signal lines are credited ONLY
+        // when the same signals actually reach the provider task — which is the
+        // burst path (burstDetected). A single message never carries a "burst
+        // signal" annotation, so the audit must never claim one here either.
+        if (burstDetected && signals != null && signals.hasCorrection()) {
             out.add("burst signal: self-correction in line "
                 + joinInts(signals.correctionLines) + " — answer the corrected version");
         }
-        if (signals != null && signals.multiQuestion) {
+        if (burstDetected && signals != null && signals.multiQuestion) {
             out.add("burst signal: " + signals.questions + " questions in "
                 + signals.size + " messages — the newest leads");
         }
-        if (signals != null && signals.fillerHeavy && signals.size > 1) {
+        if (burstDetected && signals != null && signals.fillerHeavy) {
             out.add("burst signal: mostly filler pings (" + signals.fillers + " of "
                 + signals.size + ") — answer the real line, not the noise");
         }

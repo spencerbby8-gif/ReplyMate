@@ -26,7 +26,15 @@ public final class StyleProfiler {
     public static final class Derived {
         public final String line;   // prompt-ready sentence
         public final String why;    // evidence, e.g. "4 of 5 approved replies end without a full stop"
-        public Derived(String line, String why) { this.line = line; this.why = why; }
+        /** voice-control dimension this line touches ("length"/"emoji"/"") — lets an
+         *  EXPLICIT user setting for that dimension take precedence (P-intelligence-2). */
+        public final String control;
+        public Derived(String line, String why) { this(line, why, ""); }
+        public Derived(String line, String why, String control) {
+            this.line = line;
+            this.why = why;
+            this.control = control == null ? "" : control;
+        }
     }
 
     /** Derive the contact's approved-reply style. Empty when evidence is thin. */
@@ -62,11 +70,13 @@ public final class StyleProfiler {
         if (avg <= 60) {
             out.add(new Derived(
                 "keep it short — your approved replies here average ~" + avg + " characters",
-                "approved replies average ~" + avg + " chars across the last " + n));
+                "approved replies average ~" + avg + " chars across the last " + n,
+                "length"));
         } else if (avg >= 160) {
             out.add(new Derived(
                 "longer replies are fine here — your approved replies average ~" + avg + " characters",
-                "approved replies average ~" + avg + " chars across the last " + n));
+                "approved replies average ~" + avg + " chars across the last " + n,
+                "length"));
         }
 
         // 2) trailing full stop — the charter's signature imperfection
@@ -87,7 +97,8 @@ public final class StyleProfiler {
         if (withEmoji == 0) {
             out.add(new Derived(
                 "no emoji — none of your approved replies in this chat use them",
-                "0 of " + n + " approved replies contain emoji"));
+                "0 of " + n + " approved replies contain emoji",
+                "emoji"));
         }
 
         return out.size() <= MAX_LINES ? out

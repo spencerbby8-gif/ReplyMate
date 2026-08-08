@@ -129,13 +129,39 @@ public final class DraftService {
         // from approved replies. All local; nothing crosses contact boundaries.
         com.replymate.core.memory.MemoryService.Recall mem = null;
         if (memory != null) {
+            // P-intelligence-2 precedence: voice dimensions the owner set EXPLICITLY
+            // for this contact beat the learned derived-style guesses for them.
+            java.util.Set<String> explicitControls = new java.util.HashSet<String>();
+            if (styleService != null) {
+                java.util.Map<String, String> crows = styleService.contactRows(contactId);
+                if (com.replymate.core.style.StyleSettings.level(crows, "length") != null) {
+                    explicitControls.add("length");
+                }
+                if (com.replymate.core.style.StyleSettings.level(crows, "emoji") != null) {
+                    explicitControls.add("emoji");
+                }
+            }
             mem = memory.withLearnedStyle(memory.recall(c, thread), c,
-                approvedTextsFor(contactId));
+                approvedTextsFor(contactId), explicitControls);
             why.addAll(mem.why);
             if (!c.memoryEnabled) {
                 why.add("memory disabled for this contact — no summary, facts"
                     + " or learned style were used");
             }
+        }
+
+        // P-intelligence-2 (Prompt Audit accuracy): the raw FEEDBACK counters behind
+        // every learned hint are also credited, verbatim — never a hint without its
+        // evidence trail.
+        com.replymate.core.learning.LearningEngine.Counters feedback =
+            learningService == null ? null : learningService.counters(contactId);
+        int signalsTotal = feedback == null ? 0 : feedback.total();
+        if (feedback != null) {
+            why.add("feedback so far for " + c.displayName + ": "
+                + feedback.approved + " approved · " + feedback.edited + " edited · "
+                + feedback.regenerated + " regenerated · " + feedback.rejected
+                + " rejected (recent window)"
+                + (signalsTotal == 0 ? " — no signals yet" : ""));
         }
 
         // P-intelligence-1 (message understanding): the model consumes a CLEAN
@@ -153,7 +179,7 @@ public final class DraftService {
                     : styleService.contactRows(contactId),
                 voice == null ? null : voice.extraLines,
                 mem == null ? null : mem.lines,
-                learningService == null ? 0 : learningService.counters(contactId).total());
+                signalsTotal);
         why.addAll(understanding.whyLines());
 
         PromptBundle bundle = new PromptBundle(

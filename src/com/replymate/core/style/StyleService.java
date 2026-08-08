@@ -105,15 +105,32 @@ public final class StyleService {
         why.addAll(contactProfileNotes(contact));
 
         // 3) learned hints — through the SAME gate as recording.
+        //    P-intelligence-2 precedence: an EXPLICIT contact setting for the same
+        //    control dimension (length / emoji) beats the learned guess — the hint
+        //    is suppressed and the audit says exactly why (owner rule: explicit
+        //    contact settings must take priority over learned guesses).
         if (learning != null && learning.openFor(contact)) {
             List<LearningEngine.Hint> hints = learning.hintsFor(contact);
             if (!hints.isEmpty()) {
                 StringBuilder learned = new StringBuilder("Learned from the owner's choices:");
+                boolean any = false;
                 for (LearningEngine.Hint h : hints) {
+                    if (!h.control.isEmpty()
+                            && StyleSettings.level(contactRows, h.control) != null) {
+                        why.add("learned hint suppressed (your explicit " + h.control
+                            + " setting for " + contact.displayName + " wins): " + h.line);
+                        continue;
+                    }
                     learned.append(' ').append(h.line).append(';');
                     why.add("learned: " + h.line + " — " + h.why);
+                    any = true;
                 }
-                extra.add(learned.toString());
+                if (any) {
+                    extra.add(learned.toString());
+                } else {
+                    why.add("learning on, but every current hint is overridden by an"
+                        + " explicit contact setting");
+                }
             } else {
                 why.add("learning on, not enough signals yet");
             }

@@ -94,11 +94,19 @@ public final class LearningEngine {
         return c;
     }
 
-    /** Hint with its evidence (for the audit view's "why"). */
+    /** Hint with its evidence (for the audit view's "why"). control names the voice
+     *  control this hint touches ("length" / "emoji" / "") so explicit user settings
+     *  for that dimension can take precedence over the learned guess (P-intelligence-2). */
     public static final class Hint {
         public final String line;       // prompt line
         public final String why;        // human evidence, e.g. "5 of 7 edits made text shorter"
-        public Hint(String line, String why) { this.line = line; this.why = why; }
+        public final String control;    // "length" | "emoji" | "" (untargetable hints)
+        public Hint(String line, String why) { this(line, why, ""); }
+        public Hint(String line, String why, String control) {
+            this.line = line;
+            this.why = why;
+            this.control = control == null ? "" : control;
+        }
     }
 
     /** Deterministic hint derivation — every rule above its threshold, else silent. */
@@ -109,17 +117,17 @@ public final class LearningEngine {
         if (c.edited >= EDIT_HINT_MIN) {
             if (c.shorter >= EDIT_HINT_MIN && c.shorter >= 2 * c.longer) {
                 out.add(new Hint("keep replies noticeably shorter",
-                    c.shorter + " of " + c.edited + " edits made the text shorter"));
+                    c.shorter + " of " + c.edited + " edits made the text shorter", "length"));
             } else if (c.longer >= EDIT_HINT_MIN && c.longer >= 2 * c.shorter) {
                 out.add(new Hint("a bit more room is welcome — don't over-compress",
-                    c.longer + " of " + c.edited + " edits made the text longer"));
+                    c.longer + " of " + c.edited + " edits made the text longer", "length"));
             }
             if (c.emojiDown >= EDIT_HINT_MIN && c.emojiDown >= 2 * c.emojiUp) {
                 out.add(new Hint("skip emoji here (the owner keeps removing them)",
-                    c.emojiDown + " edits removed emoji"));
+                    c.emojiDown + " edits removed emoji", "emoji"));
             } else if (c.emojiUp >= EDIT_HINT_MIN && c.emojiUp >= 2 * c.emojiDown) {
                 out.add(new Hint("emoji are welcome in this chat",
-                    c.emojiUp + " edits added emoji"));
+                    c.emojiUp + " edits added emoji", "emoji"));
             }
         }
         if (c.regenerated >= 4 && c.regenerated > c.approved) {

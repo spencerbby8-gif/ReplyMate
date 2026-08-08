@@ -118,22 +118,50 @@ public final class MemoryService {
     /** Append the M4 learned-style layer (DraftService supplies the approved reply
      *  texts — it owns the draft store; the kv cache here makes it restart-proof). */
     public Recall withLearnedStyle(Recall base, Contact c, List<String> approvedTexts) {
+        return withLearnedStyle(base, c, approvedTexts,
+            java.util.Collections.<String>emptySet());
+    }
+
+    /** P-intelligence-2 precedence: as above, but a derived line touching a voice
+     *  control the user has EXPLICITLY set for this contact (explicitControls:
+     *  "length"/"emoji") is suppressed — explicit settings beat learned guesses,
+     *  and the audit says so. Suppression happens AFTER the cache read so toggling
+     *  the explicit setting takes effect on the very next generation. */
+    public Recall withLearnedStyle(Recall base, Contact c, List<String> approvedTexts,
+                                   java.util.Set<String> explicitControls) {
         if (base == null) base = EMPTY;
         if (!openFor(c)) return base;
-        List<String> lines = learnedStyleLines(c, approvedTexts);
-        if (lines.isEmpty()) return base;
+        java.util.Set<String> suppressed = explicitControls == null
+            ? java.util.Collections.<String>emptySet() : explicitControls;
+        List<String[]> tagged = learnedStyleTagged(c, approvedTexts);
+        if (tagged.isEmpty()) return base;
+        List<String> lines = new ArrayList<String>();
+        int blocked = 0;
+        for (String[] tl : tagged) {
+            if (!tl[0].isEmpty() && suppressed.contains(tl[0])) { blocked++; continue; }
+            lines.add(tl[1]);
+        }
+        List<String> newWhy = new ArrayList<String>(base.why);
+        if (blocked > 0) {
+            newWhy.add("learned style suppressed (" + blocked
+                + " rule(s)) — your explicit setting for this contact wins");
+        }
+        if (lines.isEmpty()) return new Recall(new ArrayList<String>(base.lines), newWhy,
+            base.summaryText, base.summaryMeta, base.facts, base.learnedStyle);
         List<String> newLines = new ArrayList<String>(base.lines);
         for (String l : lines) newLines.add("- " + l);
-        List<String> newWhy = new ArrayList<String>(base.why);
         newWhy.add("learned style applied (" + lines.size()
             + " rule(s) from your approved replies)");
         return new Recall(newLines, newWhy, base.summaryText, base.summaryMeta,
             base.facts, lines);
     }
 
-    /** Cached deterministic StyleProfiler derivation for one contact.
-     *  kv value: 1st line = approved-count the cache was built from, rest = lines. */
-    public List<String> learnedStyleLines(Contact c, List<String> approvedTexts) {
+    /** Unit-separator between control tag and line inside the v2 cache (never
+     *  appears in natural text). */
+    private static final String TAG_SEP = "";
+
+    /** Cached tagged derivation: [control, line] pairs per contact. */
+    private List<String[]> learnedStyleTagged(Contact c, List<String> approvedTexts) {
         if (!openFor(c)) return Collections.emptyList();
         int approved = approvedTexts == null ? 0
             : Math.min(approvedTexts.size(), StyleProfiler.MAX_TEXTS);
@@ -143,29 +171,45 @@ public final class MemoryService {
             int nl = cached.indexOf('\n');
             String head = nl < 0 ? cached : cached.substring(0, nl);
             if (String.valueOf(approved).equals(head)) {
-                List<String> out = new ArrayList<String>();
+                List<String[]> out = new ArrayList<String[]>();
                 if (nl > 0) {
                     for (String l : cached.substring(nl + 1).split("\n")) {
-                        if (!l.trim().isEmpty()) out.add(l);
+                        String t = l.trim();
+                        if (t.isEmpty()) continue;
+                        int sep = t.indexOf(TAG_SEP);
+                        out.add(sep < 0
+                            ? new String[] {"", t}
+                            : new String[] {t.substring(0, sep), t.substring(sep + 1)});
                     }
                 }
                 return out;
             }
         }
         List<StyleProfiler.Derived> derived = StyleProfiler.derive(approvedTexts);
-        List<String> lines = new ArrayList<String>();
+        List<String[]> out = new ArrayList<String[]>();
         StringBuilder cache = new StringBuilder(String.valueOf(approved));
         for (StyleProfiler.Derived d : derived) {
-            lines.add(d.line);
-            cache.append('\n').append(d.line.replace('\n', ' '));
+            out.add(new String[] {d.control, d.line});
+            cache.append('\n').append(d.control).append(TAG_SEP)
+                 .append(d.line.replace('\n', ' '));
         }
         kv.put(key, cache.toString());
-        return lines;
+        return out;
     }
 
-    /** kv cache key for a contact's learned-style layer (isolation by key). */
+    /** Cached deterministic StyleProfiler derivation for one contact.
+     *  kv value (v2): 1st line = approved-count; rest = "control␟line" (control may
+     *  be empty). Public contract stays untagged lines. */
+    public List<String> learnedStyleLines(Contact c, List<String> approvedTexts) {
+        List<String> out = new ArrayList<String>();
+        for (String[] tl : learnedStyleTagged(c, approvedTexts)) out.add(tl[1]);
+        return out;
+    }
+
+    /** kv cache key for a contact's learned-style layer (isolation by key).
+     *  v2 adds control tags for the explicit-vs-learned precedence rule. */
     public static String styleKey(long contactId) {
-        return "style." + contactId + ".approved.v1";
+        return "style." + contactId + ".approved.v2";
     }
 
     /* ---------------------------------------------------------------- summaries */

@@ -127,6 +127,46 @@ public final class PromptUnderstandingTest {
         assertTrue(req.task.text.contains("2 of the 2 burst lines are questions"));
     }
 
+    /** P-intelligence-2 (item 1): starting in the MIDDLE of a conversation — older
+     *  context stays as attributed history, the owner's last reply is a model turn,
+     *  the burst tail never crosses back across it, and the task leads with the
+     *  newest message. */
+    @Test public void middleOfConversationKeepsRolesContextAndBurstBoundaries() {
+        Contact c = contact(7, "Ada");
+        List<Message> thread = new ArrayList<Message>();
+        Message oldIn = msg(7, Direction.INCOMING, "how far, the price?", 1000);
+        Message mine = msg(7, Direction.OUTGOING, "150k last price", 2000);
+        Message b1 = msg(7, Direction.INCOMING, "okay I hear you", 3000);
+        Message b2 = msg(7, Direction.INCOMING, "can you do 120?", 4000);
+        thread.add(oldIn); thread.add(mine); thread.add(b1); thread.add(b2);
+
+        ConversationContext u = ConversationContextBuilder.build(c, thread,
+            promptBurst(thread), none(), none(), null, null, 0);
+        assertEquals("burst stops at the owner's last reply — never swallows older turns",
+            2, u.burstSize);
+        assertEquals("150k last price", u.lastOutgoingText);
+
+        ChatRequest req = PromptBuilder.build(bundle(c, thread, u));
+        // roles: older incoming is an attributed USER turn, owner's reply is MODEL,
+        // then the two new incoming lines follow in order.
+        java.util.List<com.replymate.core.ai.Turn> turns = req.turns;
+        assertEquals(4, turns.size());
+        assertEquals(com.replymate.core.ai.Turn.Role.USER, turns.get(0).role);
+        assertTrue(turns.get(0).text.startsWith("Ada: "));
+        assertTrue(turns.get(0).text.contains("the price"));
+        assertEquals(com.replymate.core.ai.Turn.Role.MODEL, turns.get(1).role);
+        assertEquals("150k last price", turns.get(1).text);
+        assertEquals(com.replymate.core.ai.Turn.Role.USER, turns.get(2).role);
+        assertEquals(com.replymate.core.ai.Turn.Role.USER, turns.get(3).role);
+        assertTrue(turns.get(3).text.contains("can you do 120"));
+        // the task is the burst task leading with the newest money question, not
+        // the settled older turn
+        assertTrue(req.task.text.contains("fired 2 messages"));
+        assertTrue(req.task.text.contains("can you do 120?"));
+        assertFalse("the older, already-answered question is never re-quoted as the point",
+            req.task.text.contains("The message you're replying to"));
+    }
+
     private static List<String> promptBurst(List<Message> thread) {
         return PromptBuilder.burstTailUsableIncoming(thread, 6);
     }

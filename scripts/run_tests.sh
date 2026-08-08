@@ -60,6 +60,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.assistant.AssistantLearningTest \
     com.replymate.core.listener.ConversationMatchTest \
     com.replymate.core.usecase.ChatRankerTest \
+    com.replymate.core.usecase.LearningToPromptTest \
     com.replymate.core.understanding.BurstSignalsTest \
     com.replymate.core.understanding.ConversationContextBuilderTest \
     com.replymate.core.model.ToneTransformTest \
@@ -75,6 +76,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.prompt.VoiceCharterTest \
     com.replymate.core.style.StyleSettingsTest \
     com.replymate.core.style.StyleServiceTest \
+    com.replymate.core.style.LearningPrecedenceTest \
     com.replymate.core.learning.ManualSendLearnerTest \
     com.replymate.core.learning.LearningEngineTest \
     com.replymate.core.learning.LearningServiceTest \
