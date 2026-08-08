@@ -242,12 +242,20 @@ public final class ContactEditActivity extends Activity {
         root.addView(Ui.label(this, "VOICE FOR THIS CONTACT"));
         TextView why = Ui.sub(this,
             "Override your global voice for " + this.existing.displayName
-                + " only. Tap a control to see every option with examples — pick \"Inherit global voice\" to follow your global voice.");
+                + " only — your tap here always wins over learned guesses. Tap a control"
+                + " to see every option with examples; the top row follows your global"
+                + " voice again, and Off switches that dial off for this person.");
         root.addView(why);
-        for (StyleControls.Control control : StyleControls.all()) {
-            root.addView(overrideRow(control));
-            root.addView(Ui.divider(this));
-        }
+        // P-intelligence-3: same grouping as the global voice page so both screens
+        // read the same way (storage order untouched).
+        addOverrideGroup(root, "FEEL & TONE",
+            new StyleControls.Control[] {StyleControls.TONE, StyleControls.HUMOR,
+                StyleControls.CONFIDENCE, StyleControls.FLIRTING});
+        addOverrideGroup(root, "REPLY SHAPE",
+            new StyleControls.Control[] {StyleControls.LENGTH, StyleControls.FORMALITY,
+                StyleControls.FOLLOW_UP});
+        addOverrideGroup(root, "EXPRESSION",
+            new StyleControls.Control[] {StyleControls.EMOJI, StyleControls.SLANG});
 
         // Live preview (P-polish): real generation over a sample chat using THIS
         // contact's effective voice (overrides + custom prompt + learned hints).
@@ -291,6 +299,16 @@ public final class ContactEditActivity extends Activity {
         root.addView(Ui.sub(this, memOn
             ? "Stable facts stay saved on this phone, never leave it, and shape replies for this contact only."
             : "Memory is OFF for this contact — pinned facts are saved but never used until memory is back on."));
+    }
+
+    /** One labeled group of per-contact voice overrides (P-intelligence-3). */
+    private void addOverrideGroup(LinearLayout root, String title,
+                                  StyleControls.Control[] controls) {
+        root.addView(Ui.label(this, title));
+        for (StyleControls.Control control : controls) {
+            root.addView(overrideRow(control));
+            root.addView(Ui.divider(this));
+        }
     }
 
     private View overrideRow(final StyleControls.Control control) {
@@ -603,10 +621,20 @@ public final class ContactEditActivity extends Activity {
         com.replymate.core.learning.LearningService learning = this.c.learningService();
         com.replymate.core.learning.LearningEngine.Counters k =
             learning.counters(this.contactId);
-        StringBuilder sb = new StringBuilder("Signals: approved ").append(k.approved)
-            .append(" · edited ").append(k.edited)
+        StringBuilder sb = new StringBuilder("Signals: approved ").append(k.approved);
+        if (k.approved > 0) {
+            sb.append(" (").append(k.copiedAsIs).append(" copied as-is · ")
+              .append(k.quickSent).append(" quick-sends · ")
+              .append(k.manualMatched).append(" manual matches)");
+        }
+        sb.append(" · edited ").append(k.edited)
             .append(" · regenerated ").append(k.regenerated)
             .append(" · rejected ").append(k.rejected);
+        if (k.manualTotal() > 0) {
+            sb.append("\\nManual sends (typed in the app yourself): ")
+              .append(k.manualMatched).append(" matched a draft word-for-word · ")
+              .append(k.manualCorrected).append(" corrected one");
+        }
         if (learning.openFor(this.existing)) {
             java.util.List<com.replymate.core.learning.LearningEngine.Hint> hints =
                 learning.hintsFor(this.existing);

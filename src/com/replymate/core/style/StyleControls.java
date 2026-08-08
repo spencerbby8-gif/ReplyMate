@@ -5,10 +5,17 @@ import java.util.Collections;
 import java.util.List;
 
 /** The 9 owner-approved style controls (P4 customization system). Each control has
- *  three levels (0/1/2) with a UI label AND a prompt phrase — the phrase table is the
- *  entire contract with the model, so it lives here, pure and unit-tested.
- *  Levels stored as ints in style_setting; per-contact overrides inherit when unset. */
+ *  three active levels (0/1/2) plus OFF ({@link #LEVEL_OFF}) with a UI label AND a
+ *  prompt phrase — the phrase table is the entire contract with the model, so it
+ *  lives here, pure and unit-tested.
+ *  Levels stored as ints in style_setting; per-contact overrides inherit when unset.
+ *  P-intelligence-3 (owner directive): every dimension can be turned OFF — no phrase
+ *  is rendered for it, so the model receives NO direction for that dimension at all
+ *  (vs level-0 "none", which is an ACTIVE instruction like "no emoji"). */
 public final class StyleControls {
+
+    /** Dimension disabled: phrase(3) is "" and the voice line drops it entirely. */
+    public static final int LEVEL_OFF = 3;
 
     /** One control: stable storage key, UI label, per-level UI labels + prompt phrases.
      *  P-ux-fix: each level also carries a plain-English description and a concrete
@@ -32,21 +39,26 @@ public final class StyleControls {
         }
 
         public String levelLabel(int level) {
-            return levelLabels[clamp(level)];
+            return level == LEVEL_OFF ? "off" : levelLabels[clamp(level)];
         }
 
+        /** The prompt phrase for this level. OFF ⇒ EMPTY — the dimension must not
+         *  appear in the voice line at all (disabled, not instructed). */
         public String phrase(int level) {
-            return phrases[clamp(level)];
+            return level == LEVEL_OFF ? "" : phrases[clamp(level)];
         }
 
         /** What this level makes the AI do, in owner's words. */
         public String levelDesc(int level) {
-            return descs[clamp(level)];
+            return level == LEVEL_OFF
+                ? "Off — ReplyMate gives the AI no instruction for " + label.toLowerCase()
+                    + "; it just stays natural"
+                : descs[clamp(level)];
         }
 
-        /** A concrete sample reply at this level. */
+        /** A concrete sample reply at this level ("" for OFF — nothing to sample). */
         public String levelExample(int level) {
-            return examples[clamp(level)];
+            return level == LEVEL_OFF ? "" : examples[clamp(level)];
         }
 
         static int clamp(int level) {

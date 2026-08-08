@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ════════════════════════════════════════════════════════════════════════════
+  REPLYMATE SOLO-BUILDER MODE (P-intelligence-3) — BUILD-TIME STUB ONLY.
+
+  These two strings stay EMPTY in the repository, always. NEVER commit a real
+  API key here. scripts/release.sh injects the values at packaging time from
+  dev-secrets (REPLYMATE_BUILTIN_PROVIDER / REPLYMATE_BUILTIN_KEY), builds the
+  APK, and restores this stub — so the shipped binary can carry the owner's
+  built-in key without the key ever being in git.
+
+  When EMPTY, the app is a pure bring-your-own-key build (BuiltInSetup no-ops).
+  ════════════════════════════════════════════════════════════════════════════
+-->
+<resources>
+    <string name="rm_builtin_provider_wire" translatable="false"></string>
+    <string name="rm_builtin_key" translatable="false"></string>
+</resources>

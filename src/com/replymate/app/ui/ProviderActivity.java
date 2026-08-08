@@ -48,6 +48,24 @@ public final class ProviderActivity extends Activity {
         // keep header (index 0..2: title, sub, divider), rebuild the rest
         while (root.getChildCount() > 3) root.removeViewAt(3);
 
+        // P-intelligence-3: the detected active PRIVACY MODE sits above everything —
+        // free mode warns about model-training use; paid/local soften accordingly;
+        // nothing here claims privacy the setup didn't earn.
+        com.replymate.core.privacy.ProviderPrivacy.Mode mode = c.privacyMode();
+        ProviderDef active = c.activeProviderDef();
+        boolean builtIn = com.replymate.core.privacy.ProviderPrivacy.isBuiltIn(active);
+        String activeLabel = active == null
+            ? ""
+            : (active.label.isEmpty() ? active.type.label : active.label);
+        TextView head = Ui.tv(this, "Mode: "
+            + com.replymate.core.privacy.ProviderPrivacy.badge(mode), 14,
+            mode == com.replymate.core.privacy.ProviderPrivacy.Mode.FREE ? Ui.RED : Ui.GREEN);
+        head.setTypeface(Typeface.DEFAULT_BOLD);
+        root.addView(head);
+        root.addView(Ui.sub(this,
+            com.replymate.core.privacy.ProviderPrivacy.noticeBody(mode, activeLabel, builtIn)));
+        root.addView(Ui.divider(this));
+
         java.util.List<ProviderDef> all = c.providers().all();
         if (all.isEmpty()) {
             TextView none = Ui.sub(this, "No providers yet — add one to start generating replies.");
@@ -77,6 +95,9 @@ public final class ProviderActivity extends Activity {
         sub.append(def.modelName.isEmpty() ? "no model selected" : def.modelName);
         sub.append(def.type.needsKey ? (hasKey ? " · key saved ✓" : " · key missing!")
             : " · no key needed");
+        // P-intelligence-3: mode badge per row (detected, not declared)
+        sub.append(" · ").append(com.replymate.core.privacy.ProviderPrivacy.badge(
+            com.replymate.core.privacy.ProviderPrivacy.modeFor(def, c.kv())));
         if (def.isActive) sub.append("  ● ACTIVE");
 
         LinearLayout row = new LinearLayout(this);

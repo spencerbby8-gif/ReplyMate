@@ -87,6 +87,11 @@ public final class ConversationActivity extends Activity {
         ((TextView) findViewById(R.id.conv_rel)).setText(
             contact.relationshipType.isEmpty() ? "manual mode" : contact.relationshipType);
 
+        // P-intelligence-3: ONE chat timeline — the separate "AI drafts" section is
+        // retired; drafts render as their own bubbles inline (see refreshThread()).
+        draftsHeader.setVisibility(View.GONE);
+        draftList.setVisibility(View.GONE);
+
         findViewById(R.id.back_btn).setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { finish(); }
         });
@@ -144,62 +149,125 @@ public final class ConversationActivity extends Activity {
 
     /* ------------------------------------------------------------------ thread */
 
-    /** P-ux-fix: the ONE manual action — a normal outgoing message. Your words are
-     *  saved to the thread like any sent text; if this contact is connected to an app
-     *  (WhatsApp/Discord…), the status line afterwards offers to open that app with
-     *  the text ready to paste-send. Incoming messages arrive via the listener. */
+    /** The manual composer (P-intelligence-3): behaves like a normal chat input.
+     *  Your words are ALWAYS saved to the thread like a sent text, then — when this
+     *  contact is connected to an app whose quick-reply target is still valid — the
+     *  text goes straight out through that app's own reply action (the exact same
+     *  dismissal-safe chain the Approve button uses). When no live/cached target
+     *  survives there is NO fake "Sent": the words stay in the thread, the text is
+     *  copied, and the status line honestly offers Copy + Open. */
     private void manualSend() {
         final String text = input.getText().toString().trim();
         if (text.isEmpty()) {
             Toast.makeText(this, "Type your reply first", Toast.LENGTH_SHORT).show();
             return;
         }
-        Message m = new Message();
-        m.contactId = contact.id;
-        m.channel = Channel.MANUAL;
-        m.direction = Direction.OUTGOING;
-        m.body = text;
-        m.sentAt = c.clock().now();
-        m.source = Source.MANUAL;
-        c.messages().insert(m);
+        // The WHAT-TO-DO lives in ManualComposer (tested view-free); here only the
+        // honest rendering of the outcome.
+        final com.replymate.app.assistant.ManualComposer.Result r =
+            com.replymate.app.assistant.ManualComposer.send(c, contact.id, text);
         input.setText("");
         refreshThread();
-        final Channel origin = originChannel();
-        if (origin != null) {
-            showStatus("Saved ✓ — tap here to open it in "
-                + WatchedApps.labelFor(origin), Ui.GREEN);
-            genStatus.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    openInApp(origin, text);
-                    genStatus.setOnClickListener(null);
-                }
-            });
+        final Channel origin = r.origin;
+        switch (r.outcome) {
+            case SAVED_ONLY:
+                break;                                // manual-only contact: saved
+            case SENT_LIVE:
+            case SENT_CONVERSATION:
+                showStatus("Sent ✓ through " + r.appLabel + "'s quick-reply:\n" + text,
+                    Ui.GREEN);
+                genStatus.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        genStatus.setOnClickListener(null);
+                    }
+                });
+                break;
+            case SENT_CACHED:
+                showStatus("Sent ✓ via " + r.appLabel + "'s cached quick-reply —"
+                        + " couldn't watch it land; check " + r.appLabel
+                        + " to be sure:\n" + text, Ui.GREEN);
+                genStatus.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        genStatus.setOnClickListener(null);
+                    }
+                });
+                break;
+            default:
+                showStatus("Couldn't send straight to " + r.appLabel + " (" + r.reason
+                        + "). Your reply is saved above and copied ✓ — tap here to open "
+                        + r.appLabel + " and paste it.", Ui.ACCENT);
+                genStatus.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        openInApp(origin, "");
+                        genStatus.setOnClickListener(null);
+                    }
+                });
+                break;
         }
     }
 
+    /** P-intelligence-3: the chat screen reads like a real messaging app. ONE
+     *  timeline holds incoming bubbles (left), the owner's manual/approved messages
+     *  (right) AND every AI draft as its own bubble tile at the moment it was made
+     *  — pending drafts carry an obvious "waiting for you" chip and full actions;
+     *  finalized drafts collapse to compact state bubbles (✓ copied / ✓ edited /
+     *  ✓ sent) so nothing ever looks sent when it hasn't been. */
     private void refreshThread() {
         msgList.removeAllViews();
         List<Message> all = c.messages().lastMessages(contact.id, filter.isEmpty() ? 100 : 400);
-        List<Message> shown = new ArrayList<Message>();
+        List<Draft> drafts = c.drafts().byContact(contact.id, 30);   // newest-first
+
+        // Merge messages + drafts into one ascending timeline (drafts slot in at
+        // createdAt, right after the message they answered).
+        List<Object> items = new ArrayList<Object>();
+        List<Long> times = new ArrayList<Long>();
         for (Message m : all) {
             if (filter.isEmpty()
                     || (m.body != null && m.body.toLowerCase(Locale.US).contains(filter))) {
-                shown.add(m);
+                items.add(m);
+                times.add(Long.valueOf(m.sentAt));
             }
         }
-        if (shown.isEmpty()) {
+        for (Draft d : drafts) {
+            String body = d.replyText == null ? "" : d.replyText.toLowerCase(Locale.US);
+            if (filter.isEmpty() || body.contains(filter)) {
+                items.add(d);
+                times.add(Long.valueOf(d.createdAt));
+            }
+        }
+        // simple stable insertion sort by time (messages win ties — they arrived first)
+        for (int i = 1; i < items.size(); i++) {
+            Object cur = items.get(i);
+            long ct = times.get(i).longValue();
+            int j = i - 1;
+            while (j >= 0 && times.get(j).longValue() > ct) {
+                items.set(j + 1, items.get(j));
+                times.set(j + 1, times.get(j));
+                j--;
+            }
+            items.set(j + 1, cur);
+            times.set(j + 1, Long.valueOf(ct));
+        }
+
+        if (items.isEmpty()) {
             TextView empty = Ui.sub(this, !filter.isEmpty()
-                ? "No messages match “" + filter + "”."
+                ? "No messages or drafts match “" + filter + "”."
                 : "No messages yet.\nNew WhatsApp/Discord messages from "
                     + contact.displayName
                     + " appear here on their own. Then tap ✨ Generate, or write"
-                    + " your own reply below and tap ✍ Manual.");
+                    + " your own reply below and tap ➤ Send.");
             empty.setGravity(android.view.Gravity.CENTER);
             empty.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 24));
             msgList.addView(empty);
             return;
         }
-        for (Message m : shown) msgList.addView(bubble(m));
+        for (Object item : items) {
+            if (item instanceof Message) {
+                msgList.addView(bubble((Message) item));
+            } else {
+                msgList.addView(draftTile((Draft) item));
+            }
+        }
         scrollToBottom();
     }
 
@@ -285,13 +353,31 @@ public final class ConversationActivity extends Activity {
     /* ------------------------------------------------------------------ drafts */
 
     private void refreshDrafts() {
-        draftList.removeAllViews();
-        List<Draft> drafts = c.drafts().byContact(contact.id, 30);
-        draftsHeader.setVisibility(drafts.isEmpty() ? View.GONE : View.VISIBLE);
-        for (Draft d : drafts) draftList.addView(draftCard(d));
+        // P-intelligence-3: drafts live inside the one timeline now — one refresh paints all.
+        refreshThread();
     }
 
-    private View draftCard(final Draft draft) {
+    /** Honest, glanceable state chip for a draft bubble (P-intelligence-3):
+     *  pending drafts say they WAIT for a human; finalized drafts name exactly what
+     *  happened (copied / edited / sent) — a draft must never LOOK sent when it is not. */
+    private static String stateChip(Draft d) {
+        switch (d.status) {
+            case COPIED: return "✓ approved & copied";
+            case EDITED: return "✓ edited, then copied";
+            case SENT:   return "✓ sent through quick-reply";
+            default:     return "● AI draft — waiting for your approval";
+        }
+    }
+
+    private static boolean isPending(Draft d) {
+        return d.status == DraftStatus.GENERATED;
+    }
+
+    /** A draft as a chat bubble tile: right-aligned like the owner's outgoing
+     *  messages, state chip on top, the text, audit "why" access, and the action
+     *  row. Pending tiles keep the inline edit field + tone transforms; finalized
+     *  tiles are read-only receipts of what was approved/copied/sent. */
+    private View draftTile(final Draft draft) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackgroundResource(R.drawable.bg_card);
@@ -299,23 +385,46 @@ public final class ConversationActivity extends Activity {
         card.setPadding(pad, pad, pad, pad);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Ui.dp(this, 8);
+        lp.topMargin = Ui.dp(this, 6);
+        lp.leftMargin = Ui.dp(this, 48);            // outgoing side — like "You" bubbles
         card.setLayoutParams(lp);
 
-        // Editable draft text (the "Edit" action — persisted on Copy/status changes).
-        final EditText body = new EditText(this);
-        body.setText(draft.replyText);
-        body.setTextColor(Ui.PRIMARY);
-        body.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
-        body.setBackground(null);
-        body.setPadding(0, 0, 0, Ui.dp(this, 6));
-        card.addView(body);
+        boolean pending = isPending(draft);
+        TextView chip = Ui.tv(this, (draft.favorite ? "★ " : "") + stateChip(draft), 11,
+            pending ? Ui.ACCENT : Ui.GREEN);
+        chip.setTypeface(Typeface.DEFAULT_BOLD);
+        chip.setPadding(0, 0, 0, Ui.dp(this, 4));
+        card.addView(chip);
 
-        // Meta row.
-        // P-ux-fix: provider/model name hidden from normal cards (it stays available
-        // in the "Why this reply?" panel + Prompt Audit for transparency on demand).
-        String favMark = draft.favorite ? "★ " : "";
-        card.addView(Ui.sub(this, favMark + TimeFmt.dayTime(draft.createdAt)
+        if (pending) {
+            // Editable draft text (the "Edit" action — persisted on Copy/status changes).
+            final EditText body = new EditText(this);
+            body.setText(draft.replyText);
+            body.setTextColor(Ui.PRIMARY);
+            body.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+            body.setBackground(null);
+            body.setPadding(0, 0, 0, Ui.dp(this, 6));
+            card.addView(body);
+            fillDraftActions(card, draft, body, true);
+            return card;
+        }
+
+        TextView body = Ui.tv(this, draft.replyText, 15, Ui.PRIMARY);
+        body.setPadding(0, 0, 0, Ui.dp(this, 6));
+        body.setTextIsSelectable(true);
+        card.addView(body);
+        fillDraftActions(card, draft, null, false);
+        return card;
+    }
+
+    /** Meta row + why panel + actions for one draft tile — shared by pending and
+     *  finalized flavors. {@code body} is the inline edit field (pending) or null. */
+    private void fillDraftActions(LinearLayout card, final Draft draft,
+                                  final EditText body, final boolean pending) {
+
+        // Meta row (P-ux-fix: provider/model stays in the "Why this reply?" panel +
+        // Prompt Audit only — the chip above carries the readable state).
+        card.addView(Ui.sub(this, TimeFmt.dayTime(draft.createdAt)
             + " · " + draft.status.wire));
 
         // Expandable "Why this reply?" panel (owner ask): which voice settings, contact
@@ -362,15 +471,24 @@ public final class ConversationActivity extends Activity {
         addAction(actions, draft.favorite ? "★" : "☆", new View.OnClickListener() {
             @Override public void onClick(View v) { toggleFavorite(draft); }
         });
-        addAction(actions, "Re-gen", new View.OnClickListener() {
-            @Override public void onClick(View v) { generate(); }
-        });
+        // Re-gen asks for a fresh take — only offered while the draft is pending:
+        // on finalized bubbles it would read as if the sent/copied reply could be
+        // redone, which it can't (the audit trail stays).
+        if (pending) {
+            addAction(actions, "Re-gen", new View.OnClickListener() {
+                @Override public void onClick(View v) { generate(); }
+            });
+        }
         addActionColored(actions, "Delete", Ui.RED, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 c.drafts().delete(draft.id);
-                // P4 learning: deleting a draft without copying = rejection.
-                c.learningService().record(contact,
-                    StyleSignal.Kind.REJECTED, "deleted", draft.id);
+                // P4 learning: deleting a PENDING draft without copying = rejection.
+                // Deleting a finalized receipt is just history cleanup (no signal,
+                // same as before — the approval/copy signal was already recorded).
+                if (pending) {
+                    c.learningService().record(contact,
+                        StyleSignal.Kind.REJECTED, "deleted", draft.id);
+                }
                 Toast.makeText(ConversationActivity.this,
                     "Draft deleted", Toast.LENGTH_SHORT).show();
                 refreshDrafts();
@@ -381,16 +499,21 @@ public final class ConversationActivity extends Activity {
         if (origin != null) {
             TextView open = addAction(actions, "Open in " + WatchedApps.labelFor(origin),
                 new View.OnClickListener() {
-                    @Override public void onClick(View v) { openInApp(origin, body); }
+                    @Override public void onClick(View v) {
+                        openInApp(origin, body == null
+                            ? draft.replyText : body.getText().toString().trim());
+                    }
                 });
             open.setTextColor(Ui.ACCENT);
         }
+
+        if (!pending) return;                        // finalized receipt: no transforms
 
         if (busyDrafts.contains(draft.id)) {
             TextView busy = Ui.sub(this, "Transforming…");
             busy.setPadding(0, Ui.dp(this, 4), 0, 0);
             card.addView(busy);
-            return card;                            // no tone chips while working
+            return;                                 // no tone chips while working
         }
 
         // Tone transforms row.
@@ -399,20 +522,19 @@ public final class ConversationActivity extends Activity {
         tones.setPadding(0, Ui.dp(this, 4), 0, 0);
         card.addView(tones);
         for (final ToneTransform tone : ToneTransform.values()) {
-            TextView chip = Ui.tv(this, tone.label, 11, Ui.DIM);
-            chip.setBackgroundResource(R.drawable.bg_field);
+            TextView toneChip = Ui.tv(this, tone.label, 11, Ui.DIM);
+            toneChip.setBackgroundResource(R.drawable.bg_field);
             int hp = Ui.dp(this, 8), vp = Ui.dp(this, 4);
-            chip.setPadding(hp, vp, hp, vp);
+            toneChip.setPadding(hp, vp, hp, vp);
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             clp.rightMargin = Ui.dp(this, 6);
             clp.topMargin = Ui.dp(this, 4);
-            tones.addView(chip, clp);
-            chip.setOnClickListener(new View.OnClickListener() {
+            tones.addView(toneChip, clp);
+            toneChip.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { transform(draft, tone); }
             });
         }
-        return card;
     }
 
     private TextView addAction(LinearLayout parent, String label,
@@ -432,8 +554,12 @@ public final class ConversationActivity extends Activity {
         return a;
     }
 
+    /** {@code body} is the pending tile's inline edit field; finalized tiles pass
+     *  null and copy the receipt text as-is. */
     private void copyDraft(Draft draft, EditText body) {
-        String text = body.getText().toString().trim();
+        String text = body == null
+            ? (draft.replyText == null ? "" : draft.replyText.trim())
+            : body.getText().toString().trim();
         if (text.isEmpty()) {
             Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show();
             return;

@@ -32,6 +32,12 @@ public final class AssistantPlanner {
      *  step. Keep EDIT LAST: request codes derive from ordinals. */
     public enum Btn { APPROVE_SEND, COPY, REGENERATE, OPEN, EDIT }
 
+    /** P-intelligence-3: RemoteInput result key for the inline EDIT action on the
+     *  draft alert — the typed correction arrives under this key in the broadcast
+     *  (framework RemoteInput contract; constant lives here so both the notifier
+     *  and the receiver pin the SAME key). */
+    public static final String EDIT_INPUT_KEY = "rm_edit_text";
+
     /* ------------------------------------------------------------------ capability */
 
     /** The best usable direct-reply action across BOTH documented surfaces

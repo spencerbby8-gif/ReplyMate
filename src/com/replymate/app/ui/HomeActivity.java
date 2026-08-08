@@ -78,7 +78,43 @@ public final class HomeActivity extends Activity {
         super.onResume();
         if (c == null) return;
         renderHealth();
+        renderPrivacy();
         renderContacts();
+    }
+
+    /** P-intelligence-3: the privacy mode banner. Detected from the real provider/
+     *  account setup (never from "a key exists"): FREE gets the honest model-
+     *  training warning in amber, LOCAL/PRIVATE soften to green, NONE prompts to
+     *  add a provider. Tap always opens AI providers — where the key actually
+     *  changes. Full notice text readable on the provider screens. */
+    private void renderPrivacy() {
+        TextView p = (TextView) findViewById(R.id.home_privacy);
+        if (p == null) return;
+        com.replymate.core.model.ProviderDef active = c.activeProviderDef();
+        com.replymate.core.privacy.ProviderPrivacy.Mode mode = c.privacyMode();
+        p.setVisibility(View.VISIBLE);
+        p.setText(com.replymate.core.privacy.ProviderPrivacy.headline(
+            mode, com.replymate.core.privacy.ProviderPrivacy.isBuiltIn(active))
+            + " — tap to manage");
+        int color;
+        switch (mode) {
+            case FREE:
+                color = Color.rgb(240, 180, 80);   // amber = warning, not alarm
+                break;
+            case PRIVATE:
+            case LOCAL:
+                color = Ui.GREEN;
+                break;
+            default:
+                color = Ui.DIM;
+                break;
+        }
+        p.setTextColor(color);
+        p.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(HomeActivity.this, ProviderActivity.class));
+            }
+        });
     }
 
     private void renderHealth() {

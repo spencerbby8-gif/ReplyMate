@@ -81,6 +81,21 @@ public final class StyleService {
             why.add("global voice: defaults (not customized yet)");
         }
         why.addAll(overrides);
+        // P-intelligence-3: OFF controls must be credited EXACTLY as off — never let
+        // the audit imply an instruction was sent for a dimension that was disabled.
+        List<String> offs = offNotes(levels);
+        if (offs.size() == StyleControls.all().size()) {
+            why.add("every voice control is Off — no style directions were sent;"
+                + " replies stay natural for this chat");
+        } else if (!offs.isEmpty()) {
+            StringBuilder sb = new StringBuilder("voice controls switched off (no"
+                + " instruction sent — the AI stays natural on these): ");
+            for (int i = 0; i < offs.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(offs.get(i));
+            }
+            why.add(sb.toString());
+        }
 
         // 2) owner's own standing style instruction (global, applies to every chat),
         //    then the custom prompt box (this contact only). P-background-8: the
@@ -220,5 +235,15 @@ public final class StyleService {
             first = false;
         }
         return sb.toString();
+    }
+
+    /** Labels of the controls resolved to OFF in this composition (audit credit). */
+    static List<String> offNotes(int[] levels) {
+        List<String> out = new ArrayList<String>();
+        List<StyleControls.Control> all = StyleControls.all();
+        for (int i = 0; i < all.size(); i++) {
+            if (levels[i] == StyleControls.LEVEL_OFF) out.add(all.get(i).label);
+        }
+        return out;
     }
 }

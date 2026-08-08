@@ -157,11 +157,37 @@ public final class DraftService {
             learningService == null ? null : learningService.counters(contactId);
         int signalsTotal = feedback == null ? 0 : feedback.total();
         if (feedback != null) {
-            why.add("feedback so far for " + c.displayName + ": "
-                + feedback.approved + " approved · " + feedback.edited + " edited · "
-                + feedback.regenerated + " regenerated · " + feedback.rejected
-                + " rejected (recent window)"
-                + (signalsTotal == 0 ? " — no signals yet" : ""));
+            StringBuilder fb = new StringBuilder("feedback so far for ")
+                .append(c.displayName).append(": ")
+                .append(feedback.approved).append(" approved");
+            if (feedback.approved > 0) {
+                fb.append(" (");
+                boolean firstPart = true;
+                if (feedback.copiedAsIs > 0) {
+                    fb.append(feedback.copiedAsIs).append(" copied as-is");
+                    firstPart = false;
+                }
+                if (feedback.quickSent > 0) {
+                    if (!firstPart) fb.append(", ");
+                    fb.append(feedback.quickSent).append(" sent via quick-reply");
+                    firstPart = false;
+                }
+                if (feedback.manualMatched > 0) {
+                    if (!firstPart) fb.append(", ");
+                    fb.append(feedback.manualMatched).append(" manual matches");
+                }
+                fb.append(')');
+            }
+            fb.append(" · ").append(feedback.edited).append(" edited");
+            if (feedback.manualTotal() > 0) {
+                fb.append(" (manual sends: ").append(feedback.manualMatched)
+                  .append(" matched word-for-word, ").append(feedback.manualCorrected)
+                  .append(" corrected)");
+            }
+            fb.append(" · ").append(feedback.regenerated).append(" regenerated · ")
+              .append(feedback.rejected).append(" rejected (recent window)");
+            if (signalsTotal == 0) fb.append(" — no signals yet");
+            why.add(fb.toString());
         }
 
         // P-intelligence-1 (message understanding): the model consumes a CLEAN

@@ -62,10 +62,21 @@ public final class VoiceActivity extends Activity {
         root.addView(Ui.divider(this));
 
         root.addView(Ui.label(this, "PRESET CONTROLS — TAP TO CHANGE"));
-        for (StyleControls.Control control : StyleControls.all()) {
-            root.addView(controlRow(control));
-            root.addView(Ui.divider(this));
-        }
+        root.addView(Ui.sub(this,
+            "Nine dials, grouped. Off means no instruction at all for that dial —"
+            + " the AI just stays natural on it."));
+
+        // P-intelligence-3: related dials grouped so the page scans like settings,
+        // not a wall of nine rows. Order here is the display order (storage order
+        // in StyleControls.all() is untouched).
+        addGroup(root, "FEEL & TONE",
+            new StyleControls.Control[] {StyleControls.TONE, StyleControls.HUMOR,
+                StyleControls.CONFIDENCE, StyleControls.FLIRTING});
+        addGroup(root, "REPLY SHAPE",
+            new StyleControls.Control[] {StyleControls.LENGTH, StyleControls.FORMALITY,
+                StyleControls.FOLLOW_UP});
+        addGroup(root, "EXPRESSION",
+            new StyleControls.Control[] {StyleControls.EMOJI, StyleControls.SLANG});
 
         root.addView(Ui.label(this, "YOUR OWN STYLE INSTRUCTIONS (OPTIONAL)"));
         root.addView(Ui.sub(this,
@@ -141,6 +152,15 @@ public final class VoiceActivity extends Activity {
     @Override protected void onPause() {
         super.onPause();
         persistCustom();        // custom instructions survive the ‹ back path too
+    }
+
+    /** One labeled, grouped block of preset dials (P-intelligence-3 grouping). */
+    private void addGroup(LinearLayout root, String title, StyleControls.Control[] controls) {
+        root.addView(Ui.label(this, title));
+        for (StyleControls.Control control : controls) {
+            root.addView(controlRow(control));
+            root.addView(Ui.divider(this));
+        }
     }
 
     private View controlRow(final StyleControls.Control control) {

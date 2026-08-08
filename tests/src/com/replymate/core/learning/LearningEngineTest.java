@@ -123,4 +123,47 @@ public class LearningEngineTest {
         assertEquals(1, hints.size());
         assertTrue(hints.get(0).line.contains("consistent"));
     }
+
+    /* --------------------------------- P-intelligence-3: provenance counters */
+
+    @Test public void countersExposeCopiedQuickAndManualProvenance() {
+        List<StyleSignal> signals = new ArrayList<StyleSignal>();
+        signals.add(sig(StyleSignal.Kind.APPROVED, "copied-as-is"));
+        signals.add(sig(StyleSignal.Kind.APPROVED, "copied-as-is"));
+        signals.add(sig(StyleSignal.Kind.APPROVED, "sent-quick-reply"));
+        signals.add(sig(StyleSignal.Kind.APPROVED, "sent-manually-same-words"));
+        signals.add(sig(StyleSignal.Kind.APPROVED, ""));
+        signals.add(sig(StyleSignal.Kind.EDITED, "manual:shorter"));
+        signals.add(sig(StyleSignal.Kind.EDITED, "tweaked"));
+        LearningEngine.Counters c = LearningEngine.count(signals);
+        assertEquals(5, c.approved);
+        assertEquals(2, c.copiedAsIs);
+        assertEquals(1, c.quickSent);
+        assertEquals(1, c.manualMatched);
+        assertEquals(1, c.manualCorrected);
+        assertEquals(2, c.edited);
+        assertEquals(2, c.manualTotal());
+        assertEquals(7, c.total());
+    }
+
+    @Test public void provenanceNeverChangesHintThresholds() {
+        // copied-as-is approvals are REAL approvals for hint purposes (unchanged rule)
+        List<StyleSignal> signals = new ArrayList<StyleSignal>();
+        for (int i = 0; i < 5; i++) {
+            signals.add(sig(StyleSignal.Kind.APPROVED, "copied-as-is"));
+        }
+        LearningEngine.Counters c = LearningEngine.count(signals);
+        assertEquals(5, c.approved);
+        assertEquals(5, c.copiedAsIs);
+        assertEquals(1, LearningEngine.deriveHints(c).size());
+        assertTrue(LearningEngine.deriveHints(c).get(0).line.contains("consistent"));
+        // null details stay safe
+        StyleSignal bare = new StyleSignal();
+        bare.kind = StyleSignal.Kind.APPROVED;
+        bare.detail = null;
+        LearningEngine.Counters nc = LearningEngine.count(
+            java.util.Collections.singletonList(bare));
+        assertEquals(1, nc.approved);
+        assertEquals(0, nc.copiedAsIs);
+    }
 }

@@ -53,16 +53,21 @@ public final class StyleSettings {
         return notes;
     }
 
-    /** Compact one-line voice rule for the prompt, e.g.
-     *  "Voice: warm and friendly, casual chat register; keep replies short (…); no emoji; …". */
+    /** Compact one-line voice rule for the prompt, built ONLY from dimensions with
+     *  an actual phrase — OFF controls contribute nothing (they are skipped, so no
+     *  stray separators and no mention of the disabled dimension). "" when every
+     *  control is OFF (the caller then omits the voice line entirely: natural). */
     public static String renderVoiceLine(int[] levels) {
         List<StyleControls.Control> all = StyleControls.all();
-        StringBuilder sb = new StringBuilder("Voice: ");
+        StringBuilder sb = new StringBuilder();
         for (int i = 0; i < all.size(); i++) {
-            if (i > 0) sb.append("; ");
-            sb.append(all.get(i).phrase(levels[i]));
+            String phrase = all.get(i).phrase(levels[i]);
+            if (phrase.isEmpty()) continue;               // OFF — no direction given
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(phrase);
         }
-        sb.append('.');
+        if (sb.length() == 0) return "";
+        sb.insert(0, "Voice: ").append('.');
         return sb.toString();
     }
 
@@ -78,14 +83,15 @@ public final class StyleSettings {
     /* ------------------------------------------------------------- parsing */
 
     /** Parsed level or null when absent/invalid — out-of-range values are treated
-     *  as INVALID (inherit), so a corrupt row can never silently pin a hard level. */
+     *  as INVALID (inherit), so a corrupt row can never silently pin a hard level.
+     *  Valid range: 0..2 (active levels) and LEVEL_OFF (dimension disabled). */
     public static Integer level(Map<String, String> rows, String key) {
         if (rows == null) return null;
         String v = rows.get(key);
         if (v == null) return null;
         try {
             int i = Integer.parseInt(v.trim());
-            if (i < 0 || i > 2) return null;
+            if (i < 0 || i > StyleControls.LEVEL_OFF) return null;
             return i;
         } catch (NumberFormatException nfe) {
             return null;

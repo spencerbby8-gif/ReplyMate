@@ -54,7 +54,13 @@ public final class LearningEngine {
 
     /* --------------------------------------------------------------- hint derivation */
 
-    /** Counters rollup of a contact's signals, shared by hints + UI + export + audit. */
+    /** Counters rollup of a contact's signals, shared by hints + UI + export + audit.
+     *  P-intelligence-3: approvals are broken down by PROVENANCE (as-is copies /
+     *  quick-reply sends / identical manual sends) and manual-send corrections are
+     *  counted too — every learning claim in the Prompt Audit feedback line must
+     *  show exactly which real events fed it (copied is a first-class signal even
+     *  though it shares the APPROVED wire kind — the DB CHECK predates P3 and a
+     *  schema migration would risk owner data for zero added meaning). */
     public static final class Counters {
         public int approved;
         public int edited;
@@ -65,8 +71,13 @@ public final class LearningEngine {
         public int emojiDown;
         public int emojiUp;
         public int tweaked;
+        public int copiedAsIs;       // APPROVED "copied-as-is"
+        public int quickSent;        // APPROVED "sent-quick-reply"
+        public int manualMatched;    // APPROVED "sent-manually-same-words"
+        public int manualCorrected;  // EDITED "manual:<tokens>"
 
         public int total() { return approved + edited + regenerated + rejected; }
+        public int manualTotal() { return manualMatched + manualCorrected; }
     }
 
     public static Counters count(List<StyleSignal> signals) {
@@ -74,18 +85,25 @@ public final class LearningEngine {
         if (signals == null) return c;
         for (StyleSignal s : signals) {
             if (s == null || s.kind == null) continue;
+            String detail = s.detail == null ? "" : s.detail;
             switch (s.kind) {
-                case APPROVED: c.approved++; break;
+                case APPROVED:
+                    c.approved++;
+                    if (detail.contains("copied-as-is")) c.copiedAsIs++;
+                    else if (detail.contains("sent-quick-reply")) c.quickSent++;
+                    else if (detail.contains("sent-manually-same-words")) c.manualMatched++;
+                    break;
                 case REGENERATED: c.regenerated++; break;
                 case REJECTED: c.rejected++; break;
                 case EDITED:
                     c.edited++;
+                    if (detail.startsWith("manual:")) c.manualCorrected++;
                     if (s.detail != null) {
-                        if (s.detail.contains("shorter")) c.shorter++;
-                        if (s.detail.contains("longer")) c.longer++;
-                        if (s.detail.contains("emoji-down")) c.emojiDown++;
-                        if (s.detail.contains("emoji-up")) c.emojiUp++;
-                        if ("tweaked".equals(s.detail)) c.tweaked++;
+                        if (detail.contains("shorter")) c.shorter++;
+                        if (detail.contains("longer")) c.longer++;
+                        if (detail.contains("emoji-down")) c.emojiDown++;
+                        if (detail.contains("emoji-up")) c.emojiUp++;
+                        if ("tweaked".equals(detail)) c.tweaked++;
                     }
                     break;
                 default: break;

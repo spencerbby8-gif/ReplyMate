@@ -128,6 +128,23 @@ public final class AppContainer {
             new com.replymate.core.style.StyleService(sqlStyleSettingStore, learningService);
         this.styleService = styleService;
         this.providerStore = new SqlProviderStore(new ProviderDao(dbHelper));
+        // P-intelligence-3: solo-builder mode — if this build bundles the owner's
+        // built-in key (res injected at release time; EMPTY in the repo), seed a
+        // ready provider ONCE on first launch. Pure BYOK builds no-op here. The
+        // resource lookup is guarded: missing/stripped stub strings must never be
+        // allowed to take container construction down with them.
+        String builtinWire = "";
+        String builtinKey = "";
+        try {
+            builtinWire = applicationContext.getString(
+                com.replymate.app.R.string.rm_builtin_provider_wire);
+            builtinKey = applicationContext.getString(
+                com.replymate.app.R.string.rm_builtin_key);
+        } catch (RuntimeException ignored) {
+            // resource-less environments (unit harnesses) → pure BYOK behavior
+        }
+        com.replymate.core.privacy.BuiltInSetup.maybeSeed(this.providerStore,
+            this.secretVault, builtinWire, builtinKey);
         ProfileService profileService = new ProfileService(sqlKvStore);
         this.profileService = profileService;
         ContactService contactSvc = new ContactService(sqlContactStore, systemClock);
@@ -199,6 +216,18 @@ public final class AppContainer {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /** P-intelligence-3: detected privacy mode + def of the ACTIVE provider for the
+     *  UI's privacy surfaces (Home banner, provider list/edit notices). Computed on
+     *  demand — never a stale cache. */
+    public com.replymate.core.privacy.ProviderPrivacy.Mode privacyMode() {
+        return com.replymate.core.privacy.ProviderPrivacy.modeFor(
+            this.providerStore.active(), this.kvStore);
+    }
+
+    public com.replymate.core.model.ProviderDef activeProviderDef() {
+        return this.providerStore.active();
     }
 
     public void invalidateProvider() {

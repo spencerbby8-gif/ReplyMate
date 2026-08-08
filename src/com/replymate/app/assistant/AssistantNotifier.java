@@ -95,17 +95,26 @@ public final class AssistantNotifier {
         for (AssistantPlanner.Btn btn : AssistantPlanner.buttonsFor(cap)) {
             // P-background-5: preview vs send stays split: tap-body →
             // ConversationActivity; APPROVE/COPY/REGEN → receiver.
-            // P-background-9: EDIT opens the in-app draft editor (3-action cap —
-            // OPEN moved to the body tap, which needs no expansion).
+            // P-intelligence-3: EDIT is INLINE — the action carries a RemoteInput so
+            // the correction is typed right on the alert (no separate screen) and
+            // lands in AssistantReceiver.ACTION_EDIT. Where the framework can't show
+            // inline input it fires the SAME broadcast without results, and the
+            // receiver falls back to the editor screen (the only safe fallback).
             android.app.PendingIntent pi;
             if (btn == AssistantPlanner.Btn.EDIT) {
                 pi = editPi(ctx, contactId, name, appLabel, draftText, draftId, cap);
-            } else if (btn == AssistantPlanner.Btn.OPEN) {
-                pi = openPi(ctx, contactId);
+                Notification.Action.Builder ab =
+                    new Notification.Action.Builder(null, label(btn), pi)
+                        .addRemoteInput(new android.app.RemoteInput.Builder(
+                            AssistantPlanner.EDIT_INPUT_KEY)
+                            .setLabel("Edit the reply, then approve below").build());
+                b.addAction(ab.build());
             } else {
-                pi = actionPi(ctx, btn, contactId, name, appLabel, draftText, draftId, cap);
+                pi = btn == AssistantPlanner.Btn.OPEN
+                    ? openPi(ctx, contactId)
+                    : actionPi(ctx, btn, contactId, name, appLabel, draftText, draftId, cap);
+                b.addAction(new Notification.Action.Builder(null, label(btn), pi).build());
             }
-            b.addAction(new Notification.Action.Builder(null, label(btn), pi).build());
         }
         nm.notify(AssistantPlanner.notifTag(contactId), NOTIF_ID, b.build());
     }
@@ -163,22 +172,27 @@ public final class AssistantNotifier {
         }
     }
 
-    /** P-background-9: Edit opens the in-app editor with the full draft context. */
+    /** P-intelligence-3: the Edit action's PendingIntent is a BROADCAST to
+     *  AssistantReceiver.ACTION_EDIT carrying the full draft context. It MUST be
+     *  MUTABLE — the framework mutates the intent at tap time to attach the inline
+     *  RemoteInput results (immutable pending intents silently drop them). Without
+     *  results arriving (devices/layouts that can't present inline input) the
+     *  receiver opens the editor screen as the documented fallback. */
     private static PendingIntent editPi(Context ctx, long contactId, String name,
                                         String appLabel, String draftText, long draftId,
                                         AssistantPlanner.Capability cap) {
-        Intent i = new Intent(ctx, com.replymate.app.ui.DraftEditActivity.class);
+        Intent i = new Intent(ctx, AssistantReceiver.class);
+        i.setAction(AssistantReceiver.ACTION_EDIT);
         i.putExtra(AssistantReceiver.EXTRA_CONTACT_ID, contactId);
         i.putExtra(AssistantReceiver.EXTRA_NAME, name == null ? "" : name);
         i.putExtra(AssistantReceiver.EXTRA_APP_LABEL, appLabel == null ? "" : appLabel);
         i.putExtra(AssistantReceiver.EXTRA_TEXT, draftText == null ? "" : draftText);
         i.putExtra(AssistantReceiver.EXTRA_DRAFT_ID, draftId);
         i.putExtra(AssistantReceiver.EXTRA_DIRECT, cap == AssistantPlanner.Capability.DIRECT);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         int rc = (int) (contactId & 0x7fffffff) * 10 + AssistantPlanner.Btn.EDIT.ordinal();
-        return PendingIntent.getActivity(ctx, rc, i,
+        return PendingIntent.getBroadcast(ctx, rc, i,
             PendingIntent.FLAG_UPDATE_CURRENT
-                | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
+                | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_MUTABLE : 0));
     }
 
     private static PendingIntent openPi(Context ctx, long contactId) {

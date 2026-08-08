@@ -459,6 +459,45 @@ public final class Fakes {
         @Override public com.replymate.core.model.ProviderRef activeMeta() { return provider == null ? null : meta; }
     }
 
+    /** P-intelligence-3: in-memory ProviderStore (privacy-mode + built-in seed tests). */
+    public static final class ProviderStoreFake implements com.replymate.core.ports.ProviderStore {
+        public final java.util.List<com.replymate.core.model.ProviderDef> rows =
+            new java.util.ArrayList<com.replymate.core.model.ProviderDef>();
+        private long nextId = 1;
+        @Override public long upsertActive(com.replymate.core.model.ProviderDef def) {
+            if (def.id <= 0) def.id = nextId++;
+            for (com.replymate.core.model.ProviderDef r : rows) r.isActive = false;
+            rows.remove(def);
+            def.isActive = true;
+            rows.add(0, def);
+            return def.id;
+        }
+        @Override public com.replymate.core.model.ProviderDef active() {
+            for (com.replymate.core.model.ProviderDef r : rows) if (r.isActive) return r;
+            return null;
+        }
+        @Override public java.util.List<com.replymate.core.model.ProviderDef> all() {
+            return new java.util.ArrayList<com.replymate.core.model.ProviderDef>(rows);
+        }
+        @Override public void setActive(long id) {
+            for (com.replymate.core.model.ProviderDef r : rows) r.isActive = r.id == id;
+        }
+        @Override public void delete(long id) {
+            com.replymate.core.model.ProviderDef hit = null;
+            for (com.replymate.core.model.ProviderDef r : rows) if (r.id == id) hit = r;
+            if (hit != null) rows.remove(hit);
+        }
+    }
+
+    /** P-intelligence-3: in-memory SecretVault (built-in key seeding tests). */
+    public static final class SecretVaultFake implements com.replymate.core.ports.SecretVault {
+        private final java.util.Map<String, String> map = new java.util.HashMap<String, String>();
+        @Override public void putSecret(String alias, String value) { map.put(alias, value); }
+        @Override public String getSecret(String alias) { return map.get(alias); }
+        @Override public boolean hasSecret(String alias) { return map.containsKey(alias); }
+        @Override public void deleteSecret(String alias) { map.remove(alias); }
+    }
+
     public static final Clock FIXED_CLOCK = new Clock() {
         @Override public long now() { return NOW; }
     };

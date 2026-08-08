@@ -42,6 +42,9 @@ public final class AssistantReceiver extends BroadcastReceiver {
     public static final String ACTION_COPY = "com.replymate.app.assistant.COPY";
     public static final String ACTION_REGEN = "com.replymate.app.assistant.REGEN";
     public static final String ACTION_DISMISS = "com.replymate.app.assistant.DISMISS";
+    /** P-intelligence-3: inline draft editing — the Edit action carries a RemoteInput;
+     *  the typed correction arrives as results under AssistantPlanner.EDIT_INPUT_KEY. */
+    public static final String ACTION_EDIT = "com.replymate.app.assistant.EDIT";
 
     public static final String EXTRA_CONTACT_ID = "contactId";
     public static final String EXTRA_NAME = "name";
@@ -82,6 +85,9 @@ public final class AssistantReceiver extends BroadcastReceiver {
                         copyAndSettle(ctx, c, contactId, name, appLabel, text, draftId, null);
                     } else if (ACTION_SEND.equals(action)) {
                         approveAndSend(ctx, c, contactId, name, appLabel, text, draftId);
+                    } else if (ACTION_EDIT.equals(action)) {
+                        applyInlineEdit(ctx, c, contactId, name, appLabel, text, draftId,
+                            intent);
                     } else if (ACTION_DISMISS.equals(action)) {
                         noteDismissed(c, contactId, draftId);
                     }
@@ -95,6 +101,72 @@ public final class AssistantReceiver extends BroadcastReceiver {
                 }
             }
         });
+    }
+
+    /* ---------------------------------------------------------------- inline edit */
+
+    /** P-intelligence-3: the user typed a correction directly on the draft alert.
+     *  It NEVER approves by itself — the edited text becomes the pending draft and
+     *  the SAME alert is re-posted (silently) with Approve & send / Regenerate
+     *  intact, so the human still decides the send. Learning records exactly what
+     *  the manual screen records for an edit (EDITED + classifyEdit tokens).
+     *  Fallback: an action tap WITHOUT inline results (device/layout can't present
+     *  inline input) opens the editor screen — the only other safe path. */
+    private void applyInlineEdit(Context ctx, AppContainer c, long contactId, String name,
+                                 String appLabel, String text, long draftId, Intent intent) {
+        Bundle results = RemoteInput.getResultsFromIntent(intent);
+        CharSequence cs = results == null
+            ? null : results.getCharSequence(AssistantPlanner.EDIT_INPUT_KEY);
+        String edited = cs == null ? "" : cs.toString().trim();
+        String who = empty(name) ? "#" + contactId : name;
+        String tag = AssistantPlanner.notifTag(contactId);
+
+        if (edited.isEmpty()) {
+            // No inline text arrived → the only safe fallback: the editor screen,
+            // with the full draft context (pre-inline-edit behavior preserved).
+            AssistantDiag.record(c, contactId, who, tag, "",
+                AssistantEvent.Stage.NOTIFY,
+                "edit tapped but no inline text arrived (inline input unsupported here)",
+                "opening the in-app editor instead", "");
+            Intent open = new Intent(ctx, com.replymate.app.ui.DraftEditActivity.class);
+            open.putExtra(EXTRA_CONTACT_ID, contactId);
+            open.putExtra(EXTRA_NAME, name == null ? "" : name);
+            open.putExtra(EXTRA_APP_LABEL, appLabel == null ? "" : appLabel);
+            open.putExtra(EXTRA_TEXT, text == null ? "" : text);
+            open.putExtra(EXTRA_DRAFT_ID, draftId);
+            open.putExtra(EXTRA_DIRECT,
+                intent != null && intent.getBooleanExtra(EXTRA_DIRECT, false));
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(open);
+            return;
+        }
+
+        String oldText = text == null ? "" : text;
+        if (draftId > 0 && !edited.equals(oldText.trim())) {
+            c.drafts().updateText(draftId, edited);
+            c.drafts().updateStatus(draftId, DraftStatus.EDITED);
+            Contact contact = c.contacts().get(contactId);
+            // exact manual-screen parity: editing carries the richest style signal
+            c.learningService().record(contact,
+                com.replymate.core.model.StyleSignal.Kind.EDITED,
+                com.replymate.core.learning.LearningEngine.classifyEdit(oldText, edited),
+                Long.valueOf(draftId));
+        }
+        AssistantDiag.record(c, contactId, who, tag, "",
+            AssistantEvent.Stage.NOTIFY,
+            edited.equals(oldText.trim())
+                ? "inline edit submitted the draft's own words (no change)"
+                : "draft corrected inline on the alert",
+            "edited draft re-posted — still waiting for a human Approve;"
+                + " nothing sends by itself", "");
+
+        // The action tap auto-canceled the alert — re-post it SILENTLY with the
+        // edited text as the pending draft (same cycle: no new heads-up pop).
+        boolean direct = intent != null && intent.getBooleanExtra(EXTRA_DIRECT, false);
+        AssistantNotifier.post(ctx, contactId,
+            empty(name) ? who : name, appLabel, edited, draftId,
+            direct ? AssistantPlanner.Capability.DIRECT : AssistantPlanner.Capability.NONE,
+            false);
     }
 
     /* ----------------------------------------------------------------- dismiss */

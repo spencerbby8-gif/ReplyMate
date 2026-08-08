@@ -108,6 +108,12 @@ public final class ProviderEditActivity extends Activity {
         keyHint.setPadding(0, Ui.dp(this, 2), 0, 0);
         root.addView(keyHint);
 
+        // P-intelligence-3: privacy mode setup for THIS provider's account — the
+        // built-in key is pinned FREE; an owner's own key offers the paid/private
+        // plan switch (the honest detection input, since providers expose no
+        // billing-read API). Sits directly under the key it describes.
+        setupPrivacyRows(root);
+
         status = Ui.sub(this, "");
         status.setTextIsSelectable(true);   // audit: raw provider diagnostics must be copyable
         status.setPadding(0, Ui.dp(this, 10), 0, 0);
@@ -213,6 +219,68 @@ public final class ProviderEditActivity extends Activity {
 
     private void setChipsEnabled(boolean enabled) {
         for (TextView tv : chips.values()) tv.setEnabled(enabled);
+    }
+
+    /* ------------------------------------------------- P-intelligence-3 privacy */
+
+    private Ui.ToggleRow planRow;
+
+    /** Mode rows under the API key: built-in ⇒ pinned FREE (solo-builder by
+     *  design); owner's key ⇒ paid/private plan switch (the honest manual input —
+     *  providers ship no official billing-read API, and the owner mandated mode
+     *  detection from the account setup, never from "a key exists"). */
+    private void setupPrivacyRows(LinearLayout root) {
+        boolean builtIn = existing != null
+            && com.replymate.core.privacy.ProviderPrivacy.BUILT_IN_KEY_REF.equals(
+                existing.keyRef);
+        if (builtIn) {
+            TextView note = Ui.sub(this,
+                "This row runs on the built-in ReplyMate key (solo-builder mode) — a"
+                + " FREE, shared provider key: prompts and replies may be used to"
+                + " improve the provider's models. Paste YOUR OWN key below (it will"
+                + " replace the built-in one on save) to turn this into your own"
+                + " setup — then the paid/private switch appears.");
+            note.setTextColor(Ui.RED);
+            note.setPadding(0, Ui.dp(this, 4), 0, 0);
+            root.addView(note);
+            keyInput.setHint("built-in ReplyMate key active — paste your own key to take over");
+            return;
+        }
+        if (existing != null && existing.type.needsKey) {
+            boolean paid = "paid".equals(c.kv().get(
+                com.replymate.core.privacy.ProviderPrivacy.planKey(existing.id), ""));
+            planRow = Ui.toggleRow(this, "Paid/private plan", planSub(paid));
+            planRow.sw.setChecked(paid);
+            planRow.sw.setOnCheckedChangeListener(
+                new android.widget.CompoundButton.OnCheckedChangeListener() {
+                    @Override public void onCheckedChanged(
+                            android.widget.CompoundButton b, boolean on) {
+                        c.kv().put(com.replymate.core.privacy.ProviderPrivacy
+                            .planKey(existing.id), on ? "paid" : "free");
+                        c.invalidateProvider();
+                        Ui.setRowSub(planRow.row, planSub(on));
+                    }
+                });
+            root.addView(planRow.row);
+            return;
+        }
+        if (existing == null && type.needsKey) {
+            TextView note = Ui.sub(this,
+                "Privacy: a key starts in FREE mode (prompts/replies may help improve"
+                + " the provider's models). If your account is paid/private, save first"
+                + " — the \"Paid/private plan\" switch appears on this row, and the"
+                + " Home banner turns private.");
+            note.setPadding(0, Ui.dp(this, 4), 0, 0);
+            root.addView(note);
+        }
+    }
+
+    private String planSub(boolean paid) {
+        return paid
+            ? "on — paid/private by your account; prompts aren't used to train models"
+                + " (per provider terms)"
+            : "off — free/unpaid: prompts and replies may be used to improve the"
+                + " provider's models";
     }
 
     private void refreshKeyHint() {
@@ -432,8 +500,19 @@ public final class ProviderEditActivity extends Activity {
         d.modelName = model.getText().toString().trim();
         String typed = keyInput.getText().toString().trim();
         if (!typed.isEmpty() || type.needsKey) {
+            boolean wasBuiltIn = com.replymate.core.privacy.ProviderPrivacy
+                .BUILT_IN_KEY_REF.equals(d.keyRef);
             if (d.keyRef.isEmpty()) d.keyRef = "provider." + type.wire + ".key";
             if (!typed.isEmpty()) {
+                if (wasBuiltIn) {
+                    // P-intelligence-3: the owner pasted THEIR OWN key over a
+                    // built-in row — this is no longer the built-in setup. Move the
+                    // secret to the normal per-type alias so the row detects as
+                    // an owner's key (free until the plan switch says paid).
+                    d.keyRef = "provider." + type.wire + ".key";
+                    c.vault().deleteSecret(
+                        com.replymate.core.privacy.ProviderPrivacy.BUILT_IN_KEY_REF);
+                }
                 c.vault().putSecret(d.keyRef, typed);
                 c.registerSensitive(typed);
             }

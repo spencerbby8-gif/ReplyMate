@@ -171,13 +171,17 @@ public final class Ui {
                 null, currentLevel == -1, -1, cb));
             col.addView(divider(ctx));
         }
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i <= com.replymate.core.style.StyleControls.LEVEL_OFF; i++) {
             col.addView(pickRow(ctx, dlg,
                 capitalize(ctl.levelLabel(i)),
                 ctl.levelDesc(i),
-                "e.g. \"" + ctl.levelExample(i) + "\"",
+                ctl.levelExample(i).isEmpty()
+                    ? null
+                    : "e.g. \"" + ctl.levelExample(i) + "\"",
                 currentLevel == i, i, cb));
-            if (i < 2) col.addView(divider(ctx));
+            if (i < com.replymate.core.style.StyleControls.LEVEL_OFF) {
+                col.addView(divider(ctx));
+            }
         }
         dlg.setView(col);
         dlg.show();
