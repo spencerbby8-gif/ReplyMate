@@ -151,4 +151,30 @@ public final class ContentSignals {
     public static boolean isPlaceholder(String body) {
         return ContentKind.fromBodyShape(body) != null;
     }
+
+    /** P-background-9: reaction notices are NOT messages — WhatsApp/Signal style
+     *  "Reacted 👍 to “…”" and Instagram/Messenger style "liked your message".
+     *  Kept deliberately narrow (official shapes only):
+     *   - must START with the reaction verb (a person quoting the pattern mid-sentence
+     *     is a real message), AND
+     *   - "reacted … to …" requires a QUOTED segment after "to" (real apps quote the
+     *     target message) — "reacted to the news quickly" stays a real message.
+     *  Used by the ingest pipeline to drop these before they can touch a
+     *  conversation, memory, bursts or drafting. */
+    public static boolean isReactionNotice(String text) {
+        String t = normalize(text);
+        if (t.isEmpty()) return false;
+        if (t.startsWith("liked your message") || t.startsWith("loved your message")
+                || t.startsWith("liked a message") || t.startsWith("loved a message")) {
+            return true;
+        }
+        // prefix test on normalized (lowercase) text …
+        if (!t.startsWith("reacted ")) return false;
+        // … but the quote test runs on the RAW text after the first " to "
+        String raw = text.trim();
+        int rawTo = raw.indexOf(" to ");
+        if (rawTo < 0) return false;
+        char q = raw.length() > rawTo + 4 ? raw.charAt(rawTo + 4) : ' ';
+        return q == '“' || q == '"' || q == '‘';
+    }
 }

@@ -95,6 +95,31 @@ public class ContentSignalsTest {
 
     /* ------------------------------------------------------------- placeholders */
 
+    /* ---------------------------------------------- P-background-9: reactions */
+
+    @Test public void reactionNoticesAreNotMessages() {
+        // WhatsApp / Signal shapes (quoted target message)
+        assertTrue(ContentSignals.isReactionNotice("Reacted ❤️ to “on my way”"));
+        assertTrue(ContentSignals.isReactionNotice("Reacted 👍 to \"ok, 7 it is\""));
+        assertTrue(ContentSignals.isReactionNotice("reacted 😂 to “you serious??”"));
+        // Instagram / Messenger shapes
+        assertTrue(ContentSignals.isReactionNotice("Liked your message"));
+        assertTrue(ContentSignals.isReactionNotice("loved your message"));
+    }
+
+    @Test public void humanWordsAboutReactingStayMessages() {
+        assertFalse("no quote after 'to' ⇒ a real sentence",
+            ContentSignals.isReactionNotice("I reacted to the news so fast lol"));
+        assertFalse("reacted as a verb mid-sentence, not the app notice",
+            ContentSignals.isReactionNotice("she reacted badly when I told her"));
+        assertFalse("mentions liking, not the canned notice",
+            ContentSignals.isReactionNotice("I really liked your message from yesterday"));
+        assertFalse(ContentSignals.isReactionNotice("reacted"));
+        assertFalse(ContentSignals.isReactionNotice("Reacted to our plan yesterday — can't wait"));
+        assertFalse(ContentSignals.isReactionNotice(null));
+        assertFalse(ContentSignals.isReactionNotice(""));
+    }
+
     @Test public void everyNonTextKindHasAPlaceholderThatIsRecognizedBack() {
         for (ContentKind k : ContentKind.values()) {
             if (k == ContentKind.TEXT) continue;

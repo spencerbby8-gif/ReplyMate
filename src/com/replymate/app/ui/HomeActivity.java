@@ -140,7 +140,20 @@ public final class HomeActivity extends Activity {
 
     private void renderContacts() {
         list.removeAllViews();
+        // P-background-9: rank by real recent message activity (not edit order) —
+        // the latest active conversation stays on top.
         List<Contact> contacts = c.contacts().all();
+        {
+            java.util.Map<Long, Long> lastActivity = new java.util.HashMap<Long, Long>();
+            for (Contact contact : contacts) {
+                List<Message> lastOne = c.messages().lastMessages(contact.id, 1);
+                if (!lastOne.isEmpty()) {
+                    lastActivity.put(Long.valueOf(contact.id),
+                        Long.valueOf(lastOne.get(0).sentAt));
+                }
+            }
+            contacts = com.replymate.core.usecase.ChatRanker.rank(contacts, lastActivity);
+        }
 
         Set<Long> bodyHits = new HashSet<Long>();
         String needle = query.toLowerCase(Locale.US);

@@ -101,6 +101,24 @@ public class IngestCoordinatorTest {
         assertEquals(Direction.OUTGOING, messages.lastMessages(c.id, 1).get(0).direction);
     }
 
+    /* -------------------------------------------- P-background-9: react-filter */
+
+    @Test public void reactionNoticesAreDroppedBeforeStorageNeverPing() {
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "on my way", 1000, false, false),
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "Reacted ❤️ to “on my way”", 2000, false, false)), allOn());
+
+        assertEquals("only the real message is stored", 1, rep.stored);
+        assertEquals(1, rep.filtered);
+        assertEquals(1, rep.pings.size());
+        assertEquals("on my way", rep.pings.get(0).snippet);
+        Contact created = contacts.all().get(0);
+        assertEquals(1, messages.countByContact(created.id));
+        assertEquals("on my way",
+            messages.lastMessages(created.id, 10).get(0).body);
+    }
+
     @Test public void groupsStoredButNeverPing() {
         IngestReport rep = engine.handle(list(
             ev(Channel.WHATSAPP, "Family", "Ada", "Me", "hello fam", 1000, true, false)), allOn());

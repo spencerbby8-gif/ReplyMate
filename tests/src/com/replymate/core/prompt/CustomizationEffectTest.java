@@ -173,6 +173,36 @@ public class CustomizationEffectTest {
             req.system.contains("firm is fine, hostile or insulting never"));
     }
 
+    /* --------------------------------------- P-background-9: cold start + parrot */
+
+    @Test public void unknownContactColdStartIsHonestInTheAudit() {
+        // brand-new contact: no custom voice, no profile, no rules, no signals —
+        // generation must still work from neutral defaults AND say so in the audit
+        StyleService.ComposedVoice v = style.compose(Fakes.contact(7, "Stranger"));
+        ChatRequest req = buildFor(Fakes.contact(7, "Stranger"), null);
+        assertFalse("generation still runs without any customization", req.system.isEmpty());
+        assertTrue("default style line stands in for a new contact",
+            req.system.contains(SystemComposer.FALLBACK_STYLE) || req.system.contains("Voice:"));
+        assertTrue("the audit must LABEL the cold start:\n" + join(v.why),
+            join(v.why).contains("cold start — new contact, neutral assumptions"));
+        // …and as soon as ANYTHING is customized, the cold-start label retires
+        settings.put(7L, StyleSettings.CUSTOM_PROMPT_KEY, "keep it playful");
+        StyleService.ComposedVoice v2 = style.compose(Fakes.contact(7, "Stranger"));
+        assertFalse("a customized contact is no longer cold",
+            join(v2.why).contains("cold start"));
+    }
+
+    @Test public void memoryInformsButNeverRecyclesOldReplies() {
+        List<String> mem = new ArrayList<String>();
+        mem.add("- Ada once replied: lol bet");
+        ChatRequest req = buildFor(Fakes.contact(1, "Ada"), mem);
+        assertTrue("memory block is present", req.system.contains("What you remember about Ada"));
+        assertTrue("the no-parrot rule reaches the prompt",
+            req.system.contains("never recycle an older reply"));
+        assertTrue("memory informs, never dictates",
+            req.system.contains("write every message fresh in the moment"));
+    }
+
     /* ------------------------------------------------ memory + learned style */
 
     @Test public void memoryLinesReachOnlyTheirContactsPrompt() {

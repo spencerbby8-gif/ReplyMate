@@ -25,7 +25,12 @@ public final class AssistantPlanner {
 
     public enum Capability { DIRECT, NONE }
 
-    public enum Btn { APPROVE_SEND, COPY, REGENERATE, OPEN }
+    /** Banner buttons. P-background-9: EDIT replaces OPEN in the action row — the
+     *  framework caps a notification at THREE visible actions, and the owner
+     *  requires Approve/Edit/Regenerate directly visible; OPEN stays ONE tap away
+     *  as the card body tap (and on settled cards), which is not an expansion
+     *  step. Keep EDIT LAST: request codes derive from ordinals. */
+    public enum Btn { APPROVE_SEND, COPY, REGENERATE, OPEN, EDIT }
 
     /* ------------------------------------------------------------------ capability */
 
@@ -58,24 +63,28 @@ public final class AssistantPlanner {
 
     /* ------------------------------------------------------------------ actions+copy */
 
-    /** Buttons for the ReplyMate notification, in display order. */
+    /** Buttons for the ReplyMate notification, in display order (max 3 — framework
+     *  cap; the card body tap opens the conversation). */
     public static List<Btn> buttonsFor(Capability cap) {
         List<Btn> out = new ArrayList<Btn>();
         out.add(cap == Capability.DIRECT ? Btn.APPROVE_SEND : Btn.COPY);
+        out.add(Btn.EDIT);
         out.add(Btn.REGENERATE);
-        out.add(Btn.OPEN);
         return Collections.unmodifiableList(out);
     }
 
-    /** The honest caption under the draft. appLabel falls back to "This app". */
+    /** The honest caption under the draft. appLabel falls back to "This app".
+     *  P-background-9: both flavors end with the body-tap hint, since OPEN moved
+     *  from the (3-slot) action row to the card tap. */
     public static String caption(String appLabel, Capability cap) {
         String app = appLabel == null || appLabel.trim().isEmpty() ? "This app" : appLabel;
         if (cap == Capability.DIRECT) {
             return "Approve sends it through " + app + "'s own quick-reply —"
-                + " nothing sends by itself.";
+                + " nothing sends by itself. Tap the card to open this chat.";
         }
         return app + "'s notification offers no quick-reply box in this version —"
-            + " ReplyMate won't fake it: copy, or open " + app + " to send.";
+            + " ReplyMate won't fake it: copy, or open " + app + " to send."
+            + " Tap the card to open this chat.";
     }
 
     /* ------------------------------------------------------------------ identity */

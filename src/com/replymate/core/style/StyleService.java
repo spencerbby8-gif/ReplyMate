@@ -121,6 +121,21 @@ public final class StyleService {
             why.add(learningGateNote(contact));
         }
 
+        // 4) P-background-9: honest cold start. A brand-new contact with zero
+        //    customization, zero profile and zero learned signal must be LABELED
+        //    as such in Prompt Audit — the reply is generated from neutral defaults
+        //    and the thread alone, never pretended to be personalized.
+        if (extra.isEmpty()
+                && !anyNonDefault(global)
+                && overrides.isEmpty()
+                && contact.relationshipType.isEmpty()
+                && contact.relationshipNotes.isEmpty()
+                && contact.toneOverride.isEmpty()
+                && contact.languagePref.isEmpty()) {
+            why.add("cold start — new contact, neutral assumptions"
+                + " (no voice override, profile, rules or learned signals yet)");
+        }
+
         return new ComposedVoice(voiceLine, extra, why);
     }
 

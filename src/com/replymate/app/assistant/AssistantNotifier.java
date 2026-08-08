@@ -93,13 +93,18 @@ public final class AssistantNotifier {
             .setShowWhen(true);
 
         for (AssistantPlanner.Btn btn : AssistantPlanner.buttonsFor(cap)) {
-            // P-background-5: the OPEN button must OPEN the conversation — it was
-            // wired to the receiver broadcast like the other buttons, which made it
-            // regenerate instead (a button that lies). Preview vs send stays split:
-            // OPEN/tap-body → ConversationActivity; APPROVE/COPY/REGEN → receiver.
-            android.app.PendingIntent pi = btn == AssistantPlanner.Btn.OPEN
-                ? openPi(ctx, contactId)
-                : actionPi(ctx, btn, contactId, name, appLabel, draftText, draftId, cap);
+            // P-background-5: preview vs send stays split: tap-body →
+            // ConversationActivity; APPROVE/COPY/REGEN → receiver.
+            // P-background-9: EDIT opens the in-app draft editor (3-action cap —
+            // OPEN moved to the body tap, which needs no expansion).
+            android.app.PendingIntent pi;
+            if (btn == AssistantPlanner.Btn.EDIT) {
+                pi = editPi(ctx, contactId, name, appLabel, draftText, draftId, cap);
+            } else if (btn == AssistantPlanner.Btn.OPEN) {
+                pi = openPi(ctx, contactId);
+            } else {
+                pi = actionPi(ctx, btn, contactId, name, appLabel, draftText, draftId, cap);
+            }
             b.addAction(new Notification.Action.Builder(null, label(btn), pi).build());
         }
         nm.notify(AssistantPlanner.notifTag(contactId), NOTIF_ID, b.build());
@@ -152,9 +157,28 @@ public final class AssistantNotifier {
         switch (btn) {
             case APPROVE_SEND: return "Approve & send";
             case COPY:         return "Copy";
+            case EDIT:         return "Edit";
             case REGENERATE:   return "Regenerate";
             default:           return "Open conversation";
         }
+    }
+
+    /** P-background-9: Edit opens the in-app editor with the full draft context. */
+    private static PendingIntent editPi(Context ctx, long contactId, String name,
+                                        String appLabel, String draftText, long draftId,
+                                        AssistantPlanner.Capability cap) {
+        Intent i = new Intent(ctx, com.replymate.app.ui.DraftEditActivity.class);
+        i.putExtra(AssistantReceiver.EXTRA_CONTACT_ID, contactId);
+        i.putExtra(AssistantReceiver.EXTRA_NAME, name == null ? "" : name);
+        i.putExtra(AssistantReceiver.EXTRA_APP_LABEL, appLabel == null ? "" : appLabel);
+        i.putExtra(AssistantReceiver.EXTRA_TEXT, draftText == null ? "" : draftText);
+        i.putExtra(AssistantReceiver.EXTRA_DRAFT_ID, draftId);
+        i.putExtra(AssistantReceiver.EXTRA_DIRECT, cap == AssistantPlanner.Capability.DIRECT);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        int rc = (int) (contactId & 0x7fffffff) * 10 + AssistantPlanner.Btn.EDIT.ordinal();
+        return PendingIntent.getActivity(ctx, rc, i,
+            PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
     }
 
     private static PendingIntent openPi(Context ctx, long contactId) {

@@ -191,6 +191,45 @@ public class MessagingStyleParserTest {
         assertTrue(e.hasAttachment);
     }
 
+    /* ------------------------------------------- P-background-9: app self-noise */
+
+    @Test public void whatsappBackupNotificationIsIgnoredAtTheParserGate() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "WhatsApp";
+        raw.text = "Backing up messages: 45%";
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals("a backup card must never reach a conversation",
+            NotifParser.Result.Kind.IGNORE, r.kind);
+        assertTrue(r.reason, r.reason.contains("self-status"));
+    }
+
+    @Test public void whatsappCheckingForNewMessagesIsIgnored() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "WhatsApp";
+        raw.text = "Checking for new messages...";
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals(NotifParser.Result.Kind.IGNORE, r.kind);
+    }
+
+    @Test public void systemStyleDigestFromTheAppItselfIsIgnored() {
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "com.whatsapp";
+        raw.text = "You have new notifications";
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals("package-titled digest ⇒ self-status",
+            NotifParser.Result.Kind.IGNORE, r.kind);
+    }
+
+    @Test public void aRealWhatsappMessageStillPassesTheSameGate() {
+        // the aggressive filter must never swallow an actual conversation message
+        RawNotif raw = ParserFixtures.styleDm("com.whatsapp", "Amara",
+            ParserFixtures.T_GREET, ParserFixtures.T_FOLLOW);
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals(NotifParser.Result.Kind.EVENTS, r.kind);
+        assertEquals(2, r.events.size());
+        assertFalse(r.events.get(0).group);
+    }
+
     @Test public void missedCallCategoryProducesCallEvent() {
         RawNotif raw = ParserFixtures.raw("com.whatsapp");
         raw.title = "Amara";

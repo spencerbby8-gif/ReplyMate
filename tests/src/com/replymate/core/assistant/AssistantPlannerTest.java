@@ -102,19 +102,26 @@ public final class AssistantPlannerTest {
 
     /* ------------------------------------------------------------- buttons + copy */
 
-    @Test public void directShowsApproveSendFirst() {
+    @Test public void directShowsApproveSendEditRegenerate() {
         List<Btn> btns = AssistantPlanner.buttonsFor(Capability.DIRECT);
+        // P-background-9: framework cap is 3 actions — the owner requires
+        // Approve & send / Edit / Regenerate; OPEN stays as the card body tap.
         assertEquals(3, btns.size());
         assertEquals(Btn.APPROVE_SEND, btns.get(0));
-        assertEquals(Btn.REGENERATE, btns.get(1));
-        assertEquals(Btn.OPEN, btns.get(2));
+        assertEquals(Btn.EDIT, btns.get(1));
+        assertEquals(Btn.REGENERATE, btns.get(2));
+        assertFalse("OPEN lives on the body tap, never hidden in a 4th slot",
+            btns.contains(Btn.OPEN));
     }
 
-    @Test public void noneShowsCopyFirstNeverApproveSend() {
+    @Test public void noneShowsCopyEditRegenerateNeverApproveSend() {
         List<Btn> btns = AssistantPlanner.buttonsFor(Capability.NONE);
         assertEquals(3, btns.size());
         assertEquals(Btn.COPY, btns.get(0));
+        assertEquals(Btn.EDIT, btns.get(1));
+        assertEquals(Btn.REGENERATE, btns.get(2));
         assertFalse(btns.contains(Btn.APPROVE_SEND));
+        assertFalse(btns.contains(Btn.OPEN));
     }
 
     @Test public void captionsKeepTheHumanApprovalContract() {

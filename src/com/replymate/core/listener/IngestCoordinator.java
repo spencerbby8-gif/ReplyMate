@@ -72,6 +72,10 @@ public final class IngestCoordinator {
             ListenerFilter.Verdict v = ListenerFilter.verdict(e);
             if (v == ListenerFilter.Verdict.SKIP) { rep.filtered++; continue; }
 
+            // P-background-9: reaction notices are not conversation — never stored,
+            // never pinged, never able to anchor memory/bursts/drafts (any app).
+            if (ContentSignals.isReactionNotice(e.text)) { rep.filtered++; continue; }
+
             String convTitle = IdentityResolver.firstNonEmpty(
                 e.conversationTitle, e.senderName, "Unknown");
             java.util.List<String> keys = IdentityResolver.keyCandidates(

@@ -74,6 +74,7 @@
         <activity android:name=".ui.ProviderEditActivity" android:exported="false" />
         <activity android:name=".ui.ContactEditActivity" android:exported="false" />
         <activity android:name=".ui.ConversationActivity" android:exported="false" />
+        <activity android:name=".ui.DraftEditActivity" android:exported="false" />
         <activity android:name=".ui.SourcesActivity" android:exported="false" />
         <activity android:name=".ui.UsageActivity" android:exported="false" />
         <activity android:name=".ui.PromptAuditActivity" android:exported="false" />

@@ -82,6 +82,32 @@ public class TitleTextParserTest {
         assertEquals("Ada", r.events.get(0).senderName);
     }
 
+    /* -------------------------------------------- P-background-9: discord noise */
+
+    @Test public void discordAnnouncementChannelIsGroupAndNeverPings() {
+        TitleTextParser discord = new TitleTextParser(Channel.DISCORD, false);
+        RawNotif raw = ParserFixtures.titleText(
+            "com.discord", "#announcements", "server maintenance tonight at 11pm", "msg");
+        NotifParser.Result r = discord.parse(raw);
+        assertEquals("channel broadcasts still parse (memory can use them)",
+            NotifParser.Result.Kind.EVENTS, r.kind);
+        assertTrue("'#…' title infers a channel/group", r.events.get(0).group);
+        assertEquals("but the assistant NEVER pings for a broadcast",
+            ListenerFilter.Verdict.STORE_ONLY,
+            ListenerFilter.verdict(r.events.get(0)));
+    }
+
+    @Test public void discordDirectMessageStillPings() {
+        TitleTextParser discord = new TitleTextParser(Channel.DISCORD, false);
+        RawNotif raw = ParserFixtures.titleText(
+            "com.discord", "Ada", "yo, call at 8?", "msg");
+        NotifParser.Result r = discord.parse(raw);
+        assertEquals(NotifParser.Result.Kind.EVENTS, r.kind);
+        assertFalse(r.events.get(0).group);
+        assertEquals(ListenerFilter.Verdict.STORE_AND_PING,
+            ListenerFilter.verdict(r.events.get(0)));
+    }
+
     @Test public void emptyEverythingIgnored() {
         RawNotif raw = ParserFixtures.raw("com.zhiliaoapp.musically");
         NotifParser.Result r = new TitleTextParser(Channel.TIKTOK, true).parse(raw);

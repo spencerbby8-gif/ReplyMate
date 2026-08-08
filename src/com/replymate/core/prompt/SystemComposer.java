@@ -113,7 +113,9 @@ public final class SystemComposer {
           .append(" or say no, say it plainly and give the real reason — firm is fine,")
           .append(" hostile or insulting never;")
           .append(" never invent facts about ").append(contact.displayName)
-          .append("; stay in character at all times.");
+          .append("; stay in character at all times")
+          .append(" — and never recycle an older reply: memory informs the reply,")
+          .append(" it never dictates it, so write every message fresh in the moment.");
 
         return sb.toString();
     }
