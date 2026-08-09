@@ -32,9 +32,9 @@ public final class PromptBuilder {
         if (bundle.liveLine != null && !bundle.liveLine.trim().isEmpty()) {
             situationLines.add(bundle.liveLine.trim());
         }
-        // P-intelligence-5: a researched term-meaning line (optional, cached).
-        if (bundle.researchLine != null && !bundle.researchLine.trim().isEmpty()) {
-            situationLines.add(bundle.researchLine.trim());
+        // P-intelligence-6: automatic live-search evidence (bounded, attributed).
+        if (bundle.searchLine != null && !bundle.searchLine.trim().isEmpty()) {
+            situationLines.add(bundle.searchLine.trim());
         }
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
             bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines,
@@ -85,7 +85,9 @@ public final class PromptBuilder {
             task = Turn.user(base);
         }
         ChatRequest req = new ChatRequest(system, turns, task,
-            GenerationOpts.of(VARIANT_COUNT, 0.8, 220));
+            GenerationOpts.of(VARIANT_COUNT, 0.8, 220)
+                .withSearch(bundle.requestSearch)
+                .withReasoning(bundle.reasoningLevel));
         return TokenBudgeter.fit(req, TokenBudgeter.DEFAULT_MAX_INPUT);
     }
 

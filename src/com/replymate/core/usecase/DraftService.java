@@ -50,10 +50,26 @@ public final class DraftService {
     /** P-intelligence-4: optional Settings-toggle source for LiveContext (the
      *  "livectx.enabled" key). Wired by AppContainer; null ⇒ default ON. */
     private com.replymate.core.ports.KvStore liveKv;
+    private com.replymate.core.ports.RetrievalPort retrieval;
 
     /** Wire the Settings store after construction (same optional-setter pattern as
      *  ContactService.setMerger — legacy call sites keep their behavior). */
     public void setLiveKv(com.replymate.core.ports.KvStore kv) { this.liveKv = kv; }
+
+    /** P-intelligence-6: the encyclopedia fallback for providers without native
+     *  search (AppContainer wires WikimediaRetrieval; tests wire a fake). Null =
+     *  fallback transparently degrades to the anti-hallucination honesty line. */
+    public void setRetrieval(com.replymate.core.ports.RetrievalPort r) { this.retrieval = r; }
+
+    private static String joinAudit(java.util.List<String> items) {
+        if (items == null || items.isEmpty()) return "";
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < items.size() && i < 3; i++) {
+            if (i > 0) b.append(", ");
+            b.append(items.get(i));
+        }
+        return b.toString();
+    }
 
     public DraftService(ContactStore contacts, MessageStore messages, StyleStore styles,
                         ProfileService profiles, DraftStore drafts, UsageStore usage,
@@ -244,12 +260,12 @@ public final class DraftService {
         String depth = liveKv == null ? "normal"
             : liveKv.get(com.replymate.core.plan.PlanDepth.KV_KEY, "normal");
         String planText = null;
+        com.replymate.core.plan.ReplyPlanner.Plan plan = null;
         if (com.replymate.core.plan.PlanDepth.BASIC.equals(depth)) {
             why.add(com.replymate.core.plan.PlanDepth.auditLine(depth));
         } else {
-            com.replymate.core.plan.ReplyPlanner.Plan plan =
-                com.replymate.core.plan.ReplyPlanner.plan(
-                    understanding, burstTail, planLengthLabel(contactId), null);
+            plan = com.replymate.core.plan.ReplyPlanner.plan(
+                understanding, burstTail, planLengthLabel(contactId), null);
             why.add(com.replymate.core.plan.PlanDepth.auditLine(depth));
             why.addAll(plan.why);
             planText = com.replymate.core.plan.PlanDepth.DEEP.equals(depth)
@@ -266,25 +282,109 @@ public final class DraftService {
         bundle.planText = planText;
         bundle.answeredWatermark = answeredWatermark;
 
-        // P-intelligence-4 (live context): device clock + (when the partner actually
-        // used a listed term) a small DATED glossary — local only, honest stamp, off
-        // switch in Settings. Credited in the audit why-lines like every other input.
+        // Live context: the device clock only (P6 removed the dated glossary —
+        // word/current questions are automatic live search now, handled below).
         com.replymate.core.live.LiveContext.Snapshot live = liveFor(thread);
         bundle.liveLine = live.promptLine;
         why.add(live.whyLine);
 
-        // P-intelligence-5 (live research): need-triggered, cached, metered, and
-        // NEVER blocking — a failed/off lookup still generates the reply.
-        // P-intelligence-6: the trigger hears the ACTIVE burst only — an ask a
-        // previous draft already covered is never re-researched. On a manual
-        // regenerate of a fully-answered thread the burst is empty and the
-        // reply still targets the LATEST message, so research hears that one.
-        java.util.List<String> researchHearing = burstTail;
-        if (researchHearing.isEmpty() && lastIncoming != null
+        // ================= P-intelligence-6: AUTOMATIC LIVE INTELLIGENCE ========
+        // Search is a capability, not a toggle (directives 2/7): the gate listens
+        // to the ACTIVE burst only (stale topics never trigger), decides locally
+        // whether live facts are actually needed, and the result RIDES INTO the
+        // generation — natively (the provider's own search tool) or as bounded
+        // encyclopedia evidence. Ordinary replies must never trigger a lookup.
+        java.util.List<String> searchHearing = burstTail;
+        if (searchHearing.isEmpty() && lastIncoming != null
                 && PromptBuilder.usableText(lastIncoming.body)) {
-            researchHearing = java.util.Collections.singletonList(lastIncoming.body.trim());
+            searchHearing = java.util.Collections.singletonList(lastIncoming.body.trim());
         }
-        researchInto(bundle, c, thread, researchHearing, provider, why);
+        java.util.List<String> historyWords = new java.util.ArrayList<String>();
+        java.util.Set<String> burstSet = new java.util.HashSet<String>();
+        for (String b : searchHearing) if (b != null) burstSet.add(b.trim());
+        if (thread != null) {
+            for (Message m : thread) {
+                if (m != null && m.body != null && !m.body.trim().isEmpty()
+                        && !burstSet.contains(m.body.trim())) {
+                    historyWords.add(m.body.trim());   // gate history = context, not burst
+                }
+            }
+        }
+        java.util.List<String> gateNames = new java.util.ArrayList<String>();
+        gateNames.add(c.displayName);
+        if (profiles.loadFiltered() != null) gateNames.add(profiles.loadFiltered().displayName());
+        com.replymate.core.search.SearchGate.Need gateNeed;
+        try {
+            gateNeed = com.replymate.core.search.SearchGate.assess(
+                searchHearing, historyWords, gateNames);
+        } catch (RuntimeException gateBoom) {
+            gateNeed = com.replymate.core.search.SearchGate.Need.NONE;  // never hurt a reply
+        }
+        com.replymate.core.model.ProviderRef capRef = gateway.activeMeta();
+        com.replymate.core.caps.ModelCaps caps = com.replymate.core.caps.ModelCaps.of(
+            com.replymate.core.model.ProviderType.fromWire(
+                capRef == null ? provider.type() : capRef.wire),
+            capRef == null ? "" : capRef.modelName);
+        boolean gateFired = gateNeed.kind != com.replymate.core.search.SearchGate.Kind.NONE;
+        long lookupMs = 0;
+        if (gateFired) {
+            long lu0 = clock.now();
+            java.util.List<com.replymate.core.search.WebEvidence> facts;
+            if (liveKv == null) {
+                facts = null;
+            } else {
+                facts = com.replymate.core.search.SearchCache.get(
+                    liveKv, gateNeed.subject, clock.now());
+            }
+            if (facts != null) {
+                bundle.searchLine = com.replymate.core.search.WebEvidence.promptLine(
+                    facts, gateNeed.subject, true);
+                why.add("live search: \"" + gateNeed.subject + "\" answered from the"
+                    + " on-device cache — repeat looks inside a week are free");
+            } else if (caps.search == com.replymate.core.caps.ModelCaps.SearchTransport.NATIVE) {
+                // the provider's own official search tool rides the SAME generation
+                // call — search happens in-call, its result grounds the text.
+                bundle.requestSearch = true;
+                why.add("live search: " + gateNeed.reason + " → the provider's native"
+                    + " web search grounds this reply (billed by the provider)");
+            } else {
+                // retrieval fallback (official free encyclopedias) BEFORE generation.
+                facts = retrieval == null
+                    ? java.util.Collections.<com.replymate.core.search.WebEvidence>emptyList()
+                    : retrieval.lookup(gateNeed.subject);
+                lookupMs = clock.now() - lu0;
+                if (facts == null || facts.isEmpty()) {
+                    why.add("live lookup failed or found nothing ("
+                        + gateNeed.reason + ") — answer leans on the"
+                        + " anti-hallucination rule, not on invented facts");
+                } else {
+                    bundle.searchLine = com.replymate.core.search.WebEvidence.promptLine(
+                        facts, gateNeed.subject, false);
+                    if (liveKv != null) {
+                        com.replymate.core.search.SearchCache.put(
+                            liveKv, gateNeed.subject, facts, clock.now());
+                    }
+                    why.add("live search: " + gateNeed.reason + " → looked up just now"
+                        + " (free encyclopedia, " + lookupMs + "ms): "
+                        + joinAudit(
+                            com.replymate.core.search.WebEvidence.auditOf(facts)));
+                }
+            }
+        }
+
+        // P-intelligence-6 directive 3: automatic reasoning depth — simple stays
+        // fast; hard/ambiguous/search-grounded moments think deeper via the
+        // provider's OFFICIAL control. Level + reasons are audit metadata only.
+        int qMarks = 0;
+        for (String s : searchHearing) {
+            if (s == null) continue;
+            for (int qi = 0; qi < s.length(); qi++) if (s.charAt(qi) == '?') qMarks++;
+        }
+        com.replymate.core.reason.Reasoning.Decision think =
+            com.replymate.core.reason.Reasoning.decide(
+                plan, burstTail.size(), gateFired, qMarks);
+        bundle.reasoningLevel = think.level;
+        if (think.whyLine() != null) why.add(think.whyLine());
 
         ChatRequest request = PromptBuilder.build(bundle);
 
@@ -298,6 +398,33 @@ public final class DraftService {
 
         ChatReply r = reply.value;
         if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
+
+        // P-intelligence-6 post-call: capability outcomes are audit metadata.
+        if (!r.note.isEmpty()) why.add(r.note);   // honest degradation, verbatim
+        if (gateFired) {
+            // live-search generations are metered as their own kind so the usage
+            // dashboard prices them honestly: native searches show the provider's
+            // token/call figures; free paths (cache, encyclopedia) show zero.
+            UsageEvent su = new UsageEvent();
+            su.ts = clock.now();
+            su.model = gateway.activeModel() == null ? provider.type()
+                : gateway.activeModel();
+            su.kind = UsageKind.SEARCH;
+            su.tokensIn = bundle.requestSearch ? r.tokensIn : 0;
+            su.tokensOut = bundle.requestSearch ? r.tokensOut : 0;
+            usage.insert(su);
+        }
+        if (r.searchQueries > 0) {
+            why.add("live search ran inside the reply: " + r.searchQueries
+                + " web search(es) executed by the provider"
+                + (r.searchSources.isEmpty() ? ""
+                    : " — sources: " + joinAudit(r.searchSources)));
+        }
+        if (r.reasoningTokens > 0) {
+            why.add("model thinking: " + r.reasoningTokens
+                + " reasoning tokens billed (the reasoning itself stays at the"
+                + " provider — never shown, never stored)");
+        }
 
         // P-ux-fix: (Re)generate REPLACES the current draft instead of stacking duplicate
         // cards. Only untouched drafts are cleared — anything the owner explicitly kept
@@ -383,90 +510,9 @@ public final class DraftService {
             .levelLabel(eff.intValue());
     }
 
-    /** P-intelligence-5 (live research): the only extra provider call ReplyMate
-     *  can ever make — exactly ONE tiny lookup per NEW term, and only when the
-     *  partner actually needs a meaning (explicit ask or one conservative
-     *  unknown-slang token), the bundled glossary doesn't know it, the toggle is
-     *  ON, and the 7-day cache missed. Failure degrades silently (audit-noted);
-     *  the owner's reply is never blocked, metered as UsageKind.RESEARCH. */
-    private void researchInto(PromptBundle bundle, Contact c, List<Message> thread,
-                              java.util.List<String> activeIncoming,
-                              AiProvider provider, List<String> why) {
-        if (bundle == null || c == null || thread == null || provider == null) return;
-        java.util.List<String> incoming = new java.util.ArrayList<String>();
-        if (activeIncoming != null) {
-            for (String s : activeIncoming) {
-                if (s != null && !s.trim().isEmpty()) incoming.add(s.trim());
-            }
-        }
-        java.util.List<String> outgoing = new java.util.ArrayList<String>();
-        for (Message m : thread) {
-            if (m == null || m.body == null || m.body.trim().isEmpty()) continue;
-            if (m.direction == Direction.OUTGOING) outgoing.add(m.body.trim());
-        }
-        if (incoming.isEmpty()) return;
-        java.util.List<String> names = new java.util.ArrayList<String>();
-        names.add(c.displayName);
-        names.add(profiles.loadFiltered() == null ? "" : profiles.loadFiltered().displayName());
-        String term;
-        try {
-            term = com.replymate.core.live.TermResearch.detectTerm(incoming, outgoing, names);
-        } catch (RuntimeException e) {
-            return;   // trigger heuristics must never hurt a reply
-        }
-        if (term == null) return;
-
-        boolean on = liveKv != null && "1".equals(
-            liveKv.get(com.replymate.core.live.TermResearch.KV_ENABLED, "0"));
-        if (!on) {
-            why.add(com.replymate.core.live.TermResearch.whyOff(term));
-            return;
-        }
-        String cached = com.replymate.core.live.TermResearch.cached(liveKv, term, clock.now());
-        if (cached != null) {
-            bundle.researchLine = com.replymate.core.live.TermResearch.promptLine(term, cached);
-            why.add(com.replymate.core.live.TermResearch.whyCached(term));
-            return;
-        }
-        String newest = incoming.get(incoming.size() - 1);
-        Result<ChatReply> rr;
-        try {
-            rr = provider.generate(com.replymate.core.live.TermResearch.lookupRequest(term, newest));
-        } catch (RuntimeException e) {
-            why.add(com.replymate.core.live.TermResearch.whyFailed(term,
-                e.getClass().getSimpleName()));
-            return;
-        }
-        // metered exactly like the reply call — cost transparency for the dashboard
-        UsageEvent u = new UsageEvent();
-        u.ts = clock.now();
-        u.model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
-        ChatReply rv = rr.ok ? rr.value : null;
-        u.tokensIn = rv == null ? 0 : rv.tokensIn;
-        u.tokensOut = rv == null ? 0 : rv.tokensOut;
-        u.kind = UsageKind.RESEARCH;
-        try { usage.insert(u); } catch (RuntimeException ignored) { }
-
-        if (!rr.ok) {
-            why.add(com.replymate.core.live.TermResearch.whyFailed(term, rr.error));
-            return;
-        }
-        String meaning = rv.variants.isEmpty() ? "" : rv.variants.get(0).trim();
-        meaning = meaning.replaceAll("\\s+", " ");
-        if (meaning.length() > 140) meaning = meaning.substring(0, 140).trim();
-        if (meaning.isEmpty() || meaning.equalsIgnoreCase("unsure")) {
-            why.add(com.replymate.core.live.TermResearch.whyUnsure(term));
-            return;
-        }
-        com.replymate.core.live.TermResearch.store(liveKv, term, meaning, clock.now());
-        bundle.researchLine = com.replymate.core.live.TermResearch.promptLine(term, meaning);
-        why.add(com.replymate.core.live.TermResearch.whyLookedUp(term));
-    }
-
-    /** P-intelligence-4: one LiveContext snapshot per generation — device clock
-     *  (injected Clock + this phone's timezone) and, ONLY when the incoming side
-     *  actually used a bundled term, the dated glossary clause. Toggle honored from
-     *  Settings (livectx.enabled, default ON); never throws into generation. */
+    /** One LiveContext snapshot per generation — the device clock (injected Clock
+     *  + this phone's timezone). Toggle honored from Settings (livectx.enabled,
+     *  default ON); never throws into generation. */
     private com.replymate.core.live.LiveContext.Snapshot liveFor(java.util.List<Message> thread) {
         boolean enabled = liveKv == null
             || "1".equals(liveKv.get(com.replymate.core.live.LiveContext.KV_ENABLED, "1"));

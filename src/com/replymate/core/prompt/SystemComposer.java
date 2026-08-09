@@ -133,6 +133,14 @@ public final class SystemComposer {
           .append(" or say no, say it plainly and give the real reason — firm is fine,")
           .append(" hostile or insulting never;")
           .append(" never invent facts about ").append(contact.displayName)
+          // P-intelligence-6 (hard anti-hallucination): live knowledge is either
+          // verified evidence (a "Live facts" block above) or it is UNKNOWN — the
+          // model must never guess current specifics or the meaning of an
+          // unfamiliar word, and never hide a gap behind a personality excuse.
+          .append("; unless a \"Live facts\" block above verifies it, never state current")
+          .append(" or unfamiliar specifics — a score, a price, a date, what a slang")
+          .append(" word means — as fact: answer plainly that you don't know instead of")
+          .append(" guessing, with no excuses or distractions")
           // P-intelligence-4 (long-term context): months of history means facts drift —
           // the newest statement is always the truth of NOW.
           .append("; people change their minds — when something newer contradicts something")

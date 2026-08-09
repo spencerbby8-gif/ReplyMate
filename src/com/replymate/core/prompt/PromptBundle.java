@@ -31,9 +31,15 @@ public final class PromptBundle {
      *  the task turn (plan grounds the read, "output only the reply text" still
      *  closes). Basic depth leaves this null ⇒ legacy task bytes. */
     public String planText;
-    /* P-intelligence-5 (optional): a live-research "word help" line (TermResearch)
-     *  — situation-line channel like liveLine; null ⇒ nothing. */
-    public String researchLine;
+    /* P-intelligence-6 (optional): the automatic live-search evidence line —
+     *  bounded, attributed "Live facts" (WebEvidence.promptLine) or empty. Rides
+     *  the situation-line channel like liveLine. Replaces the P5 researchLine. */
+    public String searchLine;
+    /* P-intelligence-6 (optional): capability requests decided by core before
+     *  PromptBuilder stamps the GenerationOpts — native web search for this call,
+     *  and the reasoning level ("default" leaves the provider's own choice). */
+    public boolean requestSearch;
+    public String reasoningLevel = "default";
     /* P-intelligence-6 (context-expiry fix): id of the newest message already
      *  answered by an existing draft (pending or used). The burst/task is built
      *  only from messages ABOVE it, so a pending draft never becomes permanent

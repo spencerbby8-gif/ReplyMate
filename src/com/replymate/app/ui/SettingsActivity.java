@@ -150,12 +150,12 @@ public final class SettingsActivity extends Activity {
         root.addView(assistantRow.row);
         root.addView(Ui.divider(this));
 
-        // P-intelligence-4 (live context): device clock + dated glossary toggle.
-        // Honest subtitle: everything here is ON-DEVICE — a clock read and a small
-        // curated word list, never a web lookup, and generation works fine with it off.
-        Ui.ToggleRow liveRow = Ui.toggleRow(this, "Live context (date & time + slang)",
-            "adds this phone's real date/time/timezone — plus a small dated slang"
-                + " list when a message uses it. On-device only, no web calls.");
+        // Live context: device clock only (the dated glossary is gone — slang and
+        // meanings are an automatic live-search capability now, not a toggle).
+        Ui.ToggleRow liveRow = Ui.toggleRow(this, "Live context (date & time)",
+            "adds this phone's real date/time/timezone to generation. Word, slang"
+                + " and current-info questions are looked up automatically when"
+                + " needed — that's automatic, and stays on this phone's rules.");
         liveRow.sw.setChecked("1".equals(
             c.kv().get(com.replymate.core.live.LiveContext.KV_ENABLED, "1")));
         liveRow.sw.setOnCheckedChangeListener(
@@ -164,35 +164,11 @@ public final class SettingsActivity extends Activity {
                     c.kv().put(com.replymate.core.live.LiveContext.KV_ENABLED, on ? "1" : "0");
                     Toast.makeText(SettingsActivity.this, on
                         ? "Live context on — replies can use today's real date & time"
-                        : "Live context off — replies get no clock or word hints",
+                        : "Live context off — replies get no device-clock line",
                         Toast.LENGTH_SHORT).show();
                 }
             });
         root.addView(liveRow.row);
-        root.addView(Ui.divider(this));
-
-        // P-intelligence-5 (live research): optional provider-backed meaning lookup.
-        // Honest subtitle: NOT web search (provider-specific billed tool — the
-        // researched boundary); one tiny call per NEW term, cached 7 days; ordinary
-        // chats never trigger it; failure never blocks a reply; default OFF.
-        Ui.ToggleRow researchRow = Ui.toggleRow(this, "Live research (word meanings)",
-            "when a chat actually asks about a slang/word meaning, look it up once"
-                + " with your AI provider and cache it 7 days. Never web search,"
-                + " never on by itself — costs one small AI call per new term.");
-        researchRow.sw.setChecked("1".equals(
-            c.kv().get(com.replymate.core.live.TermResearch.KV_ENABLED, "0")));
-        researchRow.sw.setOnCheckedChangeListener(
-            new android.widget.CompoundButton.OnCheckedChangeListener() {
-                @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
-                    c.kv().put(com.replymate.core.live.TermResearch.KV_ENABLED,
-                        on ? "1" : "0");
-                    Toast.makeText(SettingsActivity.this, on
-                        ? "Live research on — looks up a meaning only when a chat needs it"
-                        : "Live research off — the built-in dated slang list still applies",
-                        Toast.LENGTH_SHORT).show();
-                }
-            });
-        root.addView(researchRow.row);
         root.addView(Ui.divider(this));
 
         // P-intelligence-5 (planning depth): how much LOCAL planning rides before

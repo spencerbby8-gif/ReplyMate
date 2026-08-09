@@ -96,9 +96,13 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.usecase.ContactServiceTest \
     com.replymate.core.usecase.ContactPurgeTest \
     com.replymate.core.usecase.LiveContextPromptTest \
-    com.replymate.core.usecase.LiveResearchPromptTest \
+    com.replymate.core.usecase.LiveSearchPromptTest \
+    com.replymate.core.search.SearchGateTest \
+    com.replymate.core.search.SearchCacheTest \
+    com.replymate.core.caps.ModelCapsTest \
+    com.replymate.core.reason.ReasoningTest \
+    com.replymate.core.model.ProviderBaseUrlTest \
     com.replymate.core.live.LiveContextTest \
-    com.replymate.core.live.TermResearchTest \
     com.replymate.core.plan.ReplyPlannerTest \
     com.replymate.core.usecase.PlanningDepthPromptTest \
     com.replymate.core.prompt.BurstWatermarkTest \
@@ -129,6 +133,12 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.provider.GeminiDiscoveryTest \
     com.replymate.provider.DiagnosticsTest \
     com.replymate.provider.GeminiCandidatesFallbackTest \
+    com.replymate.provider.GeminiGroundingTest \
+    com.replymate.provider.AnthropicCapsTest \
+    com.replymate.provider.ResponsesApiTest \
+    com.replymate.provider.OpenAiExtrasTest \
+    com.replymate.provider.KimiSearchLoopTest \
+    com.replymate.provider.WikimediaRetrievalTest \
     com.replymate.provider.ModelClassifierTest \
     com.replymate.core.usecase.ReplyContextHonestyTest \
     com.replymate.core.usecase.ContextIsolationTest \

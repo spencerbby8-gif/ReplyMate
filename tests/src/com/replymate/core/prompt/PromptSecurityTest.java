@@ -58,6 +58,16 @@ public final class PromptSecurityTest {
         assertTrue(s.contains("1–3 short sentences"));
     }
 
+    @Test public void theLiveKnowledgeAntiHallucinationRuleIsAlwaysPresent() {
+        // P-intelligence-6 directive 6: with no verified evidence in the prompt,
+        // the model must refuse to guess current/unfamiliar specifics — and may
+        // never cover a knowledge gap with a personality excuse.
+        String s = system();
+        assertTrue(s.contains("\"Live facts\""));
+        assertTrue(s.contains("never state current"));
+        assertTrue(s.contains("no excuses"));
+    }
+
     @Test public void memoryBodiesStillReachTheProvider_Intentionally() {
         // The provider prompt is the ONE place private context belongs — this pin
         // guards the functional contract so the human-facing gating can't be

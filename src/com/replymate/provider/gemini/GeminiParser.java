@@ -45,7 +45,12 @@ public final class GeminiParser {
                 JsonArr parts = content.arr("parts");
                 if (parts != null) {
                     for (int p = 0; p < parts.size(); p++) {
-                        String t = parts.obj(p) == null ? null : parts.obj(p).str("text");
+                        JsonObj part = parts.obj(p);
+                        if (part == null) continue;
+                        // P-intelligence-6 anti-CoT: thought parts never leave the
+                        // provider (we never set includeThoughts; skip defensively).
+                        if (part.bool("thought", false)) continue;
+                        String t = part.str("text");
                         if (t != null) text.append(t);
                     }
                 }
@@ -65,7 +70,33 @@ public final class GeminiParser {
             tokensIn = (int) usage.lng("promptTokenCount", 0);
             tokensOut = (int) usage.lng("candidatesTokenCount", 0);
         }
-        return Result.ok(new ChatReply(variants, tokensIn, tokensOut, RateLimitInfo.NONE));
+        // P-intelligence-6: safe search metadata only — executed queries (billable,
+        // ai.google.dev pricing) and public source TITLES from the grounding
+        // metadata. Grounding chunk bodies/uris stay at the provider.
+        int searchQueries = 0;
+        java.util.List<String> sources = new java.util.ArrayList<String>();
+        JsonObj first = candidates.obj(0);
+        if (first != null) {
+            JsonObj gm = first.obj("groundingMetadata");
+            if (gm != null) {
+                JsonArr queries = gm.arr("webSearchQueries");
+                if (queries != null) searchQueries = queries.size();
+                JsonArr chunks = gm.arr("groundingChunks");
+                if (chunks != null) {
+                    for (int i = 0; i < chunks.size() && sources.size() < 3; i++) {
+                        JsonObj chunk = chunks.obj(i);
+                        JsonObj web = chunk == null ? null : chunk.obj("web");
+                        String title = web == null ? null : web.str("title");
+                        if (title != null && !title.trim().isEmpty()
+                                && !sources.contains(title.trim())) {
+                            sources.add(title.trim());
+                        }
+                    }
+                }
+            }
+        }
+        return Result.ok(new ChatReply(variants, tokensIn, tokensOut, RateLimitInfo.NONE,
+            searchQueries, sources, 0, ""));
     }
 
     /** Honest truncation explanation (P-audit-deep): never save half a sentence as a

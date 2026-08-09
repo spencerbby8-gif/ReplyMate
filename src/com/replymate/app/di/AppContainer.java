@@ -180,6 +180,10 @@ public final class AppContainer {
         // P-intelligence-4: the live-context toggle (Settings → generation context)
         // reads from the same kv; default stays ON when unset.
         this.draftService.setLiveKv(sqlKvStore);
+        // P-intelligence-6: the encyclopedia fallback for providers without native
+        // search — official free Wikimedia endpoints, keyless, honesty-bounded.
+        this.draftService.setRetrieval(
+            new com.replymate.provider.retrieval.WikimediaRetrieval(new HttpClient()));
     }
 
     public AiProvider providerOrNull() {

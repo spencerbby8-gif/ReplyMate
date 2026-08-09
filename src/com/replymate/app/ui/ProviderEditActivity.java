@@ -35,7 +35,7 @@ public final class ProviderEditActivity extends Activity {
     private ProviderType type = ProviderType.GEMINI;
     private ProviderDef existing;
     private EditText label, baseUrl, model, keyInput;
-    private TextView status, keyHint, urlHint, testBtn;
+    private TextView status, keyHint, urlHint, testBtn, capsHint;
     private LinearLayout modelList;
     private final Map<ProviderType, TextView> chips =
         new HashMap<ProviderType, TextView>();
@@ -92,6 +92,17 @@ public final class ProviderEditActivity extends Activity {
         root.addView(Ui.label(this, "Model"));
         model = Ui.field(this, "pick below or type a model id", false);
         root.addView(model);
+        // P-intelligence-6 (directive 4): provider → model → capabilities, honestly
+        // bound and visible while editing. Docs-verified classifications with the
+        // runtime degrade as the backstop — never a silent switch or a surprise.
+        capsHint = Ui.sub(this, "");
+        capsHint.setPadding(0, Ui.dp(this, 2), 0, 0);
+        root.addView(capsHint);
+        model.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c2) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c2) { }
+            @Override public void afterTextChanged(android.text.Editable e) { refreshCapsHint(); }
+        });
         Button discover = Ui.btn(this, "Discover & test models (live)");
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
         dlp.topMargin = Ui.dp(this, 8);
@@ -202,19 +213,38 @@ public final class ProviderEditActivity extends Activity {
         keyInput.setEnabled(type.needsKey);
     }
 
-    /** P-editor-url: known providers keep their official endpoint (auto-filled, field
-     *  locked) — never the previous provider's URL. Only "Other (OpenAI-compatible)"
-     *  edits the base URL by hand. Enforced on chip select, screen load and save. */
+    /** P-intelligence-6 (directive 4): provider → base URL binding is suggest-not-
+     *  force. Selecting a provider fills its official endpoint when the field is
+     *  empty or still holds another provider's default; an endpoint the user typed
+     *  by hand is NEVER overwritten. The field is always editable. */
     private void applyBaseUrlRule() {
-        if (existing == null || !type.baseUrlEditable()) {
-            baseUrl.setText(ProviderType.resolveBaseUrlForUi(type,
-                baseUrl.getText().toString()));
+        String cur = baseUrl.getText().toString();
+        baseUrl.setText(ProviderType.resolveBaseUrlForUi(type, cur));
+        baseUrl.setEnabled(true);
+        baseUrl.setFocusable(true);
+        urlHint.setText("Official endpoint suggested from " + type.label
+            + "'s docs — editable; anything you type is kept as-is.");
+        refreshCapsHint();
+    }
+
+    /** Docs-verified capability summary for the CURRENT (type, model) pair + a red
+     *  warning when the typed model doesn't belong to this provider's family. */
+    private void refreshCapsHint() {
+        if (capsHint == null) return;
+        String m = model == null ? "" : model.getText().toString().trim();
+        if (m.isEmpty()) {
+            capsHint.setText("pick or type a model to see its live-search and"
+                + " reasoning capabilities");
+            capsHint.setTextColor(Ui.DIM);
+            return;
         }
-        baseUrl.setEnabled(type.baseUrlEditable());
-        baseUrl.setFocusable(type.baseUrlEditable());
-        urlHint.setText(type.baseUrlEditable()
-            ? "Any OpenAI-compatible endpoint: local servers, gateways, or providers not in the list."
-            : "Official endpoint from the provider's docs — fixed automatically.");
+        com.replymate.core.caps.ModelCaps caps =
+            com.replymate.core.caps.ModelCaps.of(type, m);
+        boolean match = com.replymate.core.caps.ModelCaps.familyMatches(type, m);
+        capsHint.setText((match ? "" : "⚠ \"" + m + "\" doesn't look like a "
+                + type.label + " model — check the provider choice.\n")
+            + "capabilities: " + caps.summary());
+        capsHint.setTextColor(match ? Ui.DIM : Ui.RED);
     }
 
     private void setChipsEnabled(boolean enabled) {
@@ -300,9 +330,7 @@ public final class ProviderEditActivity extends Activity {
     private AiProvider formProvider(String key) {
         ProviderDef d = new ProviderDef();
         d.type = type;
-        d.baseUrl = type.baseUrlEditable()
-            ? baseUrl.getText().toString().trim()
-            : type.defaultBaseUrl;
+        d.baseUrl = baseUrl.getText().toString().trim();
         d.modelName = model.getText().toString().trim();
         return ProviderFactory.build(d, key, new HttpClient(), new RetryPolicy(), c.logger());
     }
@@ -494,9 +522,9 @@ public final class ProviderEditActivity extends Activity {
         ProviderDef d = existing != null ? existing : new ProviderDef();
         d.type = type;
         d.label = label.getText().toString().trim();
-        d.baseUrl = type.baseUrlEditable()
-            ? baseUrl.getText().toString().trim()
-            : type.defaultBaseUrl;
+        // directive 4: the visible, editable field is the truth — never silently
+        // replaced by a type default (the suggest-only rule lives in the editor).
+        d.baseUrl = baseUrl.getText().toString().trim();
         d.modelName = model.getText().toString().trim();
         String typed = keyInput.getText().toString().trim();
         if (!typed.isEmpty() || type.needsKey) {

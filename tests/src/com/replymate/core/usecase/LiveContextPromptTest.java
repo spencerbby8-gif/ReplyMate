@@ -62,13 +62,17 @@ public final class LiveContextPromptTest {
             system().contains("Word help"));
     }
 
-    @Test public void slangyMessagePullsTheDatedGlossaryClauseAlong() {
+    @Test public void ordinarySlangNoLongerPullsAnyStaticClauseOrSearch() {
+        // P6: "ate fr" is everyday slang ReplyMate simply knows — the old curated
+        // glossary is gone and the search gate must NOT bill anyone for it either.
         messages.add(Fakes.msg(1, Direction.INCOMING, "ur reply ate fr"));
         assertTrue(service.generateForContact(1L).ok);
-        assertTrue(system().contains("Word help (curated 2026-08, not a live lookup): ate = did amazingly; fr = for real")
-                || system().contains("ate = did amazingly"));
-        assertTrue("audit keeps the honesty stamp",
-            snapshot(service.generateForContact(1L)).contains("not live"));
+        assertFalse(system().contains("Word help"));
+        assertFalse("no live-facts EVIDENCE block for well-known slang (the standing"
+                + " anti-hallucination rule only names the block)",
+            system().contains("Live facts ("));
+        assertFalse("no search was attached to this request",
+            provider.lastRequest.opts.search);
     }
 
     @Test public void settingsToggleRemovesTheLineWithAnHonestBreadcrumb() {

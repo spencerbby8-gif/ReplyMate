@@ -71,10 +71,14 @@ public class ProviderTypeTest {
 
     /* -------------------- P-editor-url: base URL policy for the provider editor -------------------- */
 
-    @Test public void baseUrlEditableOnlyForCustomProvider() {
+    @Test public void baseUrlStaysEditableForEveryProvider() {
+        // P-intelligence-6 directive 4: every provider page keeps its Base URL
+        // fully editable — the selector SUGGESTS the official endpoint, it can
+        // never lock the field (proxies, gateways and self-hosted endpoints are
+        // first-class use-cases for any provider family).
         for (ProviderType t : ProviderType.values()) {
-            assertEquals(t.wire + " must have a locked base URL",
-                t == ProviderType.OPENAI_COMPAT, t.baseUrlEditable());
+            assertTrue(t.wire + " must keep its base URL editable",
+                t.baseUrlEditable());
         }
     }
 

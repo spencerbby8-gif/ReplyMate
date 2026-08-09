@@ -55,21 +55,38 @@ public enum ProviderType {
         return OPENAI_COMPAT;
     }
 
-    /** P-editor-url: only the generic "Other (OpenAI-compatible)" provider allows manual
-     *  Base URL editing. Every known provider uses its official, docs-verified endpoint,
-     *  auto-filled and locked — the user should never type one by hand. */
+    /** P-intelligence-6 (directive 4): the Base URL field is ALWAYS editable for
+     *  every provider — selecting a provider AUTO-SUGGESTS its official endpoint
+     *  but a hand-typed value is sacred and never overwritten. */
     public boolean baseUrlEditable() {
-        return this == OPENAI_COMPAT;
+        return true;
     }
 
-    /** The base URL the editor must show/keep for a selected provider type:
-     *  known providers ALWAYS get their official endpoint (replacing whatever a
-     *  previous provider left in the field); custom keeps the user's input
-     *  (or its empty default when nothing was typed yet). */
+    /** True when the text is still one of the built-in official endpoints
+     *  (any provider's), i.e. NOT a value the user typed by hand. */
+    public static boolean isAnyProviderDefault(String text) {
+        String cur = text == null ? "" : text.trim();
+        if (cur.isEmpty()) return false;
+        for (ProviderType t : values()) {
+            if (!t.defaultBaseUrl.isEmpty() && t.defaultBaseUrl.equals(cur)) return true;
+        }
+        return false;
+    }
+
+    /** The base URL the editor shows for a selected provider type: empty or
+     *  another provider's official default ⇒ suggest THIS provider's official
+     *  endpoint; a hand-typed value (or this provider's own default) ⇒ preserved.
+     *  Providers with NO official endpoint (the open-compatible type) never
+     *  touch the field at all — there is nothing to suggest, and the user's
+     *  endpoint is the whole point of that type. */
     public static String resolveBaseUrlForUi(ProviderType t, String currentText) {
         if (t == null) return "";
-        if (!t.baseUrlEditable()) return t.defaultBaseUrl;
         String current = currentText == null ? "" : currentText.trim();
-        return current.isEmpty() ? t.defaultBaseUrl : current;
+        if (current.isEmpty()) return t.defaultBaseUrl;
+        if (!t.defaultBaseUrl.isEmpty() && isAnyProviderDefault(current)
+                && !t.defaultBaseUrl.equals(current)) {
+            return t.defaultBaseUrl;   // switching providers re-suggests the official one
+        }
+        return current;                // hand-typed (or already correct) — keep it
     }
 }

@@ -6,9 +6,13 @@ public enum UsageKind {
     SUMMARY("summary"),
     EXTRACT("extract"),
     STYLE("style"),
-    /** P-intelligence-5: a live-research term lookup (its own kind so the usage
-     *  dashboard can price this optional feature honestly). */
-    RESEARCH("research");
+    /** P-intelligence-5 (legacy): the removed TermResearch metered lookup. Kept so
+     *  historical rows still decode; nothing writes it since 1.5.6. */
+    RESEARCH("research"),
+    /** P-intelligence-6: an automatic live-search generation (native provider
+     *  search tokens, or a 0-token encyclopedia fallback) — priced honestly on the
+     *  usage dashboard, separate from plain replies. */
+    SEARCH("search");
 
     public final String wire;
     UsageKind(String wire) { this.wire = wire; }
