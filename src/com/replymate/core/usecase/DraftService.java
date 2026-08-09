@@ -197,11 +197,31 @@ public final class DraftService {
             why.add(fb.toString());
         }
 
+        // P-intelligence-6 (context-expiry fix, the aura-farming→Arsenal bug): the
+        // newest message ANY existing draft (pending or used) was generated against
+        // marks "already answered". The burst — active topic — is only what came
+        // AFTER it. A pending draft is therefore never permanent active context,
+        // and a clearly unrelated new message naturally resets the topic while the
+        // older conversation stays in history + long-term memory untouched.
+        long answeredWatermark = 0;
+        for (com.replymate.core.model.Draft prior : drafts.byContact(contactId, 50)) {
+            if (prior.inReplyToId != null && prior.inReplyToId > answeredWatermark) {
+                answeredWatermark = prior.inReplyToId;
+            }
+        }
+        java.util.List<String> unscopedTail = PromptBuilder.burstTailUsableIncoming(thread, 6);
+        java.util.List<String> burstTail = PromptBuilder.burstTailUsableIncoming(
+            thread, 6, answeredWatermark);
+        if (unscopedTail.size() > burstTail.size()) {
+            why.add((unscopedTail.size() - burstTail.size())
+                + " earlier message(s) already covered by a previous draft —"
+                + " answering only what's new (old topic kept in history, not re-answered)");
+        }
+
         // P-intelligence-1 (message understanding): the model consumes a CLEAN
         // conversation object, not raw notification text — sender, app, message type,
         // burst state + mechanics, the owner's last reply and the cold-start flag are
         // assembled once here, shape the prompt, and are credited in Prompt Audit.
-        java.util.List<String> burstTail = PromptBuilder.burstTailUsableIncoming(thread, 6);
         com.replymate.core.understanding.ConversationContext understanding =
             com.replymate.core.understanding.ConversationContextBuilder.build(
                 c, thread, burstTail,
@@ -244,6 +264,7 @@ public final class DraftService {
             mem == null ? null : mem.lines);
         bundle.understanding = understanding;
         bundle.planText = planText;
+        bundle.answeredWatermark = answeredWatermark;
 
         // P-intelligence-4 (live context): device clock + (when the partner actually
         // used a listed term) a small DATED glossary — local only, honest stamp, off
@@ -254,7 +275,16 @@ public final class DraftService {
 
         // P-intelligence-5 (live research): need-triggered, cached, metered, and
         // NEVER blocking — a failed/off lookup still generates the reply.
-        researchInto(bundle, c, thread, provider, why);
+        // P-intelligence-6: the trigger hears the ACTIVE burst only — an ask a
+        // previous draft already covered is never re-researched. On a manual
+        // regenerate of a fully-answered thread the burst is empty and the
+        // reply still targets the LATEST message, so research hears that one.
+        java.util.List<String> researchHearing = burstTail;
+        if (researchHearing.isEmpty() && lastIncoming != null
+                && PromptBuilder.usableText(lastIncoming.body)) {
+            researchHearing = java.util.Collections.singletonList(lastIncoming.body.trim());
+        }
+        researchInto(bundle, c, thread, researchHearing, provider, why);
 
         ChatRequest request = PromptBuilder.build(bundle);
 
@@ -360,14 +390,19 @@ public final class DraftService {
      *  ON, and the 7-day cache missed. Failure degrades silently (audit-noted);
      *  the owner's reply is never blocked, metered as UsageKind.RESEARCH. */
     private void researchInto(PromptBundle bundle, Contact c, List<Message> thread,
+                              java.util.List<String> activeIncoming,
                               AiProvider provider, List<String> why) {
         if (bundle == null || c == null || thread == null || provider == null) return;
         java.util.List<String> incoming = new java.util.ArrayList<String>();
+        if (activeIncoming != null) {
+            for (String s : activeIncoming) {
+                if (s != null && !s.trim().isEmpty()) incoming.add(s.trim());
+            }
+        }
         java.util.List<String> outgoing = new java.util.ArrayList<String>();
         for (Message m : thread) {
             if (m == null || m.body == null || m.body.trim().isEmpty()) continue;
-            if (m.direction == Direction.INCOMING) incoming.add(m.body.trim());
-            else if (m.direction == Direction.OUTGOING) outgoing.add(m.body.trim());
+            if (m.direction == Direction.OUTGOING) outgoing.add(m.body.trim());
         }
         if (incoming.isEmpty()) return;
         java.util.List<String> names = new java.util.ArrayList<String>();

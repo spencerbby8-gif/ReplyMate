@@ -34,6 +34,12 @@ public final class PromptBundle {
     /* P-intelligence-5 (optional): a live-research "word help" line (TermResearch)
      *  — situation-line channel like liveLine; null ⇒ nothing. */
     public String researchLine;
+    /* P-intelligence-6 (context-expiry fix): id of the newest message already
+     *  answered by an existing draft (pending or used). The burst/task is built
+     *  only from messages ABOVE it, so a pending draft never becomes permanent
+     *  active context and an unrelated new message starts a fresh topic.
+     *  0 = unknown ⇒ legacy behavior (byte-identical). */
+    public long answeredWatermark;
 
     public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
                         List<Message> thread) {

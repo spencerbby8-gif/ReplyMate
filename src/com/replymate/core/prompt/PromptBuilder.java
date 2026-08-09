@@ -52,7 +52,10 @@ public final class PromptBuilder {
             ? null : latest.effectiveKind();
         // P-background-6: a rapid-fire unread tail is answered ONCE as a burst —
         // summarizing it into its single point — not message by message.
-        java.util.List<String> burst = burstTailUsableIncoming(bundle.thread, 6);
+        // P-intelligence-6: scoped by the answered watermark — a pending draft's
+        // messages are never re-answered as part of a newer burst.
+        java.util.List<String> burst = burstTailUsableIncoming(
+            bundle.thread, 6, bundle.answeredWatermark);
         Turn task = burst.size() >= 2
             ? TaskComposer.burstTask(
                 bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
@@ -91,12 +94,27 @@ public final class PromptBuilder {
      *  the burst logically) or at {@code max} items. Oldest-first in the result. */
     public static java.util.List<String> burstTailUsableIncoming(
             java.util.List<com.replymate.core.model.Message> thread, int max) {
+        return burstTailUsableIncoming(thread, max, 0L);
+    }
+
+    /** P-intelligence-6 (context-expiry fix): same walk, but messages at or below
+     *  {@code answeredWatermark} are ALREADY ANSWERED — a draft (pending or used)
+     *  was generated against them — so they must not be re-answered as part of a
+     *  new burst. A pending draft is therefore never permanent active context: the
+     *  next message starts a fresh burst/topic, while everything older stays
+     *  available as history + long-term memory. Watermark 0 = legacy behavior
+     *  (previews, transforms and synthetic id-0 threads are untouched). */
+    public static java.util.List<String> burstTailUsableIncoming(
+            java.util.List<com.replymate.core.model.Message> thread, int max,
+            long answeredWatermark) {
         java.util.LinkedList<String> out = new java.util.LinkedList<String>();
         if (thread == null) return out;
         for (int i = thread.size() - 1; i >= 0 && out.size() < max; i--) {
             com.replymate.core.model.Message m = thread.get(i);
             if (m == null) continue;
             if (m.direction == com.replymate.core.model.Direction.OUTGOING) break;
+            // Context-expiry fix: already-answered messages are never re-answered.
+            if (answeredWatermark > 0 && m.id > 0 && m.id <= answeredWatermark) break;
             if (m.direction == com.replymate.core.model.Direction.INCOMING
                     && usableText(m.body)) {
                 out.addFirst(m.body.trim());
