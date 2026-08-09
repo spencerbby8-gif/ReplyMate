@@ -222,7 +222,11 @@ public final class PromptAuditActivity extends Activity {
                     sb.append("  · ").append(who).append(": ").append(text).append('\n');
                 }
             }
-            // P-memory-audit: the long-term memory layers this reply leaned on.
+            // P-memory-audit (P-intelligence-4 hardened): the long-term memory layers
+            // this reply leaned on — COUNTS + meta inline, BODIES gated. Someone
+            // glancing at this screen (or a screenshot of it) must never learn the
+            // contact's private details; the owner reads the bodies through the
+            // deliberate per-card "show prompt payload" expander below.
             com.replymate.core.json.JsonObj mem = root.obj("memory");
             if (mem != null) {
                 String summary = str(mem, "summary");
@@ -232,16 +236,14 @@ public final class PromptAuditActivity extends Activity {
                         || (style != null && style.size() > 0)) {
                     sb.append("Long-term memory used:\n");
                     if (!summary.isEmpty()) {
-                        String s = summary.length() > 400
-                            ? summary.substring(0, 400) + "…" : summary;
                         sb.append("  · Rolling summary (")
-                          .append(str(mem, "summaryMeta")).append("): ")
-                          .append(s).append('\n');
+                          .append(str(mem, "summaryMeta"))
+                          .append(") — text behind the payload toggle below\n");
                     }
-                    if (facts != null) {
-                        for (int i = 0; i < facts.size(); i++) {
-                            sb.append("  · Fact: ").append(facts.str(i)).append('\n');
-                        }
+                    if (facts != null && facts.size() > 0) {
+                        sb.append("  · ").append(facts.size())
+                          .append(" pinned/stored fact(s) — details behind the payload")
+                          .append(" toggle below\n");
                     }
                     if (style != null) {
                         for (int i = 0; i < style.size(); i++) {

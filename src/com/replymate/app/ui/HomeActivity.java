@@ -259,8 +259,55 @@ public final class HomeActivity extends Activity {
                 startActivity(i);
             }
         });
+        // P-intelligence-4: press-and-hold → Delete, like a normal chat app. An
+        // explicit confirm; the wipe is ReplyMate-local only, always honest about
+        // what goes away (messages, drafts, memory) and what is never touched
+        // (the real chat inside WhatsApp etc.).
+        row.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                confirmDelete(contact);
+                return true;
+            }
+        });
         list.addView(row);
         list.addView(Ui.divider(this));
+    }
+
+    private void confirmDelete(final Contact contact) {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Delete " + contact.displayName + "?")
+            .setMessage("Removes this conversation from ReplyMate — its stored"
+                + " messages, AI drafts and learned memory for this contact, inside"
+                + " this app only. Nothing is deleted in the real chat app."
+                + "\n\nA fresh message from them can always start a new conversation.")
+            .setPositiveButton("Delete", new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface d, int which) {
+                    deleteDeep(contact);
+                }
+            })
+            .setNegativeButton("Keep", null)
+            .show();
+    }
+
+    /** Full per-contact wipe: DB cascade + drafts + kv families + any live alert. */
+    private void deleteDeep(Contact contact) {
+        try {
+            java.util.List<Long> draftIds = new java.util.ArrayList<Long>();
+            for (com.replymate.core.model.Draft d
+                    : c.drafts().byContact(contact.id, 500)) {
+                draftIds.add(Long.valueOf(d.id));
+            }
+            com.replymate.core.usecase.ContactPurge.purge(c.kv(), contact.id, draftIds);
+            c.drafts().deleteByContact(contact.id);
+            c.contactService().delete(contact.id);
+            com.replymate.app.assistant.AssistantNotifier.cancel(this, contact.id);
+        } catch (RuntimeException boom) {
+            android.widget.Toast.makeText(this,
+                "Couldn't finish deleting (" + boom.getClass().getSimpleName()
+                    + ") — nothing in the real chat app was touched.",
+                android.widget.Toast.LENGTH_LONG).show();
+        }
+        renderContacts();
     }
 
     /** Newest matching message for the contact (for the "match: …" preview line). */

@@ -134,44 +134,49 @@
         android:background="@color/card"
         android:padding="12dp">
 
-        <EditText
-            android:id="@+id/msg_input"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Type your reply…"
-            android:textColorHint="@color/text_dim"
-            android:textColor="@color/text_primary"
-            android:textSize="15sp"
-            android:background="@drawable/bg_field"
-            android:padding="12dp"
-            android:minLines="2"
-            android:maxLines="5"
-            android:gravity="top"
-            android:inputType="textMultiLine|textCapSentences" />
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="8dp">
+            android:gravity="bottom">
 
+            <EditText
+                android:id="@+id/msg_input"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Type your reply…"
+                android:textColorHint="@color/text_dim"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:background="@drawable/bg_field"
+                android:padding="12dp"
+                android:minLines="1"
+                android:maxLines="5"
+                android:gravity="center_vertical|left"
+                android:inputType="textMultiLine|textCapSentences" />
+
+            <!-- P-intelligence-4: the Send arrow sits DIRECTLY beside the field,
+                 like a normal chat app. Manual text still goes through the same
+                 approval-free-but-direct channel: a valid quick-reply target gets
+                 a straight delivery attempt, otherwise honest Copy + Open. -->
             <Button
                 android:id="@+id/btn_manual"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginRight="4dp"
-                android:text="➤ Send"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btn_gen"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="✨ Generate"
-                android:textSize="12sp" />
+                android:layout_width="56dp"
+                android:layout_height="48dp"
+                android:layout_marginLeft="8dp"
+                android:text="➤"
+                android:contentDescription="Send"
+                android:textSize="18sp" />
         </LinearLayout>
+
+        <Button
+            android:id="@+id/btn_gen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="✨ Generate an AI draft (you approve before sending)"
+            android:textSize="12sp" />
     </LinearLayout>
 
 </LinearLayout>

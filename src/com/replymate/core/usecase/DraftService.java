@@ -47,6 +47,13 @@ public final class DraftService {
     private final com.replymate.core.style.StyleService styleService;
     private final com.replymate.core.learning.LearningService learningService;
     private final com.replymate.core.memory.MemoryService memory;   // null = legacy tests
+    /** P-intelligence-4: optional Settings-toggle source for LiveContext (the
+     *  "livectx.enabled" key). Wired by AppContainer; null ⇒ default ON. */
+    private com.replymate.core.ports.KvStore liveKv;
+
+    /** Wire the Settings store after construction (same optional-setter pattern as
+     *  ContactService.setMerger — legacy call sites keep their behavior). */
+    public void setLiveKv(com.replymate.core.ports.KvStore kv) { this.liveKv = kv; }
 
     public DraftService(ContactStore contacts, MessageStore messages, StyleStore styles,
                         ProfileService profiles, DraftStore drafts, UsageStore usage,
@@ -215,6 +222,14 @@ public final class DraftService {
             profiles.extraFiltered(),
             mem == null ? null : mem.lines);
         bundle.understanding = understanding;
+
+        // P-intelligence-4 (live context): device clock + (when the partner actually
+        // used a listed term) a small DATED glossary — local only, honest stamp, off
+        // switch in Settings. Credited in the audit why-lines like every other input.
+        com.replymate.core.live.LiveContext.Snapshot live = liveFor(thread);
+        bundle.liveLine = live.promptLine;
+        why.add(live.whyLine);
+
         ChatRequest request = PromptBuilder.build(bundle);
 
         long t0 = clock.now();
@@ -296,6 +311,26 @@ public final class DraftService {
 
     /** The most recent APPROVED reply texts for one contact (M4 evidence): drafts
      *  the owner copied as-is or edited-then-copied. Newest-first, capped. */
+    /** P-intelligence-4: one LiveContext snapshot per generation — device clock
+     *  (injected Clock + this phone's timezone) and, ONLY when the incoming side
+     *  actually used a bundled term, the dated glossary clause. Toggle honored from
+     *  Settings (livectx.enabled, default ON); never throws into generation. */
+    private com.replymate.core.live.LiveContext.Snapshot liveFor(java.util.List<Message> thread) {
+        boolean enabled = liveKv == null
+            || "1".equals(liveKv.get(com.replymate.core.live.LiveContext.KV_ENABLED, "1"));
+        java.util.List<String> incoming = new java.util.ArrayList<String>();
+        if (thread != null) {
+            for (Message m : thread) {
+                if (m != null && m.direction == Direction.INCOMING
+                        && m.body != null && !m.body.trim().isEmpty()) {
+                    incoming.add(m.body.trim());
+                }
+            }
+        }
+        return com.replymate.core.live.LiveContext.build(
+            clock.now(), java.util.TimeZone.getDefault(), enabled, incoming);
+    }
+
     private java.util.List<String> approvedTextsFor(long contactId) {
         java.util.List<String> out = new java.util.ArrayList<String>();
         java.util.List<Draft> recent = drafts.byContact(contactId, 60);   // newest-first
@@ -423,12 +458,15 @@ public final class DraftService {
             mem = memory.withLearnedStyle(memory.recall(c, sample), c,
                 approvedTextsFor(c.id));
         }
-        ChatRequest request = PromptBuilder.build(new PromptBundle(
+        PromptBundle previewBundle = new PromptBundle(
             profiles.loadFiltered(), c, styleRules, sample,
             voice == null ? "" : voice.voiceLine,
             voice == null ? null : voice.extraLines,
             profiles.extraFiltered(),
-            mem == null ? null : mem.lines));
+            mem == null ? null : mem.lines);
+        // previews mirror the real prompt — the live-context line rides here too.
+        previewBundle.liveLine = liveFor(sample).promptLine;
+        ChatRequest request = PromptBuilder.build(previewBundle);
 
         long t0 = clock.now();
         Result<ChatReply> reply = provider.generate(request);

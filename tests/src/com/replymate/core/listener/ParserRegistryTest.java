@@ -129,6 +129,37 @@ public class ParserRegistryTest {
         assertTrue(out.reason.contains("promo"));
     }
 
+    /* ---------------- P-intelligence-4: route-level noise pins (directive 3) ----- */
+
+    @Test public void whatsappBackupCardIsIgnoredBeforeIngest() {
+        // the classic WhatsApp housekeeping card — self-titled, status phrase.
+        // Must die HERE, at parse: no event, no contact, no chat-list clutter.
+        RawNotif backup = ParserFixtures.titleText(
+            "com.whatsapp", "WhatsApp", "Backing up your messages…", null);
+        ParserRegistry.Outcome out = registry.route(backup.packageName, backup, everything(), stats);
+        assertEquals(ParserRegistry.OutcomeKind.IGNORED, out.kind);
+        assertTrue("honest reason names the app self-status family: " + out.reason,
+            out.reason.contains("self-status") || out.reason.contains("category"));
+        assertEquals(1, stats.ignoredOf(Channel.WHATSAPP));
+    }
+
+    @Test public void whatsappUnreadDigestCardIsIgnoredToo() {
+        RawNotif digest = ParserFixtures.titleText(
+            "com.whatsapp", "WhatsApp", "You have 4 unread messages", null);
+        ParserRegistry.Outcome out = registry.route(digest.packageName, digest, everything(), stats);
+        assertEquals(ParserRegistry.OutcomeKind.IGNORED, out.kind);
+    }
+
+    @Test public void legitSingleShotWhatsAppDmStillParses() {
+        RawNotif dm = ParserFixtures.titleText(
+            "com.whatsapp", "Ada", "you coming tonight?", "msg");
+        ParserRegistry.Outcome out = registry.route(dm.packageName, dm, everything(), stats);
+        assertEquals("a real person texting must never be swallowed",
+            ParserRegistry.OutcomeKind.PARSED, out.kind);
+        assertEquals(1, out.events.size());
+        assertEquals("you coming tonight?", out.events.get(0).text);
+    }
+
     @Test public void groupTitlesFlowThroughForGroups() {
         RawNotif g = ParserFixtures.styleGroup("com.whatsapp", "Family", "Ada", ParserFixtures.T_GROUP);
         ParserRegistry.Outcome out = registry.route(g.packageName, g, everything(), stats);

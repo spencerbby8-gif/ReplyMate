@@ -7,6 +7,7 @@ import com.replymate.core.listener.RawNotif;
 import com.replymate.core.ports.KvStore;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** P-background (hardened in P-background-3): captures WHERE a conversation's
  *  quick-reply action lives — WHICH documented list (standard vs wearable), the
@@ -28,7 +29,33 @@ public final class AssistantTargetStore {
     private AssistantTargetStore() {
     }
 
+    /** P-intelligence-4: the LIVE reply PendingIntent, keyed by contact, kept for the
+     *  lifetime of THIS process in parallel with the persisted byte cache. Research
+     *  (official PendingIntent reference + Parcel.marshall() contract, verified
+     *  2026-08-08): a PendingIntent is a system token that survives the CREATOR's
+     *  death, and notification dismissal does NOT cancel it — but a MARSHALLED binder
+     *  handle is only meaningful while the writing process lives (the byte cache is
+     *  best-effort). Keeping the actual object strongly referenced means the common
+     *  case — dismiss the source alert, approve later in the same session — fires a
+     *  guaranteed-valid binder instead of an unmarshalled copy. Never sent to disk. */
+    private static final ConcurrentHashMap<Long, android.app.PendingIntent> LIVE_PI =
+        new ConcurrentHashMap<Long, android.app.PendingIntent>();
+
+    /** The cached reply PI and WHERE it came from (ledger honesty). */
+    public static final class CachedPi {
+        public final android.app.PendingIntent pi;
+        /** true = the live in-process token (strongest), false = persisted bytes
+         *  (best-effort after a process restart; with the process-start marker the
+         *  ledger says when the bytes predate a restart). */
+        public final boolean inMemory;
+        CachedPi(android.app.PendingIntent pi, boolean inMemory) {
+            this.pi = pi;
+            this.inMemory = inMemory;
+        }
+    }
+
     public static final class Target {
+        public long contactId = -1;
         public String packageName = "";
         public String sbnKey = "";
         public int actionIndex = -1;          // -1 ⇒ no direct-reply target
@@ -37,6 +64,11 @@ public final class AssistantTargetStore {
         public String probe = "";             // observed geometry (diagnostics)
         public String cachedPiB64 = "";       // P-background-7: cached reply PendingIntent
         public long capturedAtMs;
+        /** P-intelligence-4: our process' start marker when the byte cache was
+         *  written (android.os.Process.getStartElapsedRealtime, API 24 = minSdk).
+         *  Mismatch at fire time ⇒ ReplyMate restarted since capture ⇒ the stored
+         *  bytes predate the restart (ledger wording only — still attempted). */
+        public long procAtCache = 0L;
         /* P-background-8 identity fields (any may be "" when the app doesn't say): */
         public String conversationId = "";
         public String convTitle = "";
@@ -56,6 +88,7 @@ public final class AssistantTargetStore {
     public static void save(KvStore kv, long contactId, RawNotif raw, long nowMs) {
         if (kv == null || raw == null) return;
         Target t = new Target();
+        t.contactId = contactId;
         t.packageName = raw.packageName == null ? "" : raw.packageName;
         t.sbnKey = raw.sbnKey == null ? "" : raw.sbnKey;
         RawNotif.ActionRef best = AssistantPlanner.directAction(raw.actions);
@@ -64,6 +97,8 @@ public final class AssistantTargetStore {
         t.resultKey = best == null || best.resultKey == null ? "" : best.resultKey;
         t.probe = probeOf(raw.actions);
         t.cachedPiB64 = "";            // geometry changed → drop any stale cached target
+        t.procAtCache = 0L;
+        LIVE_PI.remove(Long.valueOf(contactId));   // stale live token must never outlive new geometry
         t.capturedAtMs = nowMs;
         t.conversationId = raw.conversationId == null ? "" : raw.conversationId;
         t.convTitle = raw.convTitle == null ? "" : raw.convTitle;
@@ -82,6 +117,7 @@ public final class AssistantTargetStore {
         m.put("resultKey", t.resultKey);
         m.put("probe", t.probe);
         m.put("cachedPi", t.cachedPiB64 == null ? "" : t.cachedPiB64);
+        m.put("procAtCache", Long.valueOf(t.procAtCache));
         m.put("capturedAt", Long.valueOf(t.capturedAtMs));
         m.put("convId", t.conversationId == null ? "" : t.conversationId);
         m.put("convTitle", t.convTitle == null ? "" : t.convTitle);
@@ -89,12 +125,15 @@ public final class AssistantTargetStore {
         return m;
     }
 
-    /** P-background-7 (approve AFTER dismissal): resolve the stored target's reply
-     *  action on the LIVE notification and cache its PendingIntent (parcel → base64
-     *  in kv). PendingIntents are system tokens that survive our process death and
-     *  often the notification itself; the approve path sends through this cache when
-     *  the original notification is gone. Best-effort: any failure just leaves the
-     *  cache empty and approval falls back honestly. */
+    /** P-background-7 (approve AFTER dismissal), P-intelligence-4 hardened: resolve
+     *  the stored target's reply action on the LIVE notification and cache its
+     *  PendingIntent TWO ways — (1) the live object in {@link #LIVE_PI} for this
+     *  process' lifetime (the reliable same-session flavor), and (2) parcel → base64
+     *  in kv as best-effort persistence. Officially a PendingIntent token survives
+     *  the CREATOR's death and a plain notification dismissal never cancels it
+     *  (only the app itself can) — but MARSHALLED binder handles are not
+     *  persistence-safe, so the byte flavor is attempted honestly and any failure
+     *  falls back with a real reason. */
     public static void cachePendingIntent(
             KvStore kv, long contactId,
             android.service.notification.StatusBarNotification sbn) {
@@ -104,6 +143,10 @@ public final class AssistantTargetStore {
         android.app.Notification.Action a = ReplyActionResolver.selectAnySurface(
             sbn.getNotification(), t.source, t.resultKey, t.actionIndex);
         if (a == null || a.actionIntent == null) return;
+        // P-intelligence-4: keep the live token for this process' lifetime — the
+        // dismissal-surviving flavor that doesn't depend on parcelled binder handles.
+        LIVE_PI.put(Long.valueOf(contactId), a.actionIntent);
+        t.procAtCache = android.os.Process.getStartElapsedRealtime();
         android.os.Parcel p = android.os.Parcel.obtain();
         try {
             android.app.PendingIntent.writePendingIntentOrNullToParcel(a.actionIntent, p);
@@ -117,20 +160,40 @@ public final class AssistantTargetStore {
         }
     }
 
-    /** Decode the cached reply PendingIntent (null when none/corrupt/expired bytes). */
-    public static android.app.PendingIntent readCachedPi(Target t) {
-        if (t == null || t.cachedPiB64 == null || t.cachedPiB64.isEmpty()) return null;
+    /** The cached reply PendingIntent for this target, or null. The LIVE in-process
+     *  token wins (always a valid binder here); the persisted bytes are the
+     *  cross-process best-effort. Caller reads {@link CachedPi#inMemory} for ledger
+     *  honesty about which flavor fired. */
+    public static CachedPi readCachedPi(Target t) {
+        if (t == null) return null;
+        android.app.PendingIntent live = LIVE_PI.get(Long.valueOf(t.contactId));
+        if (live != null) return new CachedPi(live, true);
+        if (t.cachedPiB64 == null || t.cachedPiB64.isEmpty()) return null;
         android.os.Parcel p = android.os.Parcel.obtain();
         try {
             byte[] bytes = android.util.Base64.decode(t.cachedPiB64, android.util.Base64.NO_WRAP);
             p.unmarshall(bytes, 0, bytes.length);
             p.setDataPosition(0);
-            return android.app.PendingIntent.readPendingIntentOrNullFromParcel(p);
+            android.app.PendingIntent pi =
+                android.app.PendingIntent.readPendingIntentOrNullFromParcel(p);
+            return pi == null ? null : new CachedPi(pi, false);
         } catch (RuntimeException e) {
             return null;
         } finally {
             p.recycle();
         }
+    }
+
+    /** True when this process started after the byte cache was written — the ledger's
+     *  "the stored copy predates a ReplyMate restart" marker. Never used to gate. */
+    public static boolean restartedSinceCache(Target t) {
+        return t != null && t.procAtCache > 0L
+            && t.procAtCache != android.os.Process.getStartElapsedRealtime();
+    }
+
+    /** Test hook (Robolectric): simulate a process restart by dropping live tokens. */
+    public static void clearLivePiForTests() {
+        LIVE_PI.clear();
     }
 
     /** P-background-8: find a LIVE notification from the same app that the stored
@@ -213,6 +276,7 @@ public final class AssistantTargetStore {
     /** Load — tolerant: missing/corrupt json yields an unusable (NONE) target. */
     public static Target load(KvStore kv, long contactId) {
         Target t = new Target();
+        t.contactId = contactId;
         if (kv == null) return t;
         try {
             JsonObj o = Json.parseObj(kv.get(AssistantPlanner.targetKvKey(contactId), ""));
@@ -223,6 +287,7 @@ public final class AssistantTargetStore {
             t.resultKey = o.str("resultKey", "");
             t.probe = o.str("probe", "");
             t.cachedPiB64 = o.str("cachedPi", "");
+            t.procAtCache = o.lng("procAtCache", 0L);
             t.capturedAtMs = o.lng("capturedAt", 0L);
             t.conversationId = o.str("convId", "");
             t.convTitle = o.str("convTitle", "");

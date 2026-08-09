@@ -150,6 +150,27 @@ public final class SettingsActivity extends Activity {
         root.addView(assistantRow.row);
         root.addView(Ui.divider(this));
 
+        // P-intelligence-4 (live context): device clock + dated glossary toggle.
+        // Honest subtitle: everything here is ON-DEVICE — a clock read and a small
+        // curated word list, never a web lookup, and generation works fine with it off.
+        Ui.ToggleRow liveRow = Ui.toggleRow(this, "Live context (date & time + slang)",
+            "adds this phone's real date/time/timezone — plus a small dated slang"
+                + " list when a message uses it. On-device only, no web calls.");
+        liveRow.sw.setChecked("1".equals(
+            c.kv().get(com.replymate.core.live.LiveContext.KV_ENABLED, "1")));
+        liveRow.sw.setOnCheckedChangeListener(
+            new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
+                    c.kv().put(com.replymate.core.live.LiveContext.KV_ENABLED, on ? "1" : "0");
+                    Toast.makeText(SettingsActivity.this, on
+                        ? "Live context on — replies can use today's real date & time"
+                        : "Live context off — replies get no clock or word hints",
+                        Toast.LENGTH_SHORT).show();
+                }
+            });
+        root.addView(liveRow.row);
+        root.addView(Ui.divider(this));
+
         LinearLayout usageRow = Ui.row(this, "Usage dashboard",
             "local metering of every AI call (count + tokens)");
         usageRow.setOnClickListener(new View.OnClickListener() {

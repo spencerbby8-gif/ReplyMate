@@ -24,6 +24,9 @@ public final class PromptBundle {
      *  Mutable by design — DraftService fills it after construction; legacy paths
      *  (previews, transforms, old tests) leave it null and get the legacy task. */
     public com.replymate.core.understanding.ConversationContext understanding;
+    /* P-intelligence-4 (optional): the device-clock live-context line (LiveContext).
+     *  Same mutable-fill pattern as understanding; null/"" ⇒ byte-identical legacy. */
+    public String liveLine;
 
     public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
                         List<Message> thread) {

@@ -63,11 +63,12 @@ public final class DirectDelivery {
     }
 
     /** Fire the CACHED reply PendingIntent with the official RemoteInput results
-     *  structure rebuilt from the stored key (dismissal-proof send). */
+     *  structure rebuilt from the stored key (dismissal-proof send). Prefers the
+     *  LIVE in-process token (P-intelligence-4) over the persisted bytes. */
     public static String fireCached(Context ctx, AssistantTargetStore.Target t,
                                     String app, String text) {
-        PendingIntent pi = AssistantTargetStore.readCachedPi(t);
-        if (pi == null) {
+        AssistantTargetStore.CachedPi cached = AssistantTargetStore.readCachedPi(t);
+        if (cached == null || cached.pi == null) {
             return "no cached reply target survived either";
         }
         try {
@@ -76,10 +77,13 @@ public final class DirectDelivery {
             results.putCharSequence(t.resultKey, text);
             Intent fillIn = new Intent();
             RemoteInput.addResultsToIntent(inputs, fillIn, results);
-            pi.send(ctx, 0, fillIn);
+            cached.pi.send(ctx, 0, fillIn);
             return null;   // cached target fired — handed to the app unwatched
         } catch (PendingIntent.CanceledException gone) {
-            return app + " closed that reply box (the cached target expired too)";
+            return app + (cached.inMemory
+                ? " closed that reply box (the saved reply target was canceled"
+                    + " — it only stays valid while the app keeps it open)"
+                : " closed that reply box (the cached target expired too)");
         } catch (RuntimeException e) {
             return "the cached reply target failed (" + e.getClass().getSimpleName() + ")";
         }

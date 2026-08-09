@@ -177,6 +177,9 @@ public final class AppContainer {
         };
         this.gateway = providerGateway;
         this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap, styleService, learningService, memoryService);
+        // P-intelligence-4: the live-context toggle (Settings → generation context)
+        // reads from the same kv; default stays ON when unset.
+        this.draftService.setLiveKv(sqlKvStore);
     }
 
     public AiProvider providerOrNull() {

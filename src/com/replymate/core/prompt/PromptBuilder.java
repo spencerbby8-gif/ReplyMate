@@ -27,6 +27,11 @@ public final class PromptBuilder {
                     .coldStartPromptLine(ud);
             if (!coldLine.isEmpty()) situationLines.add(coldLine);
         }
+        // P-intelligence-4: the live-context (device clock) line rides the same
+        // situation-line channel — auditable, toggleable, offline-honest.
+        if (bundle.liveLine != null && !bundle.liveLine.trim().isEmpty()) {
+            situationLines.add(bundle.liveLine.trim());
+        }
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
             bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines,
             situationLines);

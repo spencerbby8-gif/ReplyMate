@@ -59,6 +59,12 @@ public final class ContactService {
         store.update(c);
     }
 
+    /** P-intelligence-4: owner-initiated conversation deletion. DB rows cascade via
+     *  foreign keys (channels/messages/memory/summaries); drafts and kv state are
+     *  cleaned by the caller (drafts port + ContactPurge) so NOTHING per-contact
+     *  survives — strict isolation both ways. The source app is never touched. */
+    public void delete(long contactId) { store.delete(contactId); }
+
     /** Listener path (P2): resolve a channel identity to a contact, auto-creating both
      *  the contact and the channel row on first sight, touching lastSeen on later ones.
      *  Serialized: on listener (re)bind the system replays ALL active conversations in a

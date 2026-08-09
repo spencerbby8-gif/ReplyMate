@@ -401,8 +401,8 @@ public final class AssistantReceiver extends BroadcastReceiver {
     private String tryCachedSend(Context ctx, AppContainer c, long contactId, String who,
                                  String tag, String app, AssistantTargetStore.Target t,
                                  String text, String liveMissReason) {
-        PendingIntent pi = AssistantTargetStore.readCachedPi(t);
-        if (pi == null) {
+        AssistantTargetStore.CachedPi cached = AssistantTargetStore.readCachedPi(t);
+        if (cached == null || cached.pi == null) {
             return liveMissReason + " — no cached reply target survived either";
         }
         try {
@@ -411,14 +411,24 @@ public final class AssistantReceiver extends BroadcastReceiver {
             results.putCharSequence(t.resultKey, text);
             Intent fillIn = new Intent();
             RemoteInput.addResultsToIntent(inputs, fillIn, results);
+            String flavor = cached.inMemory
+                ? "the kept live reply token (survives dismissal while ReplyMate runs)"
+                : AssistantTargetStore.restartedSinceCache(t)
+                    ? "the stored reply target — captured BEFORE a ReplyMate restart,"
+                        + " so it may already be stale"
+                    : "the stored reply target (this ReplyMate restart kept no live token)";
             AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
                 AssistantEvent.Stage.APPROVE_RESOLVE, liveMissReason,
-                "sending via " + app + "'s cached reply PendingIntent (result key "
-                    + t.resultKey + ") — delivery can't be watched after dismissal", "");
-            pi.send(ctx, 0, fillIn);
+                "sending via " + app + "'s cached reply PendingIntent through " + flavor
+                    + " (result key " + t.resultKey
+                    + ") — delivery can't be watched after dismissal", "");
+            cached.pi.send(ctx, 0, fillIn);
             return null;   // cached target fired — handed to the app unwatched
         } catch (PendingIntent.CanceledException gone) {
-            return app + " closed that reply box (the cached target expired too)";
+            return app + (cached.inMemory
+                ? " closed that reply box itself (the saved target was canceled —"
+                    + " only the app can do that, never a plain dismissal)"
+                : " closed that reply box (the cached target expired too)");
         } catch (RuntimeException e) {
             return "the cached reply target failed (" + e.getClass().getSimpleName() + ")";
         }
