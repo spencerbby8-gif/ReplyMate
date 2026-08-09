@@ -1,7 +1,21 @@
+# Build output (regenerable)
 build/
+
+# Secrets — never committed (secured copies live in /home/user/dev-secrets)
 dev-secrets/
+secrets.env
+.env
+.env.*
 *.keystore
 *.jks
 *.key
-.env
 *.pem
+
+# Signing byproducts
+*.idsig
+
+# Logs — any tool, any depth
+*.log
+
+# Local machine config (Android Studio / sdk paths)
+local.properties
