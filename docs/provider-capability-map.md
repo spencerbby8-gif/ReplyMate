@@ -1,4 +1,15 @@
 # Provider capability map (P-intelligence-6) — researched 2026-08-09
+> **P-background-8 amendment (1.5.8):** every dialect that attaches a paid
+> thinking/reasoning control now also enlarges the output-token cap by the
+> thinking budget + reply headroom — providers count thinking INSIDE the output
+> cap, and shipping a chat-tuned 220 cap with a 512+ thinking budget starved the
+> answer into empty/MAX_TOKENS replies (background drafts silently died on
+> 1.5.6–1.5.7). Anthropic and OpenAI-Responses already did this; Gemini
+> (2.5 budgets & 3 levels), OpenRouter effort, DeepSeek, Kimi and Mistral now
+> follow the same rule. The encyclopedia fallback additionally carries its own
+> tight transport (2.5s/4s per call, 9s total) — a slow external lookup can
+> never park a background draft; it degrades to the honesty line instead.
+
 
 Every claim below traces to the provider's own official documentation (URLs listed).
 Nothing here invents APIs, tools, or pricing; where a capability does not exist in

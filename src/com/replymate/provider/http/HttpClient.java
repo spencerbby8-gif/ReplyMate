@@ -30,6 +30,10 @@ public class HttpClient {
         this.readTimeoutMs = readTimeoutMs;
     }
 
+    /** The per-call limits this client enforces (audit + retrieval-budget pins). */
+    public int connectTimeoutMs() { return connectTimeoutMs; }
+    public int readTimeoutMs() { return readTimeoutMs; }
+
     public HttpResponse post(String url, Map<String, String> headers, String jsonBody) {
         HttpURLConnection conn = null;
         try {

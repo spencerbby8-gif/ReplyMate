@@ -79,6 +79,14 @@ public final class GeminiPayloads {
                     thinking.put("thinkingBudget", "high".equals(reasoning) ? 4096 : 512);
                 }
                 genConfig.put("thinkingConfig", thinking);
+                // P-background-8 (device-kill fix): on thinking models the THOUGHTS
+                // count INSIDE maxOutputTokens — 1.5.6 sent budgets (512/4096 or the
+                // gemini-3 levels) against the chat-tuned 220 cap, so thinking ate
+                // the whole allowance and the reply came back empty/MAX_TOKENS →
+                // NO draft at all in the background. Thinking rides only with real
+                // headroom on top of the reply budget (mirrors Anthropic/OpenAI).
+                genConfig.put("maxOutputTokens",
+                    req.opts.maxOutputTokens + ("high".equals(reasoning) ? 4096 : 1024));
             }
             // DEFAULT sends nothing: dynamic thinking stays the provider's choice.
         }

@@ -182,8 +182,11 @@ public final class AppContainer {
         this.draftService.setLiveKv(sqlKvStore);
         // P-intelligence-6: the encyclopedia fallback for providers without native
         // search — official free Wikimedia endpoints, keyless, honesty-bounded.
+        // P-background-8: the retrieval transport is deliberately NOT the shared
+        // 15s/45s provider client — a crawling Wikipedia must never park a draft.
         this.draftService.setRetrieval(
-            new com.replymate.provider.retrieval.WikimediaRetrieval(new HttpClient()));
+            new com.replymate.provider.retrieval.WikimediaRetrieval(
+                com.replymate.provider.retrieval.WikimediaRetrieval.tightHttpClient()));
     }
 
     public AiProvider providerOrNull() {

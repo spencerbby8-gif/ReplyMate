@@ -25,6 +25,20 @@ import java.util.Map;
  *  rule (the reply must not invent). Network failures degrade silently to empty. */
 public final class WikimediaRetrieval implements RetrievalPort {
 
+    /** P-background-8: this transport is NOT the shared provider client. A slow
+     *  external lookup must never park a background draft, so the per-call
+     *  limits are seconds, and a TOTAL elapsed budget guards even pathological
+     *  transports (the 2nd endpoint is skipped once the 1st ate the budget). */
+    public static final int CONNECT_MS = 2_500;
+    public static final int READ_MS = 4_000;
+    /** Wall-clock ceiling for the whole lookup (both endpoints together). */
+    public static final long TOTAL_BUDGET_MS = 9_000;
+
+    /** The client AppContainer must hand us — tight, honest, per-call. */
+    public static HttpClient tightHttpClient() {
+        return new HttpClient(CONNECT_MS, READ_MS);
+    }
+
     /** Injectable transport so JVM tests see the exact requests + canned answers. */
     public interface Transport {
         HttpResponse get(String url, Map<String, String> headers);
@@ -48,22 +62,24 @@ public final class WikimediaRetrieval implements RetrievalPort {
         if (subject == null || subject.trim().isEmpty()) return out;
         String title = toTitle(subject);
         if (title.isEmpty()) return out;
+        final long deadline = System.currentTimeMillis() + TOTAL_BUDGET_MS;
         try {
             // 1) Wikipedia summary (people, places, teams, products, events).
             String wikiUrl = "https://en.wikipedia.org/api/rest_v1/page/summary/"
                 + enc(title);
-            HttpResponse wiki = get(wikiUrl);
+            HttpResponse wiki = getBounded(wikiUrl, deadline);
             if (wiki.code >= 200 && wiki.code < 300) {
                 WebEvidence e = parseWikipedia(wiki.body);
                 if (e != null) out.add(e);
             }
-            // 2) Wiktionary (slang, Pidgin, abbreviations, meanings) — ask when
-            //    Wikipedia missed OR returned a thin disambiguation.
-            if (out.isEmpty()) {
+            // 2) Wiktionary (slang, Pidgin, abbreviations, meanings) — asked
+            //    only when Wikipedia missed AND the first leg did not already
+            //    eat the time budget: the draft never waits on a 2nd crawl.
+            if (out.isEmpty() && System.currentTimeMillis() < deadline) {
                 String wiktUrl = "https://en.wiktionary.org/w/api.php?action=query"
                     + "&prop=extracts&exintro&explaintext&redirects=1&format=json"
                     + "&titles=" + enc(title.toLowerCase(Locale.US));
-                HttpResponse wikt = get(wiktUrl);
+                HttpResponse wikt = getBounded(wiktUrl, deadline);
                 if (wikt.code >= 200 && wikt.code < 300) {
                     WebEvidence e = parseWiktionary(wikt.body);
                     if (e != null) out.add(e);
@@ -74,6 +90,41 @@ public final class WikimediaRetrieval implements RetrievalPort {
         }
         return out;
     }
+
+    /** One HTTP leg with a WALL-CLOCK bound on top of the transport's own
+     *  socket timeouts — a hung endpoint (connected, never answering) can park
+     *  a blocking read beyond the draft's patience, so the leg runs on a tiny
+     *  daemon pool and the draft thread waits only until the lookup deadline.
+     *  On timeout the leg is cancelled and reads as a failure → honest empty. */
+    private HttpResponse getBounded(String url, long deadlineMs) {
+        long wait = deadlineMs - System.currentTimeMillis();
+        if (wait <= 0) return new HttpResponse(0, "", java.util.Collections.<String, String>emptyMap());
+        java.util.concurrent.Future<HttpResponse> f =
+            LEGS.submit(new java.util.concurrent.Callable<HttpResponse>() {
+                @Override public HttpResponse call() { return get(url); }
+            });
+        try {
+            return f.get(wait, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException te) {
+            f.cancel(true);
+            return new HttpResponse(0, "", java.util.Collections.<String, String>emptyMap());
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return new HttpResponse(0, "", java.util.Collections.<String, String>emptyMap());
+        } catch (java.util.concurrent.ExecutionException ee) {
+            return new HttpResponse(0, "", java.util.Collections.<String, String>emptyMap());
+        }
+    }
+
+    private static final java.util.concurrent.ExecutorService LEGS =
+        java.util.concurrent.Executors.newCachedThreadPool(
+            new java.util.concurrent.ThreadFactory() {
+                @Override public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "rm-retrieval");
+                    t.setDaemon(true);
+                    return t;
+                }
+            });
 
     private HttpResponse get(String url) {
         Map<String, String> h = new HashMap<String, String>();

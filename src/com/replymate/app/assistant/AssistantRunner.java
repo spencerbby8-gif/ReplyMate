@@ -157,7 +157,24 @@ public final class AssistantRunner {
             }
 
             DraftService svc = c.draftService();
-            Result<DraftOutcome> r = svc.generateForContact(contactId);
+            // P-background-8: the paid call is gated on THIS job still being the
+            // conversation's current one — a slow lookup can hold a stale job for
+            // seconds, and it must wake up to an abort, not a billed stale draft.
+            final long cid = contactId;
+            final long tok = token;
+            Result<DraftOutcome> r = svc.generateForContact(contactId,
+                new DraftService.AbortCheck() {
+                    @Override public boolean aborted() {
+                        return !JOBS.isCurrent(cid, tok);
+                    }
+                });
+            if (r != null && DraftService.SUPERSEDED_ERROR.equals(r.error)) {
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.SCHEDULE,
+                    "superseded by a newer job for this conversation",
+                    "aborted before the provider call (after research)", "");
+                return;
+            }
             if (r == null || !r.ok || r.value == null || r.value.drafts.isEmpty()) {
                 String reason = safe(r == null ? "no result" : r.error, 90);
                 AssistantDiag.record(c, contactId, who, tag, "",
@@ -275,9 +292,19 @@ public final class AssistantRunner {
                 break;
             }
         }
-        if (pending != null) {
-            // A draft already waits in-app (generated while alerts were denied):
-            // re-alert it — never pay for a duplicate generation.
+        // P-background-8: only a REAL waiting draft may be re-alerted — one that
+        // was generated against THIS latest message. A message newer than the
+        // waiting draft (it arrived while a slow generation was still pending)
+        // makes that draft stale: re-alerting it would mark the new message
+        // "answered" and its own scheduled job would then skip — the owner would
+        // get yesterday's answer pinned to today's question. Stale ⇒ fall
+        // through to a fresh scheduled generation instead.
+        boolean waitsOnLatest = pending != null && pending.inReplyToId != null
+            && pending.inReplyToId.longValue() == m.id;
+        if (waitsOnLatest) {
+            // A draft for exactly this message already waits in-app (generated
+            // while alerts were denied): re-alert it — never pay for a
+            // duplicate generation.
             if (ListenerStatus.canPostNotifications(c.app())) {
                 c.kv().put(AssistantPlanner.hashKvKey(ct.id),
                     AssistantPlanner.hashOf(m.body + "|" + m.sentAt + "|" + m.id));
@@ -290,6 +317,14 @@ public final class AssistantRunner {
                     "");
             }
             return;
+        }
+        if (pending != null) {
+            AssistantDiag.record(c, ct.id, ct.displayName,
+                AssistantPlanner.notifTag(ct.id), "",
+                AssistantEvent.Stage.SCHEDULE,
+                "a newer message outdates the waiting draft",
+                "catch-up schedules a fresh generation instead of re-alerting the stale one",
+                "");
         }
         schedule(c, new IngestReport.PingRequest(ct.id, ct.displayName, m.body, m.sentAt));
     }

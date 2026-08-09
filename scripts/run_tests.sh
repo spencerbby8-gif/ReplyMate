@@ -97,6 +97,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.usecase.ContactPurgeTest \
     com.replymate.core.usecase.LiveContextPromptTest \
     com.replymate.core.usecase.LiveSearchPromptTest \
+    com.replymate.core.usecase.BackgroundDraftGuardTest \
     com.replymate.core.search.SearchGateTest \
     com.replymate.core.search.SearchCacheTest \
     com.replymate.core.caps.ModelCapsTest \
@@ -142,6 +143,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.provider.OpenAiExtrasTest \
     com.replymate.provider.KimiSearchLoopTest \
     com.replymate.provider.WikimediaRetrievalTest \
+    com.replymate.provider.RetrievalBudgetTest \
+    com.replymate.provider.OutputBudgetTest \
     com.replymate.provider.ModelClassifierTest \
     com.replymate.core.usecase.ReplyContextHonestyTest \
     com.replymate.core.usecase.ContextIsolationTest \

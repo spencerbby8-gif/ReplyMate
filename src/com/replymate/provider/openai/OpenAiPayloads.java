@@ -84,12 +84,20 @@ public final class OpenAiPayloads {
         return body.toJson();
     }
 
+    /** P-background-8: paid-thinking headroom added ON TOP of the reply budget
+     *  whenever a thinking/reasoning control is emitted — reasoning tokens count
+     *  inside max_tokens on every one of these dialects, and 1.5.6's chat-tuned
+     *  220 cap starved the answer into empty/length finishes (no draft at all). */
+    private static final int HEADROOM_LOW = 1024;
+    private static final int HEADROOM_HIGH = 4096;
+
     static void applyExtras(JsonObj body, ChatRequest req, String model, String wireType) {
         boolean search = req.opts.search;
         String level = req.opts.reasoning;
         boolean low = "low".equals(level), high = "high".equals(level);
         String wire = wireType == null ? "openai_compat" : wireType;
         String m = model == null ? "" : model.toLowerCase(java.util.Locale.US);
+        boolean thinkingOn = false;
         if ("openrouter".equals(wire)) {
             if (search) {
                 body.put("tools", JsonArr.create().add(JsonObj.create()
@@ -99,6 +107,7 @@ public final class OpenAiPayloads {
             }
             if (low || high) {
                 body.put("reasoning", JsonObj.create().put("effort", low ? "low" : "high"));
+                thinkingOn = true;
             }
         } else if ("kimi".equals(wire)) {
             if (search) {
@@ -112,17 +121,27 @@ public final class OpenAiPayloads {
                 // kimi-k3 reasons permanently; below it the toggle is official.
                 body.put("thinking", JsonObj.create()
                     .put("type", (low || high) ? "enabled" : "disabled"));
+                thinkingOn = low || high;
             }
         } else if ("deepseek".equals(wire)) {
             body.put("thinking", JsonObj.create()
                 .put("type", (low || high) ? "enabled" : "disabled"));
-            if (low || high) body.put("reasoning_effort", low ? "low" : "high");
+            if (low || high) {
+                body.put("reasoning_effort", low ? "low" : "high");
+                thinkingOn = true;
+            }
         } else if ("mistral".equals(wire)
                 && (m.startsWith("mistral-small") || m.startsWith("ministral"))
                 && (low || high)) {
             body.put("reasoning_effort", low ? "low" : "high");
+            thinkingOn = true;
         } else if ("openai".equals(wire) && (low || high) && openAiReasons(m)) {
             body.put("reasoning_effort", low ? "low" : "high");
+            thinkingOn = true;
+        }
+        if (thinkingOn) {
+            body.put("max_tokens", req.opts.maxOutputTokens
+                + (high ? HEADROOM_HIGH : HEADROOM_LOW));
         }
     }
 

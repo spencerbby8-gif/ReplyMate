@@ -61,6 +61,17 @@ public final class DraftService {
      *  fallback transparently degrades to the anti-hallucination honesty line. */
     public void setRetrieval(com.replymate.core.ports.RetrievalPort r) { this.retrieval = r; }
 
+    /** P-background-8: per-call staleness probe (the shared instance stays
+     *  stateless — two conversations can generate concurrently). The background
+     *  runner passes its JobCoalescer token; manual flows pass nothing. */
+    public interface AbortCheck {
+        boolean aborted();
+    }
+
+    /** The diagnosable outcome a superseded job returns BEFORE the paid call. */
+    public static final String SUPERSEDED_ERROR =
+        "superseded by a newer message before the provider call";
+
     private static String joinAudit(java.util.List<String> items) {
         if (items == null || items.isEmpty()) return "";
         StringBuilder b = new StringBuilder();
@@ -93,6 +104,14 @@ public final class DraftService {
     }
 
     public Result<DraftOutcome> generateForContact(long contactId) {
+        return generateForContact(contactId, null);
+    }
+
+    /** P-background-8 full form: {@code abort} is consulted ONCE — after all the
+     *  (possibly slow) preparation, immediately before the paid provider call —
+     *  so a job superseded while it was stuck in research never burns a request
+     *  and never saves a stale draft. Null = legacy behavior, byte-identical. */
+    public Result<DraftOutcome> generateForContact(long contactId, AbortCheck abort) {
         Contact c = contacts.get(contactId);
         if (c == null) return Result.err("Contact not found.");
         if (c.privateMode) return Result.err("This contact is private — AI generation is disabled.");
@@ -387,6 +406,13 @@ public final class DraftService {
         if (think.whyLine() != null) why.add(think.whyLine());
 
         ChatRequest request = PromptBuilder.build(bundle);
+
+        // P-background-8: the LAST gate before money moves. Everything above —
+        // style, memory, the search gate, the external lookup — is prep; a job
+        // that went stale during it stops here with an explicit outcome.
+        if (abort != null && abort.aborted()) {
+            return Result.err(SUPERSEDED_ERROR);
+        }
 
         long t0 = clock.now();
         Result<ChatReply> reply = provider.generate(request);
