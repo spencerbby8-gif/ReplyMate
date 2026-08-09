@@ -48,6 +48,15 @@ public final class BurstSignals {
 
     private BurstSignals() { }
 
+    /** P-intelligence-5: expose the same pure-filler verdict detect() uses, so the
+     *  planner's focus/ignore split can never drift from burst mechanics. */
+    public static boolean isFiller(String line) {
+        String t = line == null ? "" : line.trim();
+        return !t.isEmpty() && t.length() <= FILLER_MAX_LEN
+            && (FILLER.matcher(t).matches() || t.matches("^\\s*\\?+\\s*$"))
+            && !CORRECTION.matcher(t).matches();
+    }
+
     public static Result detect(List<String> burstTexts) {
         int questions = 0;
         int fillers = 0;

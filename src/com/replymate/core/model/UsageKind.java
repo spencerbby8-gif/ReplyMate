@@ -5,7 +5,10 @@ public enum UsageKind {
     REPLY("reply"),
     SUMMARY("summary"),
     EXTRACT("extract"),
-    STYLE("style");
+    STYLE("style"),
+    /** P-intelligence-5: a live-research term lookup (its own kind so the usage
+     *  dashboard can price this optional feature honestly). */
+    RESEARCH("research");
 
     public final String wire;
     UsageKind(String wire) { this.wire = wire; }

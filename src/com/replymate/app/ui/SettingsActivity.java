@@ -26,7 +26,7 @@ public final class SettingsActivity extends Activity {
 
     private AppContainer c;
     private LinearLayout root;
-    private LinearLayout providerRow, listenRow, notifRow, accountRow;
+    private LinearLayout providerRow, listenRow, notifRow, accountRow, depthRowRef;
     private Ui.ToggleRow assistantRow;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -169,6 +169,40 @@ public final class SettingsActivity extends Activity {
                 }
             });
         root.addView(liveRow.row);
+        root.addView(Ui.divider(this));
+
+        // P-intelligence-5 (live research): optional provider-backed meaning lookup.
+        // Honest subtitle: NOT web search (provider-specific billed tool — the
+        // researched boundary); one tiny call per NEW term, cached 7 days; ordinary
+        // chats never trigger it; failure never blocks a reply; default OFF.
+        Ui.ToggleRow researchRow = Ui.toggleRow(this, "Live research (word meanings)",
+            "when a chat actually asks about a slang/word meaning, look it up once"
+                + " with your AI provider and cache it 7 days. Never web search,"
+                + " never on by itself — costs one small AI call per new term.");
+        researchRow.sw.setChecked("1".equals(
+            c.kv().get(com.replymate.core.live.TermResearch.KV_ENABLED, "0")));
+        researchRow.sw.setOnCheckedChangeListener(
+            new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
+                    c.kv().put(com.replymate.core.live.TermResearch.KV_ENABLED,
+                        on ? "1" : "0");
+                    Toast.makeText(SettingsActivity.this, on
+                        ? "Live research on — looks up a meaning only when a chat needs it"
+                        : "Live research off — the built-in dated slang list still applies",
+                        Toast.LENGTH_SHORT).show();
+                }
+            });
+        root.addView(researchRow.row);
+        root.addView(Ui.divider(this));
+
+        // P-intelligence-5 (planning depth): how much LOCAL planning rides before
+        // the model writes. Zero extra provider calls at every level.
+        depthRowRef = Ui.row(this, "Planning depth", "");
+        updateDepthSub();
+        depthRowRef.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickDepth(); }
+        });
+        root.addView(depthRowRef);
         root.addView(Ui.divider(this));
 
         LinearLayout usageRow = Ui.row(this, "Usage dashboard",
@@ -413,6 +447,53 @@ public final class SettingsActivity extends Activity {
                 });
         }
         b.show();
+    }
+
+    /** P-intelligence-5: the 3-way planning depth picker (shared dialog pattern —
+     *  one tap, single choice, immediate save, subtitle mirrors real state). */
+    private void pickDepth() {
+        final String[] keys = {
+            com.replymate.core.plan.PlanDepth.BASIC,
+            com.replymate.core.plan.PlanDepth.NORMAL,
+            com.replymate.core.plan.PlanDepth.DEEP };
+        final String[] titles = { "Basic", "Normal", "Deep" };
+        final String[] blurbs = {
+            "no planning block — the classic prompt, fastest",
+            "one compact plan line: what the moment needs + reply length (default)",
+            "full plan: situation, topic, which burst lines count, what to skip,"
+                + " and length fit — same single provider call" };
+        String cur = com.replymate.core.plan.PlanDepth.normalize(
+            c.kv().get(com.replymate.core.plan.PlanDepth.KV_KEY,
+                com.replymate.core.plan.PlanDepth.NORMAL));
+        int checked = com.replymate.core.plan.PlanDepth.DEEP.equals(cur) ? 2
+            : com.replymate.core.plan.PlanDepth.BASIC.equals(cur) ? 0 : 1;
+        CharSequence[] items = new CharSequence[3];
+        for (int i = 0; i < 3; i++) items[i] = titles[i] + " — " + blurbs[i];
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Planning depth")
+            .setSingleChoiceItems(items, checked,
+                new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int which) {
+                        c.kv().put(com.replymate.core.plan.PlanDepth.KV_KEY, keys[which]);
+                        updateDepthSub();
+                        d.dismiss();
+                    }
+                })
+            .setNegativeButton("Close", null)
+            .show();
+    }
+
+    private void updateDepthSub() {
+        if (depthRowRef == null || c == null) return;
+        String cur = com.replymate.core.plan.PlanDepth.normalize(
+            c.kv().get(com.replymate.core.plan.PlanDepth.KV_KEY,
+                com.replymate.core.plan.PlanDepth.NORMAL));
+        Ui.setRowSub(depthRowRef,
+            com.replymate.core.plan.PlanDepth.DEEP.equals(cur)
+                ? "Deep — full planning block before the reply (still one AI call)"
+                : com.replymate.core.plan.PlanDepth.BASIC.equals(cur)
+                    ? "Basic — no planning block (classic prompt)"
+                    : "Normal — compact plan line before the reply (still one AI call)");
     }
 
     private void refreshRows() {

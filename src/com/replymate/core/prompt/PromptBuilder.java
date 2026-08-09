@@ -32,6 +32,10 @@ public final class PromptBuilder {
         if (bundle.liveLine != null && !bundle.liveLine.trim().isEmpty()) {
             situationLines.add(bundle.liveLine.trim());
         }
+        // P-intelligence-5: a researched term-meaning line (optional, cached).
+        if (bundle.researchLine != null && !bundle.researchLine.trim().isEmpty()) {
+            situationLines.add(bundle.researchLine.trim());
+        }
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
             bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines,
             situationLines);
@@ -62,6 +66,21 @@ public final class PromptBuilder {
                 bundle.contact.displayName,
                 latest == null ? null : latest.body, appLabel, kind,
                 latest == null ? null : latest.senderName);
+        // P-intelligence-5: the deterministic plan grounds the read; it rides the
+        // END of the task turn, after the quoted message, before nothing — the
+        // final instruction remains "Output only the reply text." (BASIC depth
+        // leaves planText null and the task is byte-identical legacy.)
+        if (bundle.planText != null && !bundle.planText.trim().isEmpty()) {
+            String base = task.text;
+            int tail = base.lastIndexOf("\nOutput only the reply text.");
+            if (tail >= 0) {
+                base = base.substring(0, tail) + "\n" + bundle.planText.trim()
+                    + base.substring(tail);
+            } else {
+                base = base + "\n" + bundle.planText.trim();
+            }
+            task = Turn.user(base);
+        }
         ChatRequest req = new ChatRequest(system, turns, task,
             GenerationOpts.of(VARIANT_COUNT, 0.8, 220));
         return TokenBudgeter.fit(req, TokenBudgeter.DEFAULT_MAX_INPUT);

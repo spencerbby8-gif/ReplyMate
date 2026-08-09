@@ -96,7 +96,12 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.usecase.ContactServiceTest \
     com.replymate.core.usecase.ContactPurgeTest \
     com.replymate.core.usecase.LiveContextPromptTest \
+    com.replymate.core.usecase.LiveResearchPromptTest \
     com.replymate.core.live.LiveContextTest \
+    com.replymate.core.live.TermResearchTest \
+    com.replymate.core.plan.ReplyPlannerTest \
+    com.replymate.core.usecase.PlanningDepthPromptTest \
+    com.replymate.core.memory.LongChatCorrectionTest \
     com.replymate.core.prompt.PromptSecurityTest \
     com.replymate.core.auth.AuthFlowTest \
     com.replymate.core.listener.StatusFilterTest \

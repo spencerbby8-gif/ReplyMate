@@ -153,6 +153,15 @@ public final class LiveContext {
         return m != null ? m : PHRASES.get(term);
     }
 
+    /** P-intelligence-5: the bundled meaning for a term (null = the glossary does
+     *  NOT know it — only then is a paid live lookup even thinkable). */
+    public static String glossaryMeaning(String term) {
+        if (term == null) return null;
+        String norm = term.toLowerCase(Locale.ENGLISH).trim();
+        if (norm.isEmpty()) return null;
+        return meaning(norm);
+    }
+
     private static String join(List<String> xs) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < xs.size(); i++) {

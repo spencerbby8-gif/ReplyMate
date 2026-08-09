@@ -201,9 +201,10 @@ public final class DraftService {
         // conversation object, not raw notification text — sender, app, message type,
         // burst state + mechanics, the owner's last reply and the cold-start flag are
         // assembled once here, shape the prompt, and are credited in Prompt Audit.
+        java.util.List<String> burstTail = PromptBuilder.burstTailUsableIncoming(thread, 6);
         com.replymate.core.understanding.ConversationContext understanding =
             com.replymate.core.understanding.ConversationContextBuilder.build(
-                c, thread, PromptBuilder.burstTailUsableIncoming(thread, 6),
+                c, thread, burstTail,
                 styleService == null
                     ? java.util.Collections.<String, String>emptyMap()
                     : styleService.globalRows(),
@@ -215,6 +216,26 @@ public final class DraftService {
                 signalsTotal);
         why.addAll(understanding.whyLines());
 
+        // P-intelligence-5 (reply planning): a DETERMINISTIC plan before the model
+        // writes anything — what the moment is, what the reply must do, which burst
+        // lines count, what to skip, how long it should be. No extra provider call
+        // at any depth (researched boundary: per-call cost + mobile latency +
+        // free-tier RPM make reasoning chains the wrong default for a chat app).
+        String depth = liveKv == null ? "normal"
+            : liveKv.get(com.replymate.core.plan.PlanDepth.KV_KEY, "normal");
+        String planText = null;
+        if (com.replymate.core.plan.PlanDepth.BASIC.equals(depth)) {
+            why.add(com.replymate.core.plan.PlanDepth.auditLine(depth));
+        } else {
+            com.replymate.core.plan.ReplyPlanner.Plan plan =
+                com.replymate.core.plan.ReplyPlanner.plan(
+                    understanding, burstTail, planLengthLabel(contactId), null);
+            why.add(com.replymate.core.plan.PlanDepth.auditLine(depth));
+            why.addAll(plan.why);
+            planText = com.replymate.core.plan.PlanDepth.DEEP.equals(depth)
+                ? plan.fullBlock() : plan.compactLine();
+        }
+
         PromptBundle bundle = new PromptBundle(
             profiles.loadFiltered(), c, styleRules, thread,
             voice == null ? "" : voice.voiceLine,
@@ -222,6 +243,7 @@ public final class DraftService {
             profiles.extraFiltered(),
             mem == null ? null : mem.lines);
         bundle.understanding = understanding;
+        bundle.planText = planText;
 
         // P-intelligence-4 (live context): device clock + (when the partner actually
         // used a listed term) a small DATED glossary — local only, honest stamp, off
@@ -229,6 +251,10 @@ public final class DraftService {
         com.replymate.core.live.LiveContext.Snapshot live = liveFor(thread);
         bundle.liveLine = live.promptLine;
         why.add(live.whyLine);
+
+        // P-intelligence-5 (live research): need-triggered, cached, metered, and
+        // NEVER blocking — a failed/off lookup still generates the reply.
+        researchInto(bundle, c, thread, provider, why);
 
         ChatRequest request = PromptBuilder.build(bundle);
 
@@ -311,6 +337,97 @@ public final class DraftService {
 
     /** The most recent APPROVED reply texts for one contact (M4 evidence): drafts
      *  the owner copied as-is or edited-then-copied. Newest-first, capped. */
+    /** P-intelligence-5: the effective Reply-length word for the planner —
+     *  contact override beats global (same precedence as the voice layer), OFF
+     *  means "the owner disabled this control — the planner stays quiet about it". */
+    private String planLengthLabel(long contactId) {
+        if (styleService == null) return null;   // planner uses its built-in default
+        java.util.Map<String, String> crows = styleService.contactRows(contactId);
+        java.util.Map<String, String> grows = styleService.globalRows();
+        Integer cLen = com.replymate.core.style.StyleSettings.level(crows, "length");
+        Integer gLen = com.replymate.core.style.StyleSettings.level(grows, "length");
+        Integer eff = cLen != null ? cLen : gLen;
+        if (eff == null) return null;
+        if (eff.intValue() == com.replymate.core.style.StyleControls.LEVEL_OFF) return "";
+        return com.replymate.core.style.StyleControls.byKey("length")
+            .levelLabel(eff.intValue());
+    }
+
+    /** P-intelligence-5 (live research): the only extra provider call ReplyMate
+     *  can ever make — exactly ONE tiny lookup per NEW term, and only when the
+     *  partner actually needs a meaning (explicit ask or one conservative
+     *  unknown-slang token), the bundled glossary doesn't know it, the toggle is
+     *  ON, and the 7-day cache missed. Failure degrades silently (audit-noted);
+     *  the owner's reply is never blocked, metered as UsageKind.RESEARCH. */
+    private void researchInto(PromptBundle bundle, Contact c, List<Message> thread,
+                              AiProvider provider, List<String> why) {
+        if (bundle == null || c == null || thread == null || provider == null) return;
+        java.util.List<String> incoming = new java.util.ArrayList<String>();
+        java.util.List<String> outgoing = new java.util.ArrayList<String>();
+        for (Message m : thread) {
+            if (m == null || m.body == null || m.body.trim().isEmpty()) continue;
+            if (m.direction == Direction.INCOMING) incoming.add(m.body.trim());
+            else if (m.direction == Direction.OUTGOING) outgoing.add(m.body.trim());
+        }
+        if (incoming.isEmpty()) return;
+        java.util.List<String> names = new java.util.ArrayList<String>();
+        names.add(c.displayName);
+        names.add(profiles.loadFiltered() == null ? "" : profiles.loadFiltered().displayName());
+        String term;
+        try {
+            term = com.replymate.core.live.TermResearch.detectTerm(incoming, outgoing, names);
+        } catch (RuntimeException e) {
+            return;   // trigger heuristics must never hurt a reply
+        }
+        if (term == null) return;
+
+        boolean on = liveKv != null && "1".equals(
+            liveKv.get(com.replymate.core.live.TermResearch.KV_ENABLED, "0"));
+        if (!on) {
+            why.add(com.replymate.core.live.TermResearch.whyOff(term));
+            return;
+        }
+        String cached = com.replymate.core.live.TermResearch.cached(liveKv, term, clock.now());
+        if (cached != null) {
+            bundle.researchLine = com.replymate.core.live.TermResearch.promptLine(term, cached);
+            why.add(com.replymate.core.live.TermResearch.whyCached(term));
+            return;
+        }
+        String newest = incoming.get(incoming.size() - 1);
+        Result<ChatReply> rr;
+        try {
+            rr = provider.generate(com.replymate.core.live.TermResearch.lookupRequest(term, newest));
+        } catch (RuntimeException e) {
+            why.add(com.replymate.core.live.TermResearch.whyFailed(term,
+                e.getClass().getSimpleName()));
+            return;
+        }
+        // metered exactly like the reply call — cost transparency for the dashboard
+        UsageEvent u = new UsageEvent();
+        u.ts = clock.now();
+        u.model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        ChatReply rv = rr.ok ? rr.value : null;
+        u.tokensIn = rv == null ? 0 : rv.tokensIn;
+        u.tokensOut = rv == null ? 0 : rv.tokensOut;
+        u.kind = UsageKind.RESEARCH;
+        try { usage.insert(u); } catch (RuntimeException ignored) { }
+
+        if (!rr.ok) {
+            why.add(com.replymate.core.live.TermResearch.whyFailed(term, rr.error));
+            return;
+        }
+        String meaning = rv.variants.isEmpty() ? "" : rv.variants.get(0).trim();
+        meaning = meaning.replaceAll("\\s+", " ");
+        if (meaning.length() > 140) meaning = meaning.substring(0, 140).trim();
+        if (meaning.isEmpty() || meaning.equalsIgnoreCase("unsure")) {
+            why.add(com.replymate.core.live.TermResearch.whyUnsure(term));
+            return;
+        }
+        com.replymate.core.live.TermResearch.store(liveKv, term, meaning, clock.now());
+        bundle.researchLine = com.replymate.core.live.TermResearch.promptLine(term, meaning);
+        why.add(com.replymate.core.live.TermResearch.whyLookedUp(term));
+    }
+
     /** P-intelligence-4: one LiveContext snapshot per generation — device clock
      *  (injected Clock + this phone's timezone) and, ONLY when the incoming side
      *  actually used a bundled term, the dated glossary clause. Toggle honored from
@@ -466,6 +583,29 @@ public final class DraftService {
             mem == null ? null : mem.lines);
         // previews mirror the real prompt — the live-context line rides here too.
         previewBundle.liveLine = liveFor(sample).promptLine;
+        // …and so does the planning layer (identical depth semantics).
+        String depthP = liveKv == null ? "normal"
+            : liveKv.get(com.replymate.core.plan.PlanDepth.KV_KEY, "normal");
+        if (!com.replymate.core.plan.PlanDepth.BASIC.equals(depthP)) {
+            java.util.List<String> burstP = PromptBuilder.burstTailUsableIncoming(sample, 6);
+            com.replymate.core.understanding.ConversationContext udP =
+                com.replymate.core.understanding.ConversationContextBuilder.build(
+                    c, sample, burstP,
+                    styleService == null
+                        ? java.util.Collections.<String, String>emptyMap()
+                        : styleService.globalRows(),
+                    styleService == null
+                        ? java.util.Collections.<String, String>emptyMap()
+                        : styleService.contactRows(c.id),
+                    voice == null ? null : voice.extraLines,
+                    mem == null ? null : mem.lines, 0);
+            com.replymate.core.plan.ReplyPlanner.Plan planP =
+                com.replymate.core.plan.ReplyPlanner.plan(
+                    udP, burstP, planLengthLabel(c.id), null);
+            previewBundle.planText =
+                com.replymate.core.plan.PlanDepth.DEEP.equals(depthP)
+                    ? planP.fullBlock() : planP.compactLine();
+        }
         ChatRequest request = PromptBuilder.build(previewBundle);
 
         long t0 = clock.now();

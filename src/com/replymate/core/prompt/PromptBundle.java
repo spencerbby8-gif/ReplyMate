@@ -27,6 +27,13 @@ public final class PromptBundle {
     /* P-intelligence-4 (optional): the device-clock live-context line (LiveContext).
      *  Same mutable-fill pattern as understanding; null/"" ⇒ byte-identical legacy. */
     public String liveLine;
+    /* P-intelligence-5 (optional): the ReplyPlanner block, appended to the END of
+     *  the task turn (plan grounds the read, "output only the reply text" still
+     *  closes). Basic depth leaves this null ⇒ legacy task bytes. */
+    public String planText;
+    /* P-intelligence-5 (optional): a live-research "word help" line (TermResearch)
+     *  — situation-line channel like liveLine; null ⇒ nothing. */
+    public String researchLine;
 
     public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
                         List<Message> thread) {
