@@ -27,7 +27,15 @@ public final class StatusFilter {
         "notifications are on", "notifications for", "finishing up",
         "getting your messages", "loading chats", "importing", "exporting",
         "updating your", "transferring your", "preparing backup", "cloud backup",
-        "google drive", "storage almost full", "free up space"
+        "google drive", "storage almost full", "free up space",
+        // P-intelligence-7: further app self-service chrome (still behind the
+        // no-conversation-evidence + self-title gate, so a human's text with the
+        // same words can never be swallowed):
+        "you have new messages", "you may have new", "new messages",
+        "end-to-end encrypted", "encrypted messages", "tap to view",
+        "checking for messages", "waiting for messages", "your chats will",
+        "linked devices", "whatsapp web", "web client", "decrypting",
+        "messages on this device", "connecting to", "reconnecting…"
     };
 
     private StatusFilter() { }

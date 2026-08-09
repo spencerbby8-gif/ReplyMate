@@ -335,7 +335,15 @@ public final class SettingsActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions,
                                                      int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_POST_NOTIF) refreshRows();
+        if (requestCode == REQ_POST_NOTIF) {
+            refreshRows();
+            // P-intelligence-7: catch up messages swallowed while alerts were denied.
+            if (grantResults.length > 0
+                    && grantResults[0]
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                com.replymate.app.assistant.AssistantRunner.retryUnanswered(c);
+            }
+        }
     }
 
 

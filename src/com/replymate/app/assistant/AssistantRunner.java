@@ -123,14 +123,13 @@ public final class AssistantRunner {
         String tag = AssistantPlanner.notifTag(contactId);
         try {
             if (!enabled(c) && !force) return;
-            if (!ListenerStatus.canPostNotifications(c.app())) {
-                AssistantDiag.record(c, contactId, who, tag, "",
-                    AssistantEvent.Stage.GATES,
-                    "notification permission not granted",
-                    "skipped generation (no way to show the result honestly)",
-                    "allow ReplyMate notifications (Settings → ReplyMate notifications)");
-                return;
-            }
+            // P-intelligence-7 (fresh-install first-message fix): the
+            // POST_NOTIFICATIONS runtime approval gates ONLY the alert, never the
+            // draft. On a fresh install Android denies it until the owner grants
+            // once — a first message swallowed here used to die silently with no
+            // draft and no retry. Now the draft generates either way; the alert
+            // posts when allowed, and the catch-up re-alerts after the grant.
+            boolean canAlert = ListenerStatus.canPostNotifications(c.app());
 
             // State is read AT FIRE TIME — a newer message during the debounce is
             // always the one answered, never the stale one.
@@ -166,56 +165,133 @@ public final class AssistantRunner {
                     "nothing generated, no alert posted", fixFor(reason));
                 return;
             }
-            c.kv().put(AssistantPlanner.hashKvKey(contactId), incomingHash);
-
             Draft d = r.value.drafts.get(0);
-            String appLabel = WatchedApps.labelFor(lastIncoming.channel);
-            AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
-            if (!t.usable()) {
-                // P-background-6: the FIRST draft must show Approve & send whenever the
-                // app really exposes RemoteInput — Regenerate must never be the way to
-                // reveal it. The capture-time raw can predate the visible actions
-                // (WhatsApp often posts first, attaches actions a beat later), so
-                // re-probe the live shade once at generate time.
-                com.replymate.app.listener.RmNotificationListener l =
-                    com.replymate.app.listener.RmNotificationListener.active();
-                if (l != null && AssistantTargetStore.refreshFromLive(
-                        c.kv(), contactId, t.packageName, l.safeActiveNotifications())) {
-                    t = AssistantTargetStore.load(c.kv(), contactId);
-                    AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
-                        AssistantEvent.Stage.NOTIFY,
-                        "capture-time raw carried no usable reply action",
-                        "live re-probe found the app's real reply action — Approve & send is on the first draft",
-                        "");
-                }
-            }
-            AssistantPlanner.Capability cap = t.usable()
-                ? AssistantPlanner.Capability.DIRECT : AssistantPlanner.Capability.NONE;
-            if (cap == AssistantPlanner.Capability.NONE) {
-                AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+            if (!canAlert) {
+                // Draft exists (in-app, auditable) — only the alert is gated. The
+                // hash is deliberately NOT marked done so retryUnanswered()
+                // re-alerts this conversation the moment the approval is granted.
+                AssistantDiag.record(c, contactId, who, tag, "",
                     AssistantEvent.Stage.NOTIFY,
-                    "no usable quick-reply — observed: " + safe(t.probe, 130),
-                    "posted alert with honest Copy/Regenerate/Open fallback",
-                    "if the app DOES show Reply, tell support: its action hides behind a surface we don't read yet");
+                    "'show notifications' approval missing",
+                    "draft #" + d.id + " saved — visible in ReplyMate; no alert posted",
+                    "allow ReplyMate notifications (the home screen asks once on first open)");
+                return;
             }
-
-            AssistantNotifier.ensureChannels(c.app());
-            // P-background-8 heads-up discipline: ONE audible pop per draft cycle.
-            // A scheduled (non-forced) generation alerts only when this conversation
-            // hasn't claimed the current cycle yet — burst updates + Regenerate
-            // refresh the SAME alert silently. Approve/Copy/fallback and any
-            // dismissal of the card clear the flag, so the next genuinely new
-            // burst pops again. force (the Regenerate button) never re-pops.
-            String alertedKey = AssistantPlanner.alertedKvKey(contactId);
-            boolean fresh = !force && !"1".equals(c.kv().get(alertedKey, "0"));
-            AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap, fresh);
-            if (fresh) c.kv().put(alertedKey, "1");
+            c.kv().put(AssistantPlanner.hashKvKey(contactId), incomingHash);
+            notifyDraft(c, contactId, who, lastIncoming, d, force);
         } catch (RuntimeException e) {
             AssistantDiag.record(c, contactId, who, tag, "",
                 AssistantEvent.Stage.GENERATE,
                 e.getClass().getSimpleName() + ": " + safe(e.getMessage(), 70),
                 "pipeline aborted safely", "re-open Settings → Diagnostics if it repeats");
         }
+    }
+
+    /** Post (or silently refresh) the draft alert for one conversation — shared by
+     *  scheduled generation and the approval catch-up. Background thread only. */
+    private static void notifyDraft(AppContainer c, long contactId, String who,
+                                    Message lastIncoming, Draft d, boolean force) {
+        String tag = AssistantPlanner.notifTag(contactId);
+        String appLabel = WatchedApps.labelFor(lastIncoming.channel);
+        AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
+        if (!t.usable()) {
+            // P-background-6: the FIRST draft must show Approve & send whenever the
+            // app really exposes RemoteInput — Regenerate must never be the way to
+            // reveal it. The capture-time raw can predate the visible actions
+            // (WhatsApp often posts first, attaches actions a beat later), so
+            // re-probe the live shade once at generate time.
+            com.replymate.app.listener.RmNotificationListener l =
+                com.replymate.app.listener.RmNotificationListener.active();
+            if (l != null && AssistantTargetStore.refreshFromLive(
+                    c.kv(), contactId, t.packageName, l.safeActiveNotifications())) {
+                t = AssistantTargetStore.load(c.kv(), contactId);
+                AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                    AssistantEvent.Stage.NOTIFY,
+                    "capture-time raw carried no usable reply action",
+                    "live re-probe found the app's real reply action — Approve & send is on the first draft",
+                    "");
+            }
+        }
+        AssistantPlanner.Capability cap = t.usable()
+            ? AssistantPlanner.Capability.DIRECT : AssistantPlanner.Capability.NONE;
+        if (cap == AssistantPlanner.Capability.NONE) {
+            AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                AssistantEvent.Stage.NOTIFY,
+                "no usable quick-reply — observed: " + safe(t.probe, 130),
+                "posted alert with honest Copy/Regenerate/Open fallback",
+                "if the app DOES show Reply, tell support: its action hides behind a surface we don't read yet");
+        }
+
+        AssistantNotifier.ensureChannels(c.app());
+        // P-background-8 heads-up discipline: ONE audible pop per draft cycle.
+        // A scheduled (non-forced) generation alerts only when this conversation
+        // hasn't claimed the current cycle yet — burst updates + Regenerate
+        // refresh the SAME alert silently. Approve/Copy/fallback and any
+        // dismissal of the card clear the flag, so the next genuinely new
+        // burst pops again. force (the Regenerate button) never re-pops.
+        String alertedKey = AssistantPlanner.alertedKvKey(contactId);
+        boolean fresh = !force && !"1".equals(c.kv().get(alertedKey, "0"));
+        AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap, fresh);
+        if (fresh) c.kv().put(alertedKey, "1");
+    }
+
+    /** P-intelligence-7: approval/provider catch-up. A message that arrived while a
+     *  prerequisite was missing (POST_NOTIFICATIONS denied on a fresh install, or
+     *  no provider configured yet) must not stay dead forever: scan conversations
+     *  whose LATEST message is a real incoming text that never produced an alerted
+     *  draft, and re-drive them through the normal pipeline. Called after the
+     *  owner grants notifications, and after a provider is saved. Idempotent:
+     *  conversations already answered are skipped by the same hash + pending-draft
+     *  checks the live path uses. */
+    public static void retryUnanswered(final AppContainer c) {
+        if (c == null || !enabled(c)) return;
+        Tasks.bg(new Runnable() {
+            @Override public void run() {
+                for (com.replymate.core.model.Contact ct : c.contacts().all()) {
+                    try {
+                        retryOne(c, ct);
+                    } catch (RuntimeException ignored) { /* one bad row never stops the sweep */ }
+                }
+            }
+        });
+    }
+
+    private static void retryOne(AppContainer c, com.replymate.core.model.Contact ct) {
+        java.util.List<Message> lastOne = c.messages().lastMessages(ct.id, 1);
+        if (lastOne.isEmpty()) return;
+        Message m = lastOne.get(0);
+        if (m.direction != Direction.INCOMING) return;
+        if (m.body == null
+                || com.replymate.core.listener.ListenerFilter.isPlaceholder(m.body)) {
+            return;
+        }
+        String doneHash = c.kv().get(AssistantPlanner.hashKvKey(ct.id), "");
+        if (!AssistantPlanner.needsReply(m, doneHash)) return;
+
+        Draft pending = null;
+        for (Draft d : c.drafts().byContact(ct.id, 5)) {
+            if (d.status == com.replymate.core.model.DraftStatus.GENERATED) {
+                pending = d;
+                break;
+            }
+        }
+        if (pending != null) {
+            // A draft already waits in-app (generated while alerts were denied):
+            // re-alert it — never pay for a duplicate generation.
+            if (ListenerStatus.canPostNotifications(c.app())) {
+                c.kv().put(AssistantPlanner.hashKvKey(ct.id),
+                    AssistantPlanner.hashOf(m.body + "|" + m.sentAt + "|" + m.id));
+                notifyDraft(c, ct.id, ct.displayName, m, pending, false);
+                AssistantDiag.record(c, ct.id, ct.displayName,
+                    AssistantPlanner.notifTag(ct.id), "",
+                    AssistantEvent.Stage.NOTIFY,
+                    "approval granted after the draft was generated",
+                    "existing draft re-alerted (no duplicate generation)",
+                    "");
+            }
+            return;
+        }
+        schedule(c, new IngestReport.PingRequest(ct.id, ct.displayName, m.body, m.sentAt));
     }
 
     /** Map known honest gate errors to a human next-step. Unknowns stay generic. */

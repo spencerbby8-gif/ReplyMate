@@ -119,18 +119,39 @@ public class IngestCoordinatorTest {
             messages.lastMessages(created.id, 10).get(0).body);
     }
 
-    @Test public void groupsStoredButNeverPing() {
+    @Test public void groupsNeverCreateConversations() {
+        // P-intelligence-7 (owner policy, supersedes the old store-only rule):
+        // group/broadcast items are dropped BEFORE any contact, row, ping or
+        // draft — they can never clutter the home list.
         IngestReport rep = engine.handle(list(
             ev(Channel.WHATSAPP, "Family", "Ada", "Me", "hello fam", 1000, true, false)), allOn());
-        assertEquals(1, rep.stored);
+        assertEquals(0, rep.stored);
+        assertEquals(1, rep.filtered);
         assertEquals(0, rep.pings.size());
-        assertEquals("family", contacts.all().get(0).displayName.equals("Family")
-            ? "family" : "fail");   // display name kept
+        assertTrue("no conversation was created for the group",
+            contacts.all().isEmpty());
     }
 
-    @Test public void mediaOnlyStoresPlaceholderNoPing() {
+    @Test public void mediaOnlyFromAnUnknownSenderCreatesNothing() {
+        // P-intelligence-7: media-only notices for a NEW identity never create a
+        // conversation; only real (readable-text) messages do.
         IngestReport rep = engine.handle(list(
             ev(Channel.TELEGRAM, "Sam", "Sam", "Me", null, 1000, false, true)), allOn());
+        assertEquals(0, rep.stored);
+        assertEquals(1, rep.filtered);
+        assertEquals(0, rep.pings.size());
+        assertTrue(contacts.all().isEmpty());
+    }
+
+    @Test public void mediaOnlyInAnExistingConversationStillAddsContext() {
+        // …but once a real message created the conversation, media rows stay as
+        // honest placeholders (context for future drafts), still never pinging.
+        IngestReport first = engine.handle(list(
+            ev(Channel.TELEGRAM, "Sam", "Sam", "Me", "hey you", 1000, false, false)), allOn());
+        assertEquals(1, first.stored);
+        assertEquals(1, first.pings.size());
+        IngestReport rep = engine.handle(list(
+            ev(Channel.TELEGRAM, "Sam", "Sam", "Me", null, 2000, false, true)), allOn());
         assertEquals(1, rep.stored);
         assertEquals(0, rep.pings.size());
         Contact c = contacts.all().get(0);
@@ -199,6 +220,11 @@ public class IngestCoordinatorTest {
     }
 
     @Test public void mediaOnlyStoredWithKindPlaceholderMimeAndUriNoPing() {
+        // P-intelligence-7: media rows need the conversation to already exist —
+        // a real text opens it below (media-first would create nothing).
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "hello there", 500L, false, false)),
+            allOn());
         engine.handle(list(media(Channel.WHATSAPP, "Amara", "📷 Photo",
             "image/jpeg", "content://wa/123", com.replymate.core.model.ContentKind.IMAGE)), allOn());
         Contact c = contacts.all().get(0);
@@ -220,18 +246,19 @@ public class IngestCoordinatorTest {
         assertEquals(com.replymate.core.model.ContentKind.IMAGE, m.effectiveKind());
     }
 
-    @Test public void missedCallStoredAsCallEventNoPing() {
+    @Test public void missedCallNoiseNeverCreatesAConversation() {
+        // P-intelligence-7 (owner policy, supersedes the old store-CALL rule):
+        // missed/declined-call notices are service noise — dropped BEFORE any
+        // contact, row, ping or draft exists. They never clutter the home list.
         NotifEvent call = media(Channel.WHATSAPP, "Amara", "Missed voice call",
             null, null, com.replymate.core.model.ContentKind.CALL);
         call.hasAttachment = false;
         IngestReport rep = engine.handle(list(call), allOn());
-        assertEquals(1, rep.stored);
+        assertEquals(0, rep.stored);
+        assertTrue(rep.filtered >= 1);
         assertEquals(0, rep.pings.size());
-        Contact c = contacts.all().get(0);
-        Message m = messages.lastMessages(c.id, 1).get(0);
-        assertEquals("Missed voice call", m.body);
-        assertEquals(com.replymate.core.model.ContentKind.CALL, m.effectiveKind());
-        assertEquals("", m.mediaUri);      // calls never carry media references
+        assertTrue("a missed call alone never opens a conversation",
+            contacts.all().isEmpty());
     }
 
     @Test public void mediaRowsNeverLeakMimeOrUriIntoTextMessages() {
@@ -247,6 +274,10 @@ public class IngestCoordinatorTest {
     }
 
     @Test public void identicalMediaRepostDedupesAcrossPlaceholderGenerations() {
+        // opens the conversation with a real text (P-intelligence-7 first-contact rule)
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "hello", 100L, false, false)),
+            allOn());
         IngestReport first = engine.handle(list(media(Channel.WHATSAPP, "Amara", "📷 Photo",
             "image/jpeg", "content://wa/123", com.replymate.core.model.ContentKind.IMAGE)), allOn());
         assertEquals(1, first.stored);

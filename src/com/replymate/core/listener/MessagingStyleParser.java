@@ -44,6 +44,12 @@ public final class MessagingStyleParser implements NotifParser {
                 String text = trim(raw.text);
                 if (text.isEmpty()) text = trim(raw.bigText);
                 if (text.isEmpty()) return Result.ignore("no readable message content");
+                // P-intelligence-7: app service-summary geometry ("23 new messages",
+                // "you have new messages", "tap to view…") is chrome, never a human
+                // message — dropped before it can become a conversation.
+                if (NoiseGate.isSummaryGeometry(text)) {
+                    return Result.ignore("service summary: " + text);
+                }
                 NotifEvent e = base(raw, group);
                 e.senderName = firstNonBlank(raw.convTitle, raw.title);
                 e.text = text;

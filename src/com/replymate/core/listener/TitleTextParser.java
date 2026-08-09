@@ -73,6 +73,10 @@ public class TitleTextParser implements NotifParser {
             String title = MessagingStyleParser.trim(raw.title);
             String sender = senderFrom(raw, text);
             String body = bodyFrom(raw, text, sender);
+            // P-intelligence-7: service-summary geometry is chrome, never a person.
+            if (NoiseGate.isSummaryGeometry(body)) {
+                return Result.ignore("service summary: " + body);
+            }
             boolean callEvent = raw.category != null && "call".equals(raw.category)
                 && ContentSignals.isCallEvent(body);
 

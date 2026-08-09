@@ -551,6 +551,9 @@ public final class ProviderEditActivity extends Activity {
         }
         c.providers().upsertActive(d);
         c.invalidateProvider();
+        // P-intelligence-7: catch up messages that arrived while no provider was
+        // configured — a fresh install's first message must still get its draft.
+        com.replymate.app.assistant.AssistantRunner.retryUnanswered(c);
         Toast.makeText(this, "Saved & activated", Toast.LENGTH_SHORT).show();
         finish();
     }

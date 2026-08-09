@@ -165,6 +165,22 @@ public final class ContactService {
         return c;
     }
 
+    /** Read-only lookup (P-intelligence-7): the contact already linked to ANY of
+     *  these channel keys, else null. Creates nothing — the noise gate uses it to
+     *  decide whether a non-text notice may add context to an existing
+     *  conversation (never create a new one). */
+    public Contact findChannelContact(Channel channel, java.util.List<String> keys) {
+        if (channel == null || keys == null) return null;
+        for (String k : keys) {
+            if (k == null || k.trim().isEmpty()) continue;
+            ContactChannel existing = store.findChannel(channel, k.trim());
+            if (existing == null) continue;
+            Contact c = store.get(existing.contactId);
+            if (c != null) return c;
+        }
+        return null;
+    }
+
     /** Name-based candidate for attach: same normalized display name AND either a
      *  channel row on THIS app (same service ⇒ same person/group title) or a
      *  manual-only contact (owner created it by hand, no app link yet). Prefers a

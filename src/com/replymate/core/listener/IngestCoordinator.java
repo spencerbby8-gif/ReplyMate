@@ -76,11 +76,31 @@ public final class IngestCoordinator {
             // never pinged, never able to anchor memory/bursts/drafts (any app).
             if (ContentSignals.isReactionNotice(e.text)) { rep.filtered++; continue; }
 
+            // P-intelligence-7: group/broadcast-style items and missed-call notices
+            // are stopped BEFORE any contact or message exists — they never become
+            // ReplyMate conversations, never ping, never draft.
+            NoiseGate.Drop noise = NoiseGate.evaluate(e);
+            if (noise.drop) { rep.filtered++; continue; }
+
             String convTitle = IdentityResolver.firstNonEmpty(
                 e.conversationTitle, e.senderName, "Unknown");
             java.util.List<String> keys = IdentityResolver.keyCandidates(
                 e.conversationId, convTitle, e.group);
             String remoteKey = keys.get(0);
+
+            // P-intelligence-7: a non-text notice (media/voice/poll/document echo)
+            // may only ADD context to an EXISTING conversation — it must never
+            // CREATE one. Real (human, readable-text) messages only create
+            // ReplyMate conversations; nothing else may clutter the home list.
+            com.replymate.core.model.ContentKind kind = e.contentKind != null
+                ? e.contentKind
+                : ContentSignals.classify(e.mediaMime, e.hasAttachment, e.text);
+            if (!NoiseGate.isReadableText(kind, e.text)
+                    && contactService.findChannelContact(e.channel, keys) == null) {
+                rep.filtered++;
+                continue;
+            }
+
             Contact contact = contactService.ensureChannelContact(
                 e.channel, remoteKey, IdentityResolver.displayNameFor(convTitle), keys);
 
@@ -90,9 +110,6 @@ public final class IngestCoordinator {
             // Content kind decided ONCE, from notification evidence (P-audit-deep) —
             // never from which app sent it. Media-only items get an honest per-kind
             // placeholder body; a real caption (text with media) is kept verbatim.
-            com.replymate.core.model.ContentKind kind = e.contentKind != null
-                ? e.contentKind
-                : ContentSignals.classify(e.mediaMime, e.hasAttachment, e.text);
             boolean emptyText = e.text == null || e.text.trim().isEmpty();
             String body;
             if (kind != null && kind.isUnreadable()

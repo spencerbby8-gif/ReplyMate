@@ -33,6 +33,8 @@ import java.util.Set;
  *  listener health chip, entries to settings/new contact. */
 public final class HomeActivity extends Activity {
 
+    private static final int REQ_POST_NOTIF = 7;
+
     /** Mirrors the listener's default-on set for the health chip label. */
     private static final Set<Channel> DEFAULTS_ON =
         EnumSet.of(Channel.WHATSAPP, Channel.TELEGRAM);
@@ -48,6 +50,18 @@ public final class HomeActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_home);
         c = ReplyMateApp.containerOf(this);
+
+        // P-intelligence-7 (fresh-install first-message): Android 13+ denies
+        // POST_NOTIFICATIONS until asked — ask ONCE on the first home-screen open
+        // so the very first reply alert can actually post. Later grants also
+        // trigger the catch-up for messages swallowed before the approval.
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && !com.replymate.app.listener.ListenerStatus.canPostNotifications(this)
+                && !"1".equals(c.kv().get("notif.post.asked", "0"))) {
+            c.kv().put("notif.post.asked", "1");
+            requestPermissions(
+                new String[] {"android.permission.POST_NOTIFICATIONS"}, REQ_POST_NOTIF);
+        }
 
         list = (LinearLayout) findViewById(R.id.contact_list);
         empty = (TextView) findViewById(R.id.empty_state);
@@ -323,5 +337,19 @@ public final class HomeActivity extends Activity {
         String body = m.body.replace('\n', ' ').trim();
         if (body.length() > 40) body = body.substring(0, 40) + "…";
         return who + body;
+    }
+
+    /** P-intelligence-7: the catch-up for messages swallowed while alerts were
+     *  denied — the moment the approval lands, re-alert/re-drive them. */
+    @Override public void onRequestPermissionsResult(int requestCode,
+                                                     String[] permissions,
+                                                     int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQ_POST_NOTIF || c == null) return;
+        if (grantResults.length > 0
+                && grantResults[0]
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            com.replymate.app.assistant.AssistantRunner.retryUnanswered(c);
+        }
     }
 }

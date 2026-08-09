@@ -130,6 +130,21 @@ public final class AssistantPlanner {
         return !incomingHash.equals(lastDoneHash);
     }
 
+    /** P-intelligence-7: does this latest message still lack a generated AND
+     *  alerted reply? The catch-up sweep (retryUnanswered) uses exactly the same
+     *  rule the live schedule path uses, so a conversation can never be retried
+     *  for something already answered. */
+    public static boolean needsReply(com.replymate.core.model.Message lastIncoming,
+                                     String lastDoneHash) {
+        if (lastIncoming == null) return false;
+        if (lastIncoming.direction
+                != com.replymate.core.model.Direction.INCOMING) return false;
+        String incomingHash = hashOf(lastIncoming.body + "|"
+            + lastIncoming.sentAt + "|" + lastIncoming.id);
+        return shouldGenerate(incomingHash, lastDoneHash == null ? "" : lastDoneHash,
+            false);
+    }
+
     /** Stable, dependency-free content hash (FNV-1a 64). Same input ⇒ same output
      *  across process restarts — required for the dedupe rule above. */
     public static String hashOf(String s) {

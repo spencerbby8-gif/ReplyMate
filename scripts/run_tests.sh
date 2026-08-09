@@ -117,6 +117,9 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.listener.ListenerFilterTest \
     com.replymate.core.listener.BatchWindowTest \
     com.replymate.core.listener.IngestCoordinatorTest \
+    com.replymate.core.listener.NoiseGateTest \
+    com.replymate.core.listener.NoiseIngestTest \
+    com.replymate.core.assistant.AssistantCatchUpTest \
     com.replymate.core.listener.MessagingStyleParserTest \
     com.replymate.core.listener.TitleTextParserTest \
     com.replymate.core.listener.ParserRegistryTest \
