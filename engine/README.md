@@ -42,6 +42,10 @@ NOT required — the engine avoids them deliberately) — nothing else.
 
 - `REPLYMATE_SDK` — use an existing SDK instead of `.engine-sdk/`
 - `REPLYMATE_SECRETS` — alternate secrets dir
+- `REPLYMATE_JKS` (+`REPLYMATE_JKS_PASS`, default `android`) — sign with a
+  provided keystore instead of the local key. This is the **recovery path**:
+  if the original ≤1.5.8 `arena.keystore` is ever recovered, export it here
+  and update-in-place continuity over old installs is restored (same identity).
 - `MIN_SDK` / `TARGET_SDK` — default 24 / 34 (matches shipped 1.5.8 metadata)
 
 ## Known divergence from historical builds

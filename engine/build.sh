@@ -132,11 +132,22 @@ CLASSES=$(find "$BUILD/classes" -name '*.class')
 log "5/6 pack + align + sign"
 (cd "$BUILD/dex-out" && zip -0 -X "$BUILD/unsigned.apk" classes.dex >/dev/null)
 "$ZIPALIGN" -p -f 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
-arena_key
 mkdir -p "$(dirname "$OUT")"
-"$APKSIGNER" sign --key "$KEY" --cert "$CERT" \
-  --v1-signing-enabled true --v2-signing-enabled true \
-  --out "$OUT" "$BUILD/aligned.apk"
+if [ -n "${REPLYMATE_JKS:-}" ] && [ -f "${REPLYMATE_JKS:-}" ]; then
+  # Recovery path (P-release-2): if the original arena.keystore is ever
+  # recovered, point REPLYMATE_JKS at it and update-continuity over ≤1.5.8
+  # is restored. Pass defaults to the historic 'android'.
+  log "signing with PROVIDED keystore (recovery path): $REPLYMATE_JKS"
+  "$APKSIGNER" sign --ks "$REPLYMATE_JKS" \
+    --ks-pass "pass:${REPLYMATE_JKS_PASS:-android}" \
+    --v1-signing-enabled true --v2-signing-enabled true \
+    --out "$OUT" "$BUILD/aligned.apk"
+else
+  arena_key
+  "$APKSIGNER" sign --key "$KEY" --cert "$CERT" \
+    --v1-signing-enabled true --v2-signing-enabled true \
+    --out "$OUT" "$BUILD/aligned.apk"
+fi
 
 log "6/6 verify"
 "$ZIPALIGN" -c -p 4 "$OUT" || fatal "zipalign verification failed"
