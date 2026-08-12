@@ -427,6 +427,12 @@ service + `POST_NOTIFICATIONS`; nothing earlier).
 `scripts/run_tests.sh`: javac(8) → core+provider → tests → `java -cp … org.junit.runner.JUnitCore <Suites>`.
 Core/provider are pure JVM by §1 rule — they test on the sandbox JVM *identically* to on-device behavior.
 
+**Addendum (P-release-1, 2026-08-12):** the "device-stack / robo" counts cited in release notes up to
+1.5.8 (e.g. "110 robo green") came from an external harness that was never committed and is LOST.
+Those numbers are **retired as release gates** — the official reproducible gate is the JVM suite
+(`scripts/run_tests.sh`; 757 @ 1.5.8). Any future device-stack harness must live in this repo (e.g.
+`tests/device/`) before its counts may be cited as gates again.
+
 ### 9.2 Suites (name — representative cases)
 - `JsonTest` — round-trip, nested escaping, unicode, malformed input errors.
 - `TokenBudgeterTest` — estimate accuracy ±15%; truncation order honored; L0 never truncated; edge: 0 msgs.
@@ -451,13 +457,20 @@ UI never janked by parsing). Every phase exports its checklist into `docs/checkl
 
 - **Versioning:** semver `versionName`, monotonic `versionCode` (table in §8). Bump per shipped phase;
   hotfix → patch++ with its own APK.
-- **Build pipeline (existing engine):**
-  `VERSION_CODE=2 VERSION_NAME=0.1.0 bash /home/user/apk-engine/build.sh /home/user/ReplyMate ReplyMate-0.1.0.apk`
-  `scripts/release.sh` wraps this: runs tests → builds → verifies (`apksigner verify`, `aapt2 dump badging`)
-  → computes sha256 → archives to `releases/` + appends `RELEASES.md` row (date, vc, name, sha, notes).
-- **Signing:** existing persistent key `/home/user/apk-engine/keystore/arena.keystore` (pass `android`).
-  Same key across all versions ⇒ seamless over-install updates on your phone. **Never regenerate** (a new
-  key permanently blocks updates; documented in README). Keystore file is tiny and snapshot-persistent.
+- **Build pipeline (in-repo engine — P-release-1):**
+  `VERSION_CODE=40 VERSION_NAME=1.5.9 bash engine/build.sh "$(pwd)" releases/ReplyMate-1.5.9.apk`
+  `scripts/release.sh` wraps this: runs tests → builds → verifies (`apksigner verify`, `aapt2 dump badging`,
+  `zipalign -c`, empty-`rm_builtin` scan) → computes sha256 → archives to `releases/` + appends
+  `RELEASES.md` row (date, vc, name, sha, notes). The engine self-bootstraps the pinned toolchain from
+  `engine/TOOLS.txt` into gitignored `.engine-sdk/` — a fresh clone builds with no workspace assumptions.
+  (Pre-2026-08-12 versions used an external `/home/user/apk-engine` that was never committed; it was
+  lost with the old sandbox.)
+- **Signing (P-release-1 reality):** the original `/home/user/apk-engine/keystore/arena.keystore` lived
+  outside git and was **lost** in the 2026-08-12 workspace prune (its cert sha-256 is recorded in the
+  1.5.8 checklist: `b15f2f37…c6a85ed`). The engine now keeps a local key in gitignored `secrets/`
+  (generated once, chmod 600, never committed). **Consequence: builds signed with the new key do NOT
+  update-in-place over ≤1.5.8** — devices need a clean install (app data resets) unless the original
+  key is recovered into `secrets/`. The "never regenerate" rule stands for the new key going forward.
 - **Delivery:** APK → workspace download → phone ("install from this source" once) → over-install for updates.
   Optional fallback: keep last 3 APKs in `releases/` for quick rollback.
 - **Pre-flight per release:** suites green · vc bumped · private-mode + isolation suite green · manifest

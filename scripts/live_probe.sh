@@ -7,7 +7,7 @@
 # Example (dummy key — verifies error mapping against the live server):
 #   bash scripts/live_probe.sh gemini https://generativelanguage.googleapis.com gemini-2.5-flash AIzaSyDUMMY badModelProbe
 set -euo pipefail
-ROOT=/home/user/ReplyMate
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/build/probe-classes"
 mkdir -p "$OUT"
 CP_SRC=$(find "$ROOT/src/com/replymate/core" "$ROOT/src/com/replymate/provider" -name '*.java')

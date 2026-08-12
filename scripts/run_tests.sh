@@ -4,11 +4,13 @@
 #  Compiles every source file that has NO platform import (core,
 #  provider, platform-neutral data classes) + tests on the JVM,
 #  then runs the JUnit suites. Real SQLite via JDBC for migrations.
-#  Usage:  bash /home/user/ReplyMate/scripts/run_tests.sh
+#
+#  P-release-1: repo-relative — a fresh clone runs it from anywhere.
+#  Usage:  bash scripts/run_tests.sh
 # ==================================================================
 set -euo pipefail
 
-ROOT=/home/user/ReplyMate
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS="$ROOT/tools"
 OUT="$ROOT/build/test-classes"
 TMPD="$ROOT/build/java-tmp"

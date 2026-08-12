@@ -146,3 +146,23 @@ cost. Real 1:1 messages around them keep generating normally.
   (research/reasoning/no-search-support/slow-lookup/supersede-race/noise/
   stale-catch-up) driven through the real listener→ingest→schedule→provider→
   alert chain.
+
+---
+
+## Gate status — updated 2026-08-12 (P-release-1)
+
+**Engineering verification (reproducible from repo):** JVM gate re-ran from a
+fresh clone — **757/757 green**; the build engine is now in-repo (`engine/`) and
+the full compile → sign → hash pipeline was proven end-to-end on a disposable
+fresh checkout of `main`.
+
+**Retired as a gate:** the "110/110 device-stack" figure above (and similar
+counts in older release notes) came from an external harness that was never
+committed and no longer exists anywhere. The number stays here as the honest
+historical record, but it is **no longer an official gate** — see BLUEPRINT
+§9.1 addendum. It was NOT re-verified in P-release-1 and no older APK's device
+behavior is re-asserted from it.
+
+**Owner device verdicts — STILL OPEN.** §1–§8 above are real-phone PASS/FAIL
+checks and none are filled in. Nothing in engineering verification marks them;
+they are not PASS until the owner runs them against `releases/ReplyMate-1.5.8.apk`.

@@ -19,3 +19,7 @@ secrets.env
 
 # Local machine config (Android Studio / sdk paths)
 local.properties
+
+# P-release-1: in-repo engine bootstrap cache + local secrets — never committed
+/.engine-sdk/
+/secrets/

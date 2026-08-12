@@ -2,16 +2,23 @@
 # ==================================================================
 #  ReplyMate release pipeline (BLUEPRINT §10)
 #  tests → engine build → verify → sha256 → archive + RELEASES.md
+#
+#  P-release-1: fully in-repo. No workspace paths. The build engine is
+#  engine/build.sh (bootstraps its own pinned toolchain into
+#  .engine-sdk/). Signing key: secrets/ (gitignored) — see engine/README.md
+#  for the ≤1.5.8 key-loss / update-continuity warning.
+#
 #  Usage: bash scripts/release.sh <versionCode> <versionName> [notes]
-#         e.g. bash scripts/release.sh 1 0.0.1 "P0 foundations"
+#         e.g. bash scripts/release.sh 40 1.5.9 "P-release-1"
 # ==================================================================
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 VC="${1:?usage: release.sh <versionCode> <versionName> [notes]}"
 VN="${2:?usage: release.sh <versionCode> <versionName> [notes]}"
 NOTES="${3:-}"
 
-ROOT=/home/user/ReplyMate
 OUT="ReplyMate-$VN.apk"
 REL="$ROOT/releases"
 mkdir -p "$REL"
@@ -19,16 +26,17 @@ mkdir -p "$REL"
 echo "==> 1/4 test gate"
 bash "$ROOT/scripts/run_tests.sh"
 
-# P-intelligence-3: SOLO-BUILDER key injection — if (and only if) dev-secrets
-# carries REPLYMATE_BUILTIN_KEY, the release binary bundles it (solo-owner demo
-# asset). The values are written into the always-empty repo stub res file for
-# the build and the stub is restored afterwards, so the key NEVER lands in git.
-SECRETS=/home/user/dev-secrets/secrets.env
+# P-intelligence-3: SOLO-BUILDER key injection — if (and only if) the local
+# secrets file carries REPLYMATE_BUILTIN_KEY, the release binary bundles it
+# (solo-owner demo asset). The values are written into the always-empty repo
+# stub res file for the build and the stub is restored afterwards, so the key
+# NEVER lands in git. Default file: secrets/secrets.env (gitignored).
+SECRETS_FILE="${REPLYMATE_DEV_SECRETS:-$ROOT/secrets/secrets.env}"
 STUB="$ROOT/res/values/builtin_stub.xml"
 BUILTIN_PROVIDER=""; BUILTIN_KEY=""
-if [ -f "$SECRETS" ]; then
-    BUILTIN_PROVIDER=$(grep '^REPLYMATE_BUILTIN_PROVIDER=' "$SECRETS" | cut -d= -f2- | tr -d '[:space:]' || true)
-    BUILTIN_KEY=$(grep '^REPLYMATE_BUILTIN_KEY=' "$SECRETS" | cut -d= -f2- | tr -d '[:space:]' || true)
+if [ -f "$SECRETS_FILE" ]; then
+    BUILTIN_PROVIDER=$(grep '^REPLYMATE_BUILTIN_PROVIDER=' "$SECRETS_FILE" | cut -d= -f2- | tr -d '[:space:]' || true)
+    BUILTIN_KEY=$(grep '^REPLYMATE_BUILTIN_KEY=' "$SECRETS_FILE" | cut -d= -f2- | tr -d '[:space:]' || true)
 fi
 INJECTED=0
 restore_stub() { git -C "$ROOT" checkout -- "$STUB" 2>/dev/null || true; }
@@ -47,12 +55,12 @@ src = re.sub(r'(<string name="rm_builtin_key"[^>]*>)[^<]*(</string>)',
 open(path, 'w').write(src)
 PYEOF
 else
-    echo "== solo-builder: no REPLYMATE_BUILTIN_* in dev-secrets → pure BYOK build"
+    echo "== solo-builder: no REPLYMATE_BUILTIN_* secrets → pure BYOK build"
 fi
 
 echo "==> 2/4 engine build (vc=$VC, name=$VN)"
 VERSION_CODE="$VC" VERSION_NAME="$VN" \
-    bash /home/user/apk-engine/build.sh "$ROOT" "$OUT"
+    bash "$ROOT/engine/build.sh" "$ROOT" "$REL/$OUT"
 if [ "$INJECTED" = "1" ]; then
     restore_stub
     trap - EXIT 2>/dev/null || true
@@ -60,9 +68,9 @@ fi
 # hard proof, key or no key: the stub file may never hold a key after packaging
 grep -q 'name="rm_builtin_key"[^>]*>[^<]\+' "$STUB" && {
     echo "FATAL: built-in key still present in repo stub after build — refusing to continue" >&2; exit 1; }
+# the engine ALSO refuses non-empty rm_builtin_* inside the APK itself
 
-echo "==> 3/4 archive"
-mv "/home/user/$OUT" "$REL/$OUT"
+echo "==> 3/4 archive + ledger"
 SHA=$(sha256sum "$REL/$OUT" | awk '{print $1}')
 SIZE=$(stat -c%s "$REL/$OUT")
 
@@ -79,4 +87,6 @@ echo "| $(date -u +%F) | $VN | $VC | \`$SHA\` | $SIZE | $NOTES |" >> "$REL/RELEA
 echo "==> 4/4 done"
 echo "RELEASED: $REL/$OUT"
 echo "sha256  : $SHA"
-echo "Install on-device will update-in-place (arena.keystore signing, never regenerate)."
+echo "NOTE: ≤1.5.8 was signed with a LOST key. This build (new local key)"
+echo "      needs a CLEAN install on devices — no update-in-place. See"
+echo "      engine/README.md §Signing & update continuity."

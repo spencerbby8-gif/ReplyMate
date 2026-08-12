@@ -1,0 +1,7 @@
+# ReplyMate pinned Android toolchain (P-release-1).
+# Format: dest-dir|zip-filename|download-url|sha256
+# The engine downloads each artifact ONCE into .engine-sdk/dl/, verifies the
+# sha256 pin EVERY fetch, and unpacks to dest-dir. Pins were captured from the
+# official Google repository downloads on 2026-08-12.
+build-tools/34.0.0|build-tools_r34-linux.zip|https://dl.google.com/android/repository/build-tools_r34-linux.zip|e858c4b60069d0431051b225d384413b1643e1289b00a4825aed347f25bd510f
+platforms/android-35|platform-35_r02.zip|https://dl.google.com/android/repository/platform-35_r02.zip|0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0
