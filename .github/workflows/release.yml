@@ -71,10 +71,11 @@ jobs:
           echo "::add-mask::$RM_KS_B64"
           chmod 600 "$KS_OUT" 2>/dev/null || true
           python3 - "$KS_OUT" <<'PYEOF'
-          import base64, binascii, os, sys
+          import base64, binascii, os, sys, subprocess, zipfile, hashlib, hmac
           from urllib.parse import unquote
           s = "".join(os.environ["RM_KS_B64"].split())          # strip whitespace
           s = s.strip('"').strip("'")                           # copy-paste quotes
+
           def try_decode(x):
               for cand in (x, x.replace("-", "+").replace("_", "/")):   # std then b64url
                   cand += "=" * (-len(cand) % 4)                        # re-pad
@@ -83,6 +84,7 @@ jobs:
                   except binascii.Error:
                       continue
               return None
+
           def jks_ok(data):
               # full JKS structural walk (no password needed to parse): magic, version 2,
               # entry walk (alias/ts/encrypted-key/cert-chain), trailing 20-byte integrity digest.
@@ -116,13 +118,10 @@ jobs:
                   return len(data) - off == 20            # SHA-1 integrity digest trails the store
               except Exception:
                   return False
+
           def jks_digest_ok(data, pw):
               # JKS integrity digest (OpenJDK legacy JKS): SHA-1 over
               # password(UTF-16BE) + "Mighty Aphrodite" + store-bytes[:-20] == trailing 20 bytes.
-              # Cryptographically identifies the ONE true reconstruction — structure alone cannot,
-              # because a late paste injury hides inside the opaque encrypted-key blob yet keeps
-              # the original trailing digest bytes.
-              import hashlib
               if len(data) < 20:
                   return False
               try:
@@ -130,6 +129,7 @@ jobs:
                   return t == data[-20:]
               except Exception:
                   return False
+
           # ---- PKCS#12 (RFC 7292) structural parser + MAC verifier ----
           HASH_OID = {"1.3.14.3.2.26": ("sha1", 64, 20), "2.16.840.1.101.3.4.2.1": ("sha256", 64, 32),
                       "2.16.840.1.101.3.4.2.2": ("sha384", 128, 48), "2.16.840.1.101.3.4.2.3": ("sha512", 128, 64),
@@ -158,7 +158,10 @@ jobs:
                   if not b & 0x80: out.append(n); n = 0
               return ".".join(map(str, out))
           def p12_parse(data):
-              # parseable PKCS#12 PFX -> (payload, hash, v, u, salt, iterations, mac) else None
+              # parseable PKCS#12 PFX -> (payload, hash, v, u, salt, iterations, mac) else None.
+              # mac/hash/salt/iterations are None when the PFX legitimately has NO MacData
+              # (openssl -nomac / keystore.pkcs12.macAlgorithm=NONE): structurally whole, but
+              # integrity arbitration must then fall back to the historical-cert needle.
               try:
                   if data[:1] != b"\x30": return None
                   outer = DER(data)
@@ -174,6 +177,8 @@ jobs:
                   if t != 0xa0: return None
                   t, payload = DER(wrap).tlv()
                   if t != 0x04: return None                     # OCTET STRING = MAC input
+                  if top.o == len(top.d):                       # no MacData at all — allowed, integrity-free
+                      return payload, None, None, None, None, None, None
                   md = top.seq()                                # MacData
                   di = md.seq()                                 # DigestInfo
                   alg = di.seq()
@@ -196,15 +201,82 @@ jobs:
                   return None
           def p12_ok(data):
               return p12_parse(data) is not None
+          OID_DATA = "1.2.840.113549.1.7.1"
+          OID_ENCDATA = "1.2.840.113549.1.7.6"
+          def p12_deep_ok(data):
+              # deep DER-lattice walk of the AuthenticatedSafe: SEQUENCE OF ContentInfo, each
+              # walked to consumption (data -> SafeContents -> SafeBag lattice; encryptedData ->
+              # version/contentType/algId/ciphertext). Length-delimited content hides single-byte
+              # corruption from the ENVELOPE-only parse (needle-found shifted-window candidates);
+              # the full interior lattice does not.
+              p = p12_parse(data)
+              if p is None: return False
+              payload = p[0]
+              try:
+                  if payload[:1] != b"\x30": return False
+                  wrap = DER(payload)
+                  t, v0 = wrap.tlv()
+                  if t != 0x30 or wrap.o != len(payload): return False
+                  a = DER(v0)                       # AuthenticatedSafe
+                  if a.o >= len(a.d): return False
+                  while a.o < len(a.d):
+                      ci = a.seq()                  # ContentInfo
+                      t, v = ci.tlv()
+                      if t != 0x06: return False
+                      oid = read_oid(v)
+                      t, w = ci.tlv()
+                      if t != 0xa0: return False
+                      if ci.o != len(ci.d): return False
+                      inner = DER(w)
+                      if oid == OID_DATA:
+                          t, v2 = inner.tlv()       # OCTET STRING = SafeContents
+                          if t != 0x04: return False
+                          if inner.o != len(inner.d): return False
+                          if v2[:1] != b"\x30": return False
+                          scw = DER(v2)
+                          t, v3 = scw.tlv()
+                          if t != 0x30 or scw.o != len(v2): return False
+                          sc = DER(v3)              # SEQUENCE OF SafeBag
+                          if sc.o >= len(sc.d): return False
+                          while sc.o < len(sc.d):
+                              bag = sc.seq()
+                              t, v = bag.tlv()      # bagId OID
+                              if t != 0x06: return False
+                              t, v = bag.tlv()      # [0] EXPLICIT bag value (opaque)
+                              if t != 0xa0: return False
+                              while bag.o < len(bag.d):   # optional SET OF attributes etc.
+                                  bag.tlv()
+                      elif oid == OID_ENCDATA:
+                          ed = inner.seq()
+                          t, v = ed.tlv()           # version INTEGER
+                          if t != 0x02: return False
+                          eci = ed.seq()            # EncryptedContentInfo
+                          t, v = eci.tlv()          # contentType OID
+                          if t != 0x06: return False
+                          alg = eci.seq()           # AlgorithmIdentifier
+                          t, v = alg.tlv()
+                          if t != 0x06: return False
+                          t, v = eci.tlv()          # [0] IMPLICIT ciphertext
+                          if t != 0x80: return False
+                          if eci.o != len(eci.d): return False
+                      else:
+                          return False              # keystores carry data/encryptedData only
+                  return True
+              except Exception:
+                  return False
+          def p12_has_mac(data):
+              p = p12_parse(data)
+              return p is not None and p[6] is not None
           KDF_CACHE = {}   # one expensive KDF per unique (hash, iterations, salt, password shape);
                            # all true-tail candidates share the store's real MacData salt — caching
                            # turns ~1400 x 100k-iteration KDFs into ONE KDF + 1400 cheap HMACs.
           def p12_mac_ok(data, pw):
-              # RFC 7292 section 4: HMAC over authSafe payload, key from PKCS#12 KDF (App. B, ID=3)
+              # RFC 7292 section 4: HMAC over authSafe payload, key from PKCS#12 KDF (App. B, ID=3).
+              # True = validates / False = MAC present but wrong / None = store has no MAC.
               p = p12_parse(data)
               if p is None: return False
               payload, name, vv, uu, salt, ic, expect = p
-              import hashlib, hmac
+              if expect is None: return None
               ck = (name, ic, salt, pw)
               key = KDF_CACHE.get(ck)
               if key is None:
@@ -229,26 +301,133 @@ jobs:
                   key = key[:uu]
                   KDF_CACHE[ck] = key
               return hmac.new(key, payload, name).digest() == expect
+
           # ---- class-dispatched gates ----
           def ks_class(data):
               if data[:4] == bytes.fromhex("feedfeed"): return "JKS" if jks_ok(data) else "JKS?"
               if data[:1] == b"\x30": return "PKCS12" if p12_ok(data) else "PKCS12?"
               return None
           def struct_ok(data):
-              return jks_ok(data) or p12_ok(data)
+              return jks_ok(data) or (p12_ok(data) and p12_deep_ok(data))
+
+          def p12_probe(data):
+              # returns (whole, stop_label) — structural walk with named checkpoints; labels are
+              # content-free (identifiers/scalars only, never bytes)
+              try:
+                  if data[:1] != b"\x30": return False, "not-DER-SEQUENCE"
+                  outer = DER(data)
+                  t, v0 = outer.tlv()
+                  if t != 0x30: return False, "outer-not-seq"
+                  if outer.o != len(data): return False, "outer-length-residue-%dB" % abs(len(data) - outer.o)
+                  top = DER(v0)
+                  t, v = top.tlv()
+                  if t != 0x02: return False, "version-not-INTEGER"
+                  if int.from_bytes(v, "big") != 3: return False, "version-%d" % int.from_bytes(v, "big")
+                  ci = top.seq()
+                  t, v = ci.tlv()
+                  if t != 0x06: return False, "contentType-not-OID"
+                  if read_oid(v) != "1.2.840.113549.1.7.1": return False, "contentType-%s" % read_oid(v)
+                  t, wrap = ci.tlv()
+                  if t != 0xa0: return False, "no-[0]-wrapper"
+                  t, payload = DER(wrap).tlv()
+                  if t != 0x04: return False, "payload-not-OCTETSTRING"
+                  if top.o == len(top.d): return True, "WHOLE-noMacData"
+                  md = top.seq()
+                  di = md.seq()
+                  alg = di.seq()
+                  t, v = alg.tlv()
+                  if t != 0x06: return False, "macAlg-not-OID"
+                  if read_oid(v) not in HASH_OID: return False, "macAlg-UNSUPPORTED-%s" % read_oid(v)
+                  name, vv, uu = HASH_OID[read_oid(v)]
+                  t, expect = di.tlv()
+                  if t != 0x04: return False, "macDigest-not-OCTETSTRING"
+                  if len(expect) != uu: return False, "macDigest-len%d-exp%d" % (len(expect), uu)
+                  t, salt = md.tlv()
+                  if t != 0x04: return False, "macSalt-not-OCTETSTRING"
+                  if not 4 <= len(salt) <= 64: return False, "macSalt-%dB" % len(salt)
+                  if md.o < len(md.d):
+                      t, v = md.tlv()
+                      if t != 0x02: return False, "iterations-not-INTEGER"
+                      ic = int.from_bytes(v, "big")
+                      if not 1 <= ic <= 10_000_000: return False, "iterations-%d" % ic
+                  if top.o != len(top.d): return False, "trailing-after-MacData"
+                  return True, "WHOLE-withMac"
+              except Exception as e:
+                  return False, "parse-error-%s" % getattr(e, "args", ["?"])[0]
+
+          def jks_probe(data):
+              whole = jks_ok(data)
+              if whole: return True, "WHOLE-jks"
+              if data[:4] != bytes.fromhex("feedfeed"): return False, "no-JKS-magic"
+              return False, "jks-body-damaged"
+
+          def ks_probe(data):
+              if data[:4] == bytes.fromhex("feedfeed"): return jks_probe(data)
+              if data[:1] == b"\x30": return p12_probe(data)
+              return False, "unrecognized-bytes"
+
           RAW_PW = os.environ.get("RM_KS_PASS", "")
           PW_SHAPES = []                                   # paste injuries hit passwords too
           for _c in (RAW_PW, RAW_PW.rstrip("\r\n"), RAW_PW.strip()):
               if _c != "" and _c not in PW_SHAPES:
                   PW_SHAPES.append(_c)
           PW_USED = None
+          WIN_HOW = None
+          def store_has_integrity(data):
+              # JKS always carries the digest; PKCS12 does only when MacData is present.
+              return data[:4] == bytes.fromhex("feedfeed") or p12_has_mac(data)
+          def store_integrity_ok(data, pw):
+              r = p12_mac_ok(data, pw) if data[:1] == b"\x30" else jks_digest_ok(data, pw)
+              return r is True
           def store_digest_any(data):
               # the password SHAPE that validates the store's integrity (JKS digest / PKCS12 MAC)
+              if not store_has_integrity(data): return None
               for pw in PW_SHAPES:
-                  if data[:4] == bytes.fromhex("feedfeed"):
-                      if jks_digest_ok(data, pw): return pw
-                  elif p12_mac_ok(data, pw): return pw
+                  if store_integrity_ok(data, pw): return pw
               return None
+
+          # ---- the historical-cert NEEDLE: the exact X.509 that signed every shipped APK.
+          # Extracted at runtime from releases/ReplyMate-1.5.8.apk's META-INF/ARENA.RSA and
+          # checked against HISTORICAL_FINGERPRINT. Lets us arbitrate paste repairs by IDENTITY
+          # even when the integrity check cannot run (wrong/empty password, -nomac store).
+          NEEDLE = None
+          try:
+              fp = "".join(os.environ.get("HISTORICAL_FINGERPRINT", "").split(":")).lower()
+              import re as _re, tempfile
+              with zipfile.ZipFile("releases/ReplyMate-1.5.8.apk") as z:
+                  sig = next(n for n in z.namelist() if n.upper().endswith((".RSA", ".DSA", ".EC")))
+                  blob = z.read(sig)
+              with tempfile.NamedTemporaryFile(suffix=".rsa", delete=False) as tf:
+                  tf.write(blob); rsa_path = tf.name
+              pem = subprocess.run(["openssl", "pkcs7", "-inform", "DER", "-in", rsa_path, "-print_certs"],
+                                   capture_output=True, text=True, check=True).stdout
+              os.unlink(rsa_path)
+              for block in _re.findall(r"-----BEGIN CERTIFICATE-----\s+(.*?)\s+-----END CERTIFICATE-----", pem, _re.S):
+                  der = base64.b64decode(block)
+                  if hashlib.sha256(der).hexdigest() == fp:
+                      NEEDLE = der
+                      break
+              if NEEDLE is None:
+                  print("::notice::historical-cert needle not extractable from releases/ReplyMate-1.5.8.apk — falling back to integrity-only arbitration")
+          except Exception:
+              print("::notice::historical-cert needle extraction failed — falling back to integrity-only arbitration")
+
+          def accept(d):
+              # repair-candidate acceptance: structurally whole, then cryptographic identity.
+              # Integrity (JKS digest / PKCS12 MAC, keyed by the password) is the strongest
+              # arbiter and is checked FIRST. The historical-cert needle arbitrates whenever
+              # integrity cannot run (no usable password shapes / store carries no MAC) — and
+              # is only consulted as a fallback because PKCS12 encoders MAY encrypt the cert
+              # bags (JDK does), in which case the needle legitimately never appears.
+              if not struct_ok(d):
+                  return None
+              pw = store_digest_any(d)
+              if pw is not None:
+                  return ("integrity", pw)
+              if NEEDLE is not None and NEEDLE in d and not (store_has_integrity(d) and PW_SHAPES):
+                  return ("needle", None)
+              return None
+
           cands = [s]
           if "," in s[:64] and "base64" in s[:64].lower():      # data-URI paste
               cands.append(s.split(",", 1)[1])
@@ -262,28 +441,47 @@ jobs:
               if data is not None:
                   break
           if data is None:
-              # paste-injury recovery: exactly one stray/duplicated char (N≡1 mod 4).
-              # The JKS INTEGRITY DIGEST (keyed by RM_KS_PASS, whitespace shapes tolerated)
-              # arbitrates the ONE true winner — structure alone is provably insufficient
-              # for injuries inside the encrypted blob; unlock + fingerprint gates stay
-              # fail-closed after this regardless.
+              # paste-injury recovery, one stray/duplicated char (N≡1 mod 4)
               for c in cands:
-                  if len(c) % 4 != 1 or not PW_SHAPES:
-                      continue        # needs a password to arbitrate — else fail closed below
+                  if len(c) % 4 != 1:
+                      continue
                   for k in range(len(c)):
                       d = try_decode(c[:k] + c[k+1:])
-                      if d is not None and struct_ok(d):
-                          pw_hit = store_digest_any(d)
-                          if pw_hit is not None:
-                              data, PW_USED = d, pw_hit
-                              print(f"::warning::secret auto-recovered by removing 1 stray character (paste position {k}); re-paste a clean 'base64 -w0 arena.keystore' output next rotation")
-                              break
+                      if d is None:
+                          continue
+                      hit = accept(d)
+                      if hit is not None:
+                          data, PW_USED, WIN_HOW = d, hit[1], hit[0]
+                          arb = "integrity digest/MAC" if hit[0] == "integrity" else "the HISTORICAL ReplyMate certificate embedded in the store"
+                          print(f"::warning::secret auto-recovered by removing 1 stray character (paste position {k}), arbitrated by {arb}; re-paste a clean 'base64 -w0 arena.keystore' output next rotation")
+                          break
                   if data is not None:
                       break
+          if data is None and NEEDLE is not None:
+              # two-stray slow path: C(n,2) deletions, needle-prefiltered (only worth it when the
+              # historical certificate can arbitrate; integrity remains the post-filter).
+              for c in cands:
+                  if len(c) % 4 != 2 or len(c) > 6500:   # +2 stray chars on a ≡0-encoded store
+                      continue
+                  print("::notice::single-stray repair found nothing — scanning the two-stray space (needle-prefiltered; this can take a few minutes)")
+                  for i in range(len(c)):
+                      ci = c[:i] + c[i+1:]
+                      for j in range(i, len(ci)):
+                          d = try_decode(ci[:j] + ci[j+1:])
+                          if d is None or NEEDLE not in d:
+                              continue
+                          hit = accept(d)
+                          if hit is not None:
+                              data, PW_USED, WIN_HOW = d, hit[1], hit[0]
+                              print(f"::warning::secret auto-recovered from TWO stray characters, arbitrated by the historical-cert needle; RE-PASTE a clean 'base64 -w0 arena.keystore' output next rotation")
+                              break
+                      if data is not None:
+                          break
+                  break
           if data is None:
-              print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url after whitespace/quote/data-URI/URL-escape normalization.")
-              # content-free DECISIVE diagnostic scan over the single-deletion space
-              n_ks = 0
+              print("::error::REPLYMATE_KEYSTORE_B64 does not decode to a usable keystore after whitespace/quote/data-URI/URL-escape normalization and paste-injury repair.")
+              # content-free DECISIVE diagnostics
+              n_struct = n_needle = 0
               head_class = None
               for c in cands:
                   if len(c) % 4 != 1:
@@ -294,65 +492,64 @@ jobs:
                                     else "PKCS12/DER" if probe[:1] == b"\x30"
                                     else "PEM text" if probe[:5] == b"-----"
                                     else "unrecognized bytes")
+                  from collections import Counter as _Ctr
+                  stops = _Ctr()
                   for k in range(len(c)):
                       d = try_decode(c[:k] + c[k+1:])
-                      if d is not None and struct_ok(d):
-                          n_ks += 1
-              if n_ks > 0 and not PW_SHAPES:
-                  print(f"::error::  diagnosis: {n_ks} single-deletion reconstruction(s) ARE structurally valid keystores, but REPLYMATE_KEYSTORE_PASS is unset/empty — integrity arbitration is impossible without the password. Set the password secret; the stray character itself is auto-healable once it is.")
-              elif n_ks > 0:
-                  print(f"::error::  diagnosis: {n_ks} single-deletion reconstruction(s) ARE structurally valid keystores — but the integrity check (JKS digest / PKCS12 MAC) matches NONE of the password shapes tried. So either REPLYMATE_KEYSTORE_PASS is not this keystore's password, or the paste carries MORE than one stray character. (Integrity is keyed by the password; a wrong password can never validate a right store.)")
-              elif head_class is not None:
-                  print(f"::error::  diagnosis: content head decodes toward {head_class} but NO single-deletion reconstruction is a structurally whole keystore — the damage exceeds one stray character. Re-paste 'base64 -w0 arena.keystore' output exactly.")
-              # safe diagnostics: format class + distinct out-of-alphabet chars — never content/positions
-              if "BEGIN" in s[:12].upper():
-                  print("::error::  classification: PEM text — base64-encode the KEYSTORE FILE, not PEM")
-              elif s and all(c in "0123456789abcdefABCDEF" for c in s):
-                  print("::error::  classification: hex dump — base64 the keystore file directly, not hex")
-              elif len(s) < 1000:
-                  print(f"::error::  classification: too short ({len(s)} chars) — a JKS is ~2–4 KB → ~3–6 KB base64")
-              elif len(s) % 4 == 1:
-                  print(f"::error::  classification: {len(s)} chars ≡ 1 mod 4 — one stray/duplicated character was pasted; single-stray recovery found no integrity-valid keystore (JKS or PKCS12; needs REPLYMATE_KEYSTORE_PASS set correctly; >1 stray chars cannot be healed). Re-paste carefully.")
-              else:
-                  print(f"::error::  classification: {len(s)} chars, {s.count('%')} '%' signs.")
-              ok = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-_\"'\\%")
-              bad = sorted({c for c in s if c not in ok})
-              if bad:
-                  print("::error::  out-of-alphabet characters present (distinct set only): " + " ".join(f"U+{ord(c):04X}" for c in bad))
-              print("::error::correct value:  base64 -w0 arena.keystore  (Linux) /  base64 arena.keystore  (macOS) → paste the single-line output as the secret")
+                      if d is None:
+                          continue
+                      if NEEDLE is not None and NEEDLE in d:
+                          n_needle += 1
+                      whole, stop = ks_probe(d)
+                      if whole:
+                          n_struct += 1
+                      else:
+                          stops[stop] += 1
+                  top = ", ".join("%s x%d" % kv for kv in stops.most_common(3))
+                  if top:
+                      print(f"::error::  structural stop-reasons across one-stray reconstructions (counts only): {top}")
+                  break
+              if n_needle > 0:
+                  print(f"::error::  diagnosis: {n_needle} one-stray reconstruction(s) CONTAIN the historical ReplyMate certificate — the paste IS our keystore — but none is a usable store: integrity accepts none of the supplied password shapes (REPLYMATE_KEYSTORE_PASS is wrong for this keystore), or the body is damaged beyond a one-stray repair. Fix the password secret, or re-paste cleanly.")
+              elif NEEDLE is not None:
+                  print(f"::error::  diagnosis: NO one-stray{' OR two-stray' if True else ''} reconstruction contains the historical ReplyMate certificate (sha256 {os.environ.get('HISTORICAL_FINGERPRINT','')[:23]}…). The pasted secret is not a lightly-damaged copy of our keystore. Re-generate with 'base64 -w0 arena.keystore' and paste it fresh in one action.")
+              elif n_struct > 0:
+                  print(f"::error::  diagnosis: {n_struct} one-stray reconstruction(s) are structurally valid keystores, but integrity accepts none of the password shapes — REPLYMATE_KEYSTORE_PASS is wrong for this store, or damage exceeds what was repaired.")
+              head_note = f" (pasted content head decodes toward {head_class})" if head_class else ""
+              print(f"::error::  classification: {len(s)} chars ≡ {len(s) % 4} mod 4{head_note}.")
+              print("::error::correct value:  base64 -w0 arena.keystore  (Linux) /  base64 arena.keystore  (macOS) → paste the single-line output as the secret in ONE action")
               sys.exit(1)
           kc = ks_class(data)
-          if kc is None:
-              if data[:5] == b"-----":
-                  hint = "decoded content is PEM text — the secret must cover the keystore FILE bytes"
-              elif data[:1] == b"\x30":
-                  hint = "decoded content is DER but not a parseable PKCS#12 PFX (damaged, truncated, or an unsupported MAC algorithm)"
-              else:
-                  hint = "decoded bytes are neither a JKS store (FEEDFEED magic) nor a PKCS#12 PFX"
-              print(f"::error::{hint}")
-              sys.exit(1)
-          if not struct_ok(data):
-              print(f"::error::decoded bytes pass the {kc} header check but fail structural validation (corrupt/truncated keystore body)")
+          if kc is None or not struct_ok(data):
+              print("::error::decoded bytes are not a structurally whole JKS or PKCS#12 keystore")
               sys.exit(1)
           dig_pw = PW_USED if PW_USED is not None else store_digest_any(data)
+          integrity_present = store_has_integrity(data)
           if dig_pw is None:
-              if not PW_SHAPES:
+              if integrity_present and PW_SHAPES:
+                  if NEEDLE is not None and NEEDLE in data:
+                      print("::error::decisive: the store DOES carry the historical ReplyMate certificate \u2014 but its integrity (JKS digest / PKCS12 MAC) validates under NO supplied password shape. Either REPLYMATE_KEYSTORE_PASS is WRONG for this keystore, or the paste is corrupted beyond the repairable window. Fix the password secret or re-paste cleanly.")
+                  else:
+                      print(f"::error::{kc} integrity check MISMATCH \u2014 the decoded keystore body does not validate against REPLYMATE_KEYSTORE_PASS under any paste-tolerant shape (wrong password, or corruption beyond repair). Refusing to materialize.")
+                  sys.exit(1)
+              if integrity_present and not PW_SHAPES:
                   print("::warning::REPLYMATE_KEYSTORE_PASS unset/empty — integrity precheck skipped; the JVM unlock + fingerprint gate next step remains fail-closed")
               else:
-                  print(f"::error::{kc} integrity check MISMATCH — the decoded keystore body does not validate against REPLYMATE_KEYSTORE_PASS under any paste-tolerant shape (wrong password, or corruption beyond a single stray character). Refusing to materialize.")
-                  sys.exit(1)
-          else:
+                  print("::warning::store carries NO integrity MAC (openssl -nomac or macAlgorithm=NONE?) — the JVM unlock + fingerprint gate remains the arbiter")
+          # hand the WORKING password shape to downstream steps via 0600 runner-temp file ONLY
+          if dig_pw is not None:
               if dig_pw != RAW_PW:
                   print(f"::add-mask::{dig_pw}")
-                  print("::warning::REPLYMATE_KEYSTORE_PASS needed whitespace normalization to validate this keystore's integrity digest — downstream steps use the normalized value; re-set the secret without stray whitespace/line-breaks next rotation")
-              # hand the WORKING password shape to downstream steps via 0600 runner-temp file ONLY
+                  print("::warning::REPLYMATE_KEYSTORE_PASS needed whitespace normalization to validate this keystore's integrity — downstream steps use the normalized value; re-set the secret without stray whitespace/line-breaks next rotation")
               pwf = os.path.join(os.environ.get("RUNNER_TEMP", os.path.dirname(sys.argv[1]) or "."), ".kspw")
               with open(pwf, "w") as f:
                   f.write(dig_pw)
               os.chmod(pwf, 0o600)
           with open(sys.argv[1], "wb") as f:
               f.write(data)
-          print(f"keystore materialized at runner-temp path ({len(data)} bytes, {kc} structure + integrity valid)")
+          idnote = ("carries HISTORICAL certificate (visible)" if (NEEDLE is not None and NEEDLE in data)
+                    else "cert bytes not directly visible (encoder encrypts cert bags) — identity rests on the JVM gate")
+          print(f"keystore materialized at runner-temp path ({len(data)} bytes, {kc} structure valid, {idnote})")
           PYEOF
           chmod 600 "$KS_OUT"
           echo "KS_PATH=$KS_OUT" >> "$GITHUB_ENV"
