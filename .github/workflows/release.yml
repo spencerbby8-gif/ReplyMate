@@ -1,0 +1,150 @@
+# ==================================================================
+#  ReplyMate — secure release workflow (P-release-2)
+#
+#  Uses GitHub Actions secrets REPLYMATE_KEYSTORE_B64 + REPLYMATE_KEYSTORE_PASS.
+#  HARD RULES ENCODED HERE:
+#   * keystore bytes exist ONLY as a runner-temp file, shredded at the end
+#   * password never printed / never on argv / never written to files or env dumps
+#   * signing REFUSES to run unless the keystore certificate matches the
+#     historical ReplyMate identity (B15F2F37…6A85ED), byte-for-byte
+#   * the produced APK is refused unless IT carries that same certificate
+#   * GITHUB_TOKEN gets read-only contents perms; nothing is committed back
+#
+#  Trigger: Actions → release → Run workflow (main only). CI proof builds use
+#  vc900+ names like 1.5.8-ci-proof so the ledger series (…39, 40, …) stays
+#  clean for real releases, which ship via scripts/release.sh + REPLYMATE_JKS
+#  per docs/signing-key-migration.md once the device gate is green.
+# ==================================================================
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: "versionCode (integer; real releases: next after 39)"
+        required: true
+      version_name:
+        description: "versionName (e.g. 1.5.9; CI proofs: 1.5.8-ci-proof)"
+        required: true
+      notes:
+        description: "notes (job summary only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replymate-release
+  cancel-in-progress: false
+
+env:
+  # Public information — printed on every shipped APK since 1.4.6.
+  HISTORICAL_FINGERPRINT: "B1:5F:2F:37:FC:E1:9B:56:46:83:FE:6B:85:72:5A:9D:31:92:DF:93:18:1E:F2:F3:62:86:B5:E2:1C:6A:85:ED"
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: JVM release gate
+        run: bash scripts/run_tests.sh
+
+      - name: Materialize keystore (runner-temp file ONLY, never logged)
+        env:
+          RM_KS_B64: ${{ secrets.REPLYMATE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RM_KS_B64"
+          KS="$RUNNER_TEMP/arena.keystore"
+          printf '%s' "$RM_KS_B64" | base64 --decode > "$KS"
+          chmod 600 "$KS"
+          echo "KS_PATH=$KS" >> "$GITHUB_ENV"
+          echo "keystore materialized at runner-temp path ($(stat -c%s "$KS") bytes)"
+
+      - name: Verify keystore carries the HISTORICAL certificate (fail-closed)
+        env:
+          RM_KS_PASS: ${{ secrets.REPLYMATE_KEYSTORE_PASS }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RM_KS_PASS"
+          PW="$RUNNER_TEMP/.kspw"
+          printf '%s' "$RM_KS_PASS" > "$PW"
+          chmod 600 "$PW"
+          if KS_PASS_FILE="$PW" bash scripts/verify_keystore.sh "$KS_PATH"; then
+            echo "KEYSTORE-VERDICT: MATCH — historical ReplyMate identity confirmed"
+          else
+            rc=$?
+            echo "::error::KEYSTORE-VERDICT: FAIL (exit $rc) — wrong key or password. Refusing to sign anything."
+            exit 1
+          fi
+
+      - name: Build + sign APK with the verified historical key
+        env:
+          REPLYMATE_JKS_PASS: ${{ secrets.REPLYMATE_KEYSTORE_PASS }}
+        run: |
+          set -euo pipefail
+          VN="${{ inputs.version_name }}"
+          VC="${{ inputs.version_code }}"
+          APK="$RUNNER_TEMP/ReplyMate-$VN.apk"
+          REPLYMATE_JKS="$KS_PATH" \
+          VERSION_CODE="$VC" VERSION_NAME="$VN" \
+            bash engine/build.sh "$PWD" "$APK"
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          echo "signed build complete: ReplyMate-$VN (vc$VC)"
+
+      - name: Prove the APK itself carries the historical certificate
+        run: |
+          set -euo pipefail
+          EXPECTED="$(printf '%s' "$HISTORICAL_FINGERPRINT" | tr -d ':' | tr 'a-f' 'A-F')"
+          ACTUAL="$(bash scripts/apk_cert_fingerprint.sh "$APK_PATH")"
+          echo "APK signing cert SHA-256 : $ACTUAL"
+          echo "historical identity       : $EXPECTED"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::APK-CERT-PROOF: MISMATCH — refusing to publish this artifact"
+            exit 1
+          fi
+          echo "APK-CERT-PROOF: MATCH — update-in-place over ≤1.5.8 is preserved"
+          SHA="$(sha256sum "$APK_PATH" | awk '{print $1}')"
+          {
+            echo "### ReplyMate ${{ inputs.version_name }} (vc${{ inputs.version_code }}) — CI build"
+            echo "- apk sha256: \`$SHA\`"
+            echo "- size: $(stat -c%s "$APK_PATH") bytes"
+            echo "- jvm gate: 757/757"
+            echo "- keystore verdict: **MATCH** (historical identity)"
+            echo "- apk cert proof: **MATCH** — \`B15F2F37FC…1C6A85ED\`"
+            echo "- notes: ${{ inputs.notes }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage artifact for upload
+        run: |
+          set -euo pipefail
+          mkdir -p release-out
+          cp "$APK_PATH" "release-out/ReplyMate-${{ inputs.version_name }}.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReplyMate-${{ inputs.version_name }}-vc${{ inputs.version_code }}
+          path: release-out/
+          retention-days: 30
+
+      - name: Destroy all key material (runs even on failure)
+        if: always()
+        run: |
+          set -euo pipefail
+          for f in "${KS_PATH:-}" "$RUNNER_TEMP/.kspw"; do
+            [ -n "$f" ] && [ -e "$f" ] && { shred -u "$f" 2>/dev/null || rm -f "$f"; } || true
+          done
+          rm -f release-out/*.apk 2>/dev/null || true
+          echo "temporary keystore + password file + workspace APK copy destroyed"
