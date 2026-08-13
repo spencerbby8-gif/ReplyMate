@@ -63,14 +63,35 @@ jobs:
       - name: Materialize keystore (runner-temp file ONLY, never logged)
         env:
           RM_KS_B64: ${{ secrets.REPLYMATE_KEYSTORE_B64 }}
+          KS_OUT: ${{ runner.temp }}/arena.keystore
         run: |
           set -euo pipefail
           echo "::add-mask::$RM_KS_B64"
-          KS="$RUNNER_TEMP/arena.keystore"
-          printf '%s' "$RM_KS_B64" | base64 --decode > "$KS"
-          chmod 600 "$KS"
-          echo "KS_PATH=$KS" >> "$GITHUB_ENV"
-          echo "keystore materialized at runner-temp path ($(stat -c%s "$KS") bytes)"
+          chmod 600 "$KS_OUT" 2>/dev/null || true
+          python3 - "$KS_OUT" <<'PYEOF'
+          import base64, binascii, os, sys
+          s = "".join(os.environ["RM_KS_B64"].split())          # strip any whitespace
+          try:
+              data = base64.b64decode(s, validate=True)
+          except binascii.Error:
+              s2 = s.replace("-", "+").replace("_", "/")        # tolerate base64url
+              s2 += "=" * (-len(s2) % 4)                        # re-pad
+              try:
+                  data = base64.b64decode(s2, validate=True)
+                  print("note: secret decoded as base64url")
+              except binascii.Error:
+                  print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url")
+                  print("::error::re-encode with: base64 -w0 arena.keystore  (Linux) or: base64 arena.keystore (macOS)")
+                  sys.exit(1)
+          if data[:4] != bytes.fromhex("feedfeed"):
+              print("::error::decoded bytes are not a JKS store (bad magic) — the secret must be the keystore FILE itself, base64-encoded")
+              sys.exit(1)
+          with open(sys.argv[1], "wb") as f:
+              f.write(data)
+          print(f"keystore materialized at runner-temp path ({len(data)} bytes, JKS magic ok)")
+          PYEOF
+          chmod 600 "$KS_OUT"
+          echo "KS_PATH=$KS_OUT" >> "$GITHUB_ENV"
 
       - name: Verify keystore carries the HISTORICAL certificate (fail-closed)
         env:
