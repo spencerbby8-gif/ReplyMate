@@ -59,6 +59,14 @@ paragraph when the key was presumed lost — the audit reports quoted the
 "never regenerate" rule but not the password line; it lives on in git history
 and matches the engine's `REPLYMATE_JKS_PASS` default of `android`).
 
+**Store format — JKS or PKCS#12 are BOTH accepted everywhere.** Modern
+keytool defaults to PKCS#12, so your recovered `arena.keystore` may well be a
+`.p12`-format store even with a `.keystore` name. `scripts/verify_keystore.sh`
+auto-detects by magic (FE ED FE ED = JKS; 0x30 = PKCS#12), `engine/build.sh`
+passes the detected `--ks-type` to apksigner, and the release workflow's
+materialize step validates the store's integrity for either format (JKS digest
+resp. PKCS#12 MAC) using the password shapes from `REPLYMATE_KEYSTORE_PASS`.
+
 **Verify BEFORE use** (never trust an unverified store):
 
 ```bash

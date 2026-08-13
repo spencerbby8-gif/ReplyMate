@@ -137,8 +137,17 @@ if [ -n "${REPLYMATE_JKS:-}" ] && [ -f "${REPLYMATE_JKS:-}" ]; then
   # Recovery path (P-release-2): if the original arena.keystore is ever
   # recovered, point REPLYMATE_JKS at it and update-continuity over ≤1.5.8
   # is restored. Pass defaults to the historic 'android'.
-  log "signing with PROVIDED keystore (recovery path): $REPLYMATE_JKS"
-  "$APKSIGNER" sign --ks "$REPLYMATE_JKS" \
+  # The store may be JKS or PKCS#12 — detect by magic and say so explicitly
+  # (without --ks-type apksigner uses the JVM default type, which silently
+  # picks wrong across JDK versions).
+  MAGIC="$(od -An -tx1 -N4 "$REPLYMATE_JKS" | tr -d ' \n')"
+  case "$MAGIC" in
+    feedfeed) REPLYMATE_JKS_TYPE="JKS" ;;
+    30*)      REPLYMATE_JKS_TYPE="PKCS12" ;;
+    *)        REPLYMATE_JKS_TYPE="${REPLYMATE_JKS_TYPE:-JKS}" ;;
+  esac
+  log "signing with PROVIDED keystore (recovery path, type=$REPLYMATE_JKS_TYPE): $REPLYMATE_JKS"
+  "$APKSIGNER" sign --ks "$REPLYMATE_JKS" --ks-type "$REPLYMATE_JKS_TYPE" \
     --ks-pass "pass:${REPLYMATE_JKS_PASS:-android}" \
     --v1-signing-enabled true --v2-signing-enabled true \
     --out "$OUT" "$BUILD/aligned.apk"

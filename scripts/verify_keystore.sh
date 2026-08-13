@@ -48,9 +48,19 @@ public class VerifyKs {
         String path = a[0], expected = a[1];
         char[] pass = System.getenv("KS_PASS").toCharArray();
         KeyStore ks;
+        String type;
         try {
-            ks = KeyStore.getInstance("JKS");
+            // JKS or PKCS#12 — detect by magic (FE ED FE ED = JKS; 0x30 = DER SEQUENCE = PKCS#12)
+            byte[] head = new byte[4];
+            try (FileInputStream fin = new FileInputStream(path)) {
+                int n = fin.read(head);
+                if (n < 4) throw new java.io.IOException("store too short");
+            }
+            type = ((head[0] & 0xFF) == 0xFE && (head[1] & 0xFF) == 0xED
+                 && (head[2] & 0xFF) == 0xFE && (head[3] & 0xFF) == 0xED) ? "JKS" : "PKCS12";
+            ks = KeyStore.getInstance(type);
             try (FileInputStream in = new FileInputStream(path)) { ks.load(in, pass); }
+            System.out.println("store-type  = " + type);
         } catch (Exception e) {
             System.out.println("RESULT=UNLOCK-FAILED  (" + e.getClass().getSimpleName() + ": wrong password or corrupt store)");
             System.exit(3);
