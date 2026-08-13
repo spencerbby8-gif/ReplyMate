@@ -366,6 +366,27 @@ jobs:
               if data[:1] == b"\x30": return p12_probe(data)
               return False, "unrecognized-bytes"
 
+          def geometry_note(blob):
+              # content-free: DER header claim vs decoded size — truncation arithmetic only
+              if blob is None or blob[:1] != b"\x30" or len(blob) < 9 or not (blob[1] & 0x80):
+                  return None
+              nlb = blob[1] & 0x7f
+              if not 0 < nlb <= 4 or 2 + nlb > len(blob):
+                  return None
+              L = int.from_bytes(blob[2:2+nlb], "big")
+              full = 2 + nlb + L
+              if not 100 <= full <= 200000:
+                  return None
+              shortfall = full - len(blob)
+              if shortfall > 0:
+                  return (f"the store's DER header claims {full} bytes total; this paste decodes to {len(blob)} — "
+                          f"shortfall ~{shortfall} bytes (~{((shortfall + 2) // 3) * 4} base64 characters). The paste looks TRUNCATED "
+                          f"(part of the store never made it into the secret). Deletion-repair cannot invent missing characters — "
+                          f"re-paste the COMPLETE output, verifying with:  base64 -w0 arena.keystore | wc -c")
+              if shortfall == 0:
+                  return "paste length exactly matches the store's DER header claim — the damage is in the content, not the length."
+              return f"paste OVERFLOWS the store's DER header claim by {-shortfall} bytes — trailing junk or a wrong tail."
+
           RAW_PW = os.environ.get("RM_KS_PASS", "")
           PW_SHAPES = []                                   # paste injuries hit passwords too
           for _c in (RAW_PW, RAW_PW.rstrip("\r\n"), RAW_PW.strip()):
@@ -508,6 +529,10 @@ jobs:
                   top = ", ".join("%s x%d" % kv for kv in stops.most_common(3))
                   if top:
                       print(f"::error::  structural stop-reasons across one-stray reconstructions (counts only): {top}")
+                  probe2 = try_decode(c[:2500] + c[2501:])   # head bytes pristine unless the damage sits in the first ~6 chars
+                  gn = geometry_note(probe2)
+                  if gn:
+                      print(f"::error::  geometry: {gn}")
                   break
               if n_needle > 0:
                   print(f"::error::  diagnosis: {n_needle} one-stray reconstruction(s) CONTAIN the historical ReplyMate certificate — the paste IS our keystore — but none is a usable store: integrity accepts none of the supplied password shapes (REPLYMATE_KEYSTORE_PASS is wrong for this keystore), or the body is damaged beyond a one-stray repair. Fix the password secret, or re-paste cleanly.")
@@ -522,6 +547,9 @@ jobs:
           kc = ks_class(data)
           if kc is None or not struct_ok(data):
               print("::error::decoded bytes are not a structurally whole JKS or PKCS#12 keystore")
+              gn = geometry_note(data)
+              if gn:
+                  print(f"::error::  geometry: {gn}")
               sys.exit(1)
           dig_pw = PW_USED if PW_USED is not None else store_digest_any(data)
           integrity_present = store_has_integrity(data)
