@@ -48,17 +48,39 @@ build:
 
 ## 4. Recovery path (if the original key resurfaces)
 
+**Password:** the keystore password WAS documented all along in the repo's own
+build docs — `docs/BLUEPRINT.md` §10, in every version up to and including the
+1.5.8 release commit (`git show fbab98a:docs/BLUEPRINT.md`, line 458):
+
+> `**Signing:** existing persistent key /home/user/apk-engine/keystore/arena.keystore (pass `android`).`
+
+So: store password = `android` (the P-release-1 BLUEPRINT rewrite dropped that
+paragraph when the key was presumed lost — the audit reports quoted the
+"never regenerate" rule but not the password line; it lives on in git history
+and matches the engine's `REPLYMATE_JKS_PASS` default of `android`).
+
+**Verify BEFORE use** (never trust an unverified store):
+
 ```bash
-# place your recovered arena.keystore anywhere outside git, then:
-REPLYMATE_JKS=/path/to/arena.keystore REPLYMATE_JKS_PASS=android \
-  bash scripts/release.sh 40 1.5.9 "…"
-# verify identity matches the lost lineage before shipping:
-#   expect CERT_SHA256 = b15f2f37…c6a85ed  (old cert → update-in-place works)
+# prompts silently; password never touches argv/logs/history — or use a 600-perm file:
+#   KS_PASS_FILE=/path/to/pwfile scripts/verify_keystore.sh /path/to/arena.keystore
+scripts/verify_keystore.sh /path/to/arena.keystore
+# expect: cert-sha256 = B1:5F:2F:37:FC:E1:9B:56:46:83:FE:6B:85:72:5A:9D:
+#                        31:92:DF:93:18:1E:F2:F3:62:86:B5:E2:1C:6A:85:ED
+#         RESULT=MATCH
 ```
 
-The engine supports this natively (see `engine/README.md`). If the fingerprint
-shows the **b15f…** cert, update-in-place over ≤1.5.8 is restored and §2's
-data-loss column disappears.
+**Then build on the recovered identity** (the keystore stays where you keep
+it — it is NOT copied into git; `*.keystore` is gitignore-blocked anyway):
+
+```bash
+REPLYMATE_JKS=/path/to/arena.keystore \
+  bash scripts/release.sh 40 1.5.9 "…"   # REPLYMATE_JKS_PASS defaults to android
+# confirm the build output prints CERT_SHA256 = b15f2f37…c6a85ed
+```
+
+If the fingerprint shows the **b15f…** cert, update-in-place over ≤1.5.8 is
+restored and §2's data-loss column disappears.
 
 ## 5. Device-plan consequence
 
