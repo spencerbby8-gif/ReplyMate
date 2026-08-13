@@ -4,7 +4,8 @@
 #  Uses GitHub Actions secrets REPLYMATE_KEYSTORE_B64 + REPLYMATE_KEYSTORE_PASS.
 #  HARD RULES ENCODED HERE:
 #   * keystore bytes exist ONLY as a runner-temp file, shredded at the end
-#   * password never printed / never on argv / never written to files or env dumps
+#   * password never printed / never logged; its WORKING shape (whitespace
+#     injuries healed) lives only in a 0600 runner-temp file, shredded at the end
 #   * signing REFUSES to run unless the keystore certificate matches the
 #     historical ReplyMate identity (B15F2F37…6A85ED), byte-for-byte
 #   * the produced APK is refused unless IT carries that same certificate
@@ -115,21 +116,32 @@ jobs:
                   return len(data) - off == 20            # SHA-1 integrity digest trails the store
               except Exception:
                   return False
-          def jks_digest_ok(data):
+          def jks_digest_ok(data, pw):
               # JKS integrity digest (OpenJDK legacy JKS): SHA-1 over
               # password(UTF-16BE) + "Mighty Aphrodite" + store-bytes[:-20] == trailing 20 bytes.
               # Cryptographically identifies the ONE true reconstruction — structure alone cannot,
               # because a late paste injury hides inside the opaque encrypted-key blob yet keeps
-              # the original trailing digest bytes. Returns None when arbitration is impossible.
+              # the original trailing digest bytes.
               import hashlib
-              pw = os.environ.get("RM_KS_PASS", "")
-              if pw == "" or len(data) < 20:
-                  return None
+              if len(data) < 20:
+                  return False
               try:
                   t = hashlib.sha1(pw.encode("utf-16-be") + b"Mighty Aphrodite" + data[:-20]).digest()
                   return t == data[-20:]
               except Exception:
                   return False
+          RAW_PW = os.environ.get("RM_KS_PASS", "")
+          PW_SHAPES = []                                   # paste injuries hit passwords too
+          for _c in (RAW_PW, RAW_PW.rstrip("\r\n"), RAW_PW.strip()):
+              if _c != "" and _c not in PW_SHAPES:
+                  PW_SHAPES.append(_c)
+          PW_USED = None
+          def jks_digest_any(data):
+              # the password SHAPE that validates the store's integrity digest, else None
+              for pw in PW_SHAPES:
+                  if jks_digest_ok(data, pw):
+                      return pw
+              return None
           cands = [s]
           if "," in s[:64] and "base64" in s[:64].lower():      # data-URI paste
               cands.append(s.split(",", 1)[1])
@@ -144,24 +156,49 @@ jobs:
                   break
           if data is None:
               # paste-injury recovery: exactly one stray/duplicated char (N≡1 mod 4).
-              # The JKS INTEGRITY DIGEST (keyed by RM_KS_PASS) arbitrates the ONE true winner —
-              # structure alone is provably insufficient for injuries inside the encrypted blob;
-              # unlock + fingerprint gates stay fail-closed after this regardless.
+              # The JKS INTEGRITY DIGEST (keyed by RM_KS_PASS, whitespace shapes tolerated)
+              # arbitrates the ONE true winner — structure alone is provably insufficient
+              # for injuries inside the encrypted blob; unlock + fingerprint gates stay
+              # fail-closed after this regardless.
               for c in cands:
-                  if len(c) % 4 != 1:
-                      continue
-                  if os.environ.get("RM_KS_PASS", "") == "":
-                      continue   # cannot arbitrate without the password — fail closed below
+                  if len(c) % 4 != 1 or not PW_SHAPES:
+                      continue        # needs a password to arbitrate — else fail closed below
                   for k in range(len(c)):
                       d = try_decode(c[:k] + c[k+1:])
-                      if d is not None and jks_ok(d) and jks_digest_ok(d):
-                          data = d
-                          print(f"::warning::secret auto-recovered by removing 1 stray character (paste position {k}); re-paste a clean 'base64 -w0 arena.keystore' output next rotation")
-                          break
+                      if d is not None and jks_ok(d):
+                          pw_hit = jks_digest_any(d)
+                          if pw_hit is not None:
+                              data, PW_USED = d, pw_hit
+                              print(f"::warning::secret auto-recovered by removing 1 stray character (paste position {k}); re-paste a clean 'base64 -w0 arena.keystore' output next rotation")
+                              break
                   if data is not None:
                       break
           if data is None:
               print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url after whitespace/quote/data-URI/URL-escape normalization.")
+              # content-free DECISIVE diagnostic scan over the single-deletion space
+              n_jks = 0
+              head_class = None
+              for c in cands:
+                  if len(c) % 4 != 1:
+                      continue
+                  probe = try_decode(c[:-1])      # head bytes preserved unless the stray sits in the first 6 chars
+                  if probe is not None and head_class is None:
+                      head_class = ("JKS" if probe[:4] == bytes.fromhex("feedfeed")
+                                    else "PKCS12/DER blob" if probe[:2] == b"0\x82"
+                                    else "PEM text" if probe[:5] == b"-----"
+                                    else "unrecognized bytes")
+                  for k in range(len(c)):
+                      d = try_decode(c[:k] + c[k+1:])
+                      if d is not None and jks_ok(d):
+                          n_jks += 1
+              if n_jks > 0 and not PW_SHAPES:
+                  print(f"::error::  diagnosis: {n_jks} single-deletion reconstruction(s) ARE structurally valid JKS, but REPLYMATE_KEYSTORE_PASS is unset/empty — digest arbitration is impossible without the password. Set the password secret; the stray character itself is auto-healable once it is.")
+              elif n_jks > 0:
+                  print(f"::error::  diagnosis: {n_jks} single-deletion reconstruction(s) ARE structurally valid JKS — but the integrity digest matches NONE of the password shapes tried. So either REPLYMATE_KEYSTORE_PASS is not this keystore's password, or the paste carries MORE than one stray character. (The digest is keyed by the password; a wrong password can never validate a right store.)")
+              elif head_class == "PKCS12/DER blob":
+                  print("::error::  diagnosis: the paste decodes toward a PKCS#12/DER blob, NOT a Java KeyStore — modern keytool defaults to PKCS12. Convert first:  keytool -importkeystore -srckeystore YOURSTORE.p12 -destkeystore arena.keystore -deststoretype JKS  then re-run  base64 -w0 arena.keystore  and re-paste.")
+              elif head_class == "JKS":
+                  print("::error::  diagnosis: content is JKS-headed but NO single-deletion reconstruction is structurally whole — the damage exceeds one stray character. Re-paste 'base64 -w0 arena.keystore' output exactly.")
               # safe diagnostics: format class + distinct out-of-alphabet chars — never content/positions
               if "BEGIN" in s[:12].upper():
                   print("::error::  classification: PEM text — base64-encode the KEYSTORE FILE, not PEM")
@@ -191,12 +228,22 @@ jobs:
           if not jks_ok(data):
               print("::error::decoded bytes pass the JKS magic check but fail structural validation (corrupt/truncated keystore body)")
               sys.exit(1)
-          dig = jks_digest_ok(data)
-          if dig is False:
-              print("::error::JKS integrity digest MISMATCH — the decoded keystore body does not validate against REPLYMATE_KEYSTORE_PASS (wrong password, or corruption beyond a single stray character). Refusing to materialize.")
-              sys.exit(1)
-          if dig is None:
-              print("::warning::REPLYMATE_KEYSTORE_PASS unset/empty — integrity-digest precheck skipped; the JVM unlock + fingerprint gate next step remains fail-closed")
+          dig_pw = PW_USED if PW_USED is not None else jks_digest_any(data)
+          if dig_pw is None:
+              if not PW_SHAPES:
+                  print("::warning::REPLYMATE_KEYSTORE_PASS unset/empty — integrity-digest precheck skipped; the JVM unlock + fingerprint gate next step remains fail-closed")
+              else:
+                  print("::error::JKS integrity digest MISMATCH — the decoded keystore body does not validate against REPLYMATE_KEYSTORE_PASS under any paste-tolerant shape (wrong password, or corruption beyond a single stray character). Refusing to materialize.")
+                  sys.exit(1)
+          else:
+              if dig_pw != RAW_PW:
+                  print(f"::add-mask::{dig_pw}")
+                  print("::warning::REPLYMATE_KEYSTORE_PASS needed whitespace normalization to validate this keystore's integrity digest — downstream steps use the normalized value; re-set the secret without stray whitespace/line-breaks next rotation")
+              # hand the WORKING password shape to downstream steps via 0600 runner-temp file ONLY
+              pwf = os.path.join(os.environ.get("RUNNER_TEMP", os.path.dirname(sys.argv[1]) or "."), ".kspw")
+              with open(pwf, "w") as f:
+                  f.write(dig_pw)
+              os.chmod(pwf, 0o600)
           with open(sys.argv[1], "wb") as f:
               f.write(data)
           print(f"keystore materialized at runner-temp path ({len(data)} bytes, JKS structure + integrity digest valid)")
@@ -211,7 +258,9 @@ jobs:
           set -euo pipefail
           echo "::add-mask::$RM_KS_PASS"
           PW="$RUNNER_TEMP/.kspw"
-          printf '%s' "$RM_KS_PASS" > "$PW"
+          if [ ! -f "$PW" ]; then
+            printf '%s' "$RM_KS_PASS" > "$PW"
+          fi
           chmod 600 "$PW"
           if KS_PASS_FILE="$PW" bash scripts/verify_keystore.sh "$KS_PATH"; then
             echo "KEYSTORE-VERDICT: MATCH — historical ReplyMate identity confirmed"
@@ -226,6 +275,12 @@ jobs:
           REPLYMATE_JKS_PASS: ${{ secrets.REPLYMATE_KEYSTORE_PASS }}
         run: |
           set -euo pipefail
+          # the materialize step (when the digest validated) left the WORKING password
+          # shape in a 0600 runner-temp file — prefer it over the raw secret
+          if [ -f "$RUNNER_TEMP/.kspw" ]; then
+            REPLYMATE_JKS_PASS="$(cat "$RUNNER_TEMP/.kspw")"
+            export REPLYMATE_JKS_PASS
+          fi
           VN="${{ inputs.version_name }}"
           VC="${{ inputs.version_code }}"
           APK="$RUNNER_TEMP/ReplyMate-$VN.apk"
