@@ -65,12 +65,34 @@ runbook row D9, and any D9 failure is blocking per the phase order.
 - No product code touched (`src/`, `tests/`, `res/`, manifest untouched).
 - No branches deleted (arena line archived via bundle from P-release-1).
 
+## CI signing-continuity proof (workflow `release.yml`) — forensics log
+
+The secure release workflow is live and fail-closed: JVM gate 757/757 green on
+every run, nothing signed, nothing released, no keys generated anywhere.
+Keystore materialization from `REPLYMATE_KEYSTORE_B64`/`REPLYMATE_KEYSTORE_PASS`
+is hardened (dual-format JKS+PKCS#12, integrity/MAC arbitration of paste
+injuries, historical-cert needle, two-stray scan, end-exact structure, content
+free diagnostics).
+
+Owner actions to unblock (run history newest → oldest):
+
+- Run `31740863887` (bf13675): paste decodes to 2433 bytes but the store's own
+  DER header claims 2469 — **the paste is truncated by ~47 base64 characters**
+  (`base64 -w0 arena.keystore | wc -c` on the real file must equal ~3292; the
+  secret held 3245). No 1- or 2-stray reconstruction contains the historical
+  certificate bytes anywhere. **Fix: re-paste the complete single-line output
+  in one action; verify the character count before saving the secret.**
+- Runs `31721906092` / `31738465853`: same paste; earlier builds of the
+  classifier proved PKCS#12 format + absence of one-stray repairs.
+
 ## Remaining blockers (honest list)
 
-1. **Owner:** run the device baseline runbook; reply per its completion rule.
-2. **Owner:** confirm no personal backup of the original keystore (else use
+1. **Owner:** re-paste `REPLYMATE_KEYSTORE_B64` complete (~3292 chars; it was
+   truncated at 3245) — then the CI proof re-runs.
+2. **Owner:** run the device baseline runbook; reply per its completion rule.
+3. **Owner:** confirm no personal backup of the original keystore (else use
    the recovery path BEFORE the first post-1.5.8 release).
-3. **Owner:** secure an offline backup of the new `secrets/` key.
-4. Rotate the GitHub PAT (was shared in plaintext chat in P-release-1).
-5. Future work (not blocking): restore an in-repo device-stack harness
+4. **Owner:** secure an offline backup of the new `secrets/` key.
+5. Rotate the GitHub PAT (was shared in plaintext chat in P-release-1).
+6. Future work (not blocking): restore an in-repo device-stack harness
    (`tests/device/`) so rows like D7 gain automated pins again.
