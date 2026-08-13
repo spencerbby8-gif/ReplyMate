@@ -70,30 +70,46 @@ jobs:
           chmod 600 "$KS_OUT" 2>/dev/null || true
           python3 - "$KS_OUT" <<'PYEOF'
           import base64, binascii, os, sys
-          s = "".join(os.environ["RM_KS_B64"].split())          # strip any whitespace
-          s = s.strip('"').strip("'")                           # tolerate copy-paste quotes
+          from urllib.parse import unquote
+          s = "".join(os.environ["RM_KS_B64"].split())          # strip whitespace
+          s = s.strip('"').strip("'")                           # copy-paste quotes
           def try_decode(x):
-              try:
-                  return base64.b64decode(x, validate=True)
-              except binascii.Error:
-                  x2 = x.replace("-", "+").replace("_", "/")    # tolerate base64url
-                  x2 += "=" * (-len(x2) % 4)                    # re-pad
+              for cand in (x, x.replace("-", "+").replace("_", "/")):   # std then b64url
+                  cand += "=" * (-len(cand) % 4)                        # re-pad
                   try:
-                      return base64.b64decode(x2, validate=True)
+                      return base64.b64decode(cand, validate=True)
                   except binascii.Error:
-                      return None
-          data = try_decode(s)
+                      continue
+              return None
+          cands = [s]
+          if "," in s[:64] and "base64" in s[:64].lower():      # data-URI paste
+              cands.append(s.split(",", 1)[1])
+          u = unquote(s)                                        # URL-escaped paste (%2B/%2F/%3D)
+          if u != s: cands.append(u)
+          lite = s.replace("\\n", "").replace("\\r", "")        # literal \n paste
+          if lite != s: cands.append(lite)
+          data = None
+          for c in cands:
+              data = try_decode(c)
+              if data is not None:
+                  break
           if data is None:
-              print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url. Safe classification of what was pasted:")
+              print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url after whitespace/quote/data-URI/URL-escape normalization.")
+              # safe diagnostics: format class + distinct out-of-alphabet chars — never content/positions
               if "BEGIN" in s[:12].upper():
-                  print("::error::  → looks like PEM text — base64-encode the KEYSTORE FILE, not PEM")
+                  print("::error::  classification: PEM text — base64-encode the KEYSTORE FILE, not PEM")
               elif s and all(c in "0123456789abcdefABCDEF" for c in s):
-                  print("::error::  → looks like hex — base64 the keystore file directly, not a hex dump")
+                  print("::error::  classification: hex dump — base64 the keystore file directly, not hex")
               elif len(s) < 1000:
-                  print(f"::error::  → suspiciously short ({len(s)} chars) — a JKS is ~2–4 KB → ~3–6 KB of base64")
+                  print(f"::error::  classification: too short ({len(s)} chars) — a JKS is ~2–4 KB → ~3–6 KB base64")
               else:
-                  print(f"::error::  → {len(s)} chars, unknown encoding")
-              print("::error::correct value:  base64 -w0 arena.keystore  (Linux) /  base64 arena.keystore  (macOS) → paste the single-line output")
+                  pct = s.count("%")
+                  print(f"::error::  classification: {len(s)} chars, {pct} '%' signs.")
+              ok = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-_\"'\\%")
+              bad = sorted({c for c in s if c not in ok})
+              if bad:
+                  print("::error::  out-of-alphabet characters present (distinct set only): " + " ".join(f"U+{ord(c):04X}" for c in bad))
+              print("::error::correct value:  base64 -w0 arena.keystore  (Linux) /  base64 arena.keystore  (macOS) → paste the single-line output as the secret")
               sys.exit(1)
           if data[:4] != bytes.fromhex("feedfeed"):
               if data[:5] == b"-----":
