@@ -63,6 +63,7 @@ jobs:
       - name: Materialize keystore (runner-temp file ONLY, never logged)
         env:
           RM_KS_B64: ${{ secrets.REPLYMATE_KEYSTORE_B64 }}
+          RM_KS_PASS: ${{ secrets.REPLYMATE_KEYSTORE_PASS }}
           KS_OUT: ${{ runner.temp }}/arena.keystore
         run: |
           set -euo pipefail
@@ -81,6 +82,54 @@ jobs:
                   except binascii.Error:
                       continue
               return None
+          def jks_ok(data):
+              # full JKS structural walk (no password needed to parse): magic, version 2,
+              # entry walk (alias/ts/encrypted-key/cert-chain), trailing 20-byte integrity digest.
+              import struct
+              try:
+                  if data[:4] != bytes.fromhex("feedfeed"): return False
+                  off = 8  # magic + version(2)
+                  count = struct.unpack(">I", data[off:off+4])[0]; off += 4
+                  if not 1 <= count <= 10000: return False
+                  def utf(d, o):
+                      ln = struct.unpack(">H", d[o:o+2])[0]
+                      return o + 2 + ln
+                  for _ in range(count):
+                      tag = struct.unpack(">I", data[off:off+4])[0]; off += 4
+                      if tag == 1:                       # private-key entry
+                          off = utf(data, off)           # alias
+                          off += 8                        # timestamp
+                          klen = struct.unpack(">I", data[off:off+4])[0]; off += 4 + klen
+                          nc = struct.unpack(">I", data[off:off+4])[0]; off += 4
+                          if not 1 <= nc <= 1000: return False
+                          for _ in range(nc):
+                              off = utf(data, off)        # cert type
+                              clen = struct.unpack(">I", data[off:off+4])[0]; off += 4 + clen
+                      elif tag == 2:                     # trusted-cert entry
+                          off = utf(data, off); off += 8
+                          off = utf(data, off)
+                          clen = struct.unpack(">I", data[off:off+4])[0]; off += 4 + clen
+                      else:
+                          return False
+                      if off > len(data): return False
+                  return len(data) - off == 20            # SHA-1 integrity digest trails the store
+              except Exception:
+                  return False
+          def jks_digest_ok(data):
+              # JKS integrity digest (OpenJDK legacy JKS): SHA-1 over
+              # password(UTF-16BE) + "Mighty Aphrodite" + store-bytes[:-20] == trailing 20 bytes.
+              # Cryptographically identifies the ONE true reconstruction — structure alone cannot,
+              # because a late paste injury hides inside the opaque encrypted-key blob yet keeps
+              # the original trailing digest bytes. Returns None when arbitration is impossible.
+              import hashlib
+              pw = os.environ.get("RM_KS_PASS", "")
+              if pw == "" or len(data) < 20:
+                  return None
+              try:
+                  t = hashlib.sha1(pw.encode("utf-16-be") + b"Mighty Aphrodite" + data[:-20]).digest()
+                  return t == data[-20:]
+              except Exception:
+                  return False
           cands = [s]
           if "," in s[:64] and "base64" in s[:64].lower():      # data-URI paste
               cands.append(s.split(",", 1)[1])
@@ -94,6 +143,24 @@ jobs:
               if data is not None:
                   break
           if data is None:
+              # paste-injury recovery: exactly one stray/duplicated char (N≡1 mod 4).
+              # The JKS INTEGRITY DIGEST (keyed by RM_KS_PASS) arbitrates the ONE true winner —
+              # structure alone is provably insufficient for injuries inside the encrypted blob;
+              # unlock + fingerprint gates stay fail-closed after this regardless.
+              for c in cands:
+                  if len(c) % 4 != 1:
+                      continue
+                  if os.environ.get("RM_KS_PASS", "") == "":
+                      continue   # cannot arbitrate without the password — fail closed below
+                  for k in range(len(c)):
+                      d = try_decode(c[:k] + c[k+1:])
+                      if d is not None and jks_ok(d) and jks_digest_ok(d):
+                          data = d
+                          print(f"::warning::secret auto-recovered by removing 1 stray character (paste position {k}); re-paste a clean 'base64 -w0 arena.keystore' output next rotation")
+                          break
+                  if data is not None:
+                      break
+          if data is None:
               print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url after whitespace/quote/data-URI/URL-escape normalization.")
               # safe diagnostics: format class + distinct out-of-alphabet chars — never content/positions
               if "BEGIN" in s[:12].upper():
@@ -102,9 +169,10 @@ jobs:
                   print("::error::  classification: hex dump — base64 the keystore file directly, not hex")
               elif len(s) < 1000:
                   print(f"::error::  classification: too short ({len(s)} chars) — a JKS is ~2–4 KB → ~3–6 KB base64")
+              elif len(s) % 4 == 1:
+                  print(f"::error::  classification: {len(s)} chars ≡ 1 mod 4 — one stray/duplicated character was pasted; single-stray recovery found no digest-valid JKS (needs REPLYMATE_KEYSTORE_PASS set correctly; >1 stray chars cannot be healed). Re-paste carefully.")
               else:
-                  pct = s.count("%")
-                  print(f"::error::  classification: {len(s)} chars, {pct} '%' signs.")
+                  print(f"::error::  classification: {len(s)} chars, {s.count('%')} '%' signs.")
               ok = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-_\"'\\%")
               bad = sorted({c for c in s if c not in ok})
               if bad:
@@ -120,9 +188,18 @@ jobs:
                   hint = "decoded bytes are not a JKS store"
               print(f"::error::{hint}")
               sys.exit(1)
+          if not jks_ok(data):
+              print("::error::decoded bytes pass the JKS magic check but fail structural validation (corrupt/truncated keystore body)")
+              sys.exit(1)
+          dig = jks_digest_ok(data)
+          if dig is False:
+              print("::error::JKS integrity digest MISMATCH — the decoded keystore body does not validate against REPLYMATE_KEYSTORE_PASS (wrong password, or corruption beyond a single stray character). Refusing to materialize.")
+              sys.exit(1)
+          if dig is None:
+              print("::warning::REPLYMATE_KEYSTORE_PASS unset/empty — integrity-digest precheck skipped; the JVM unlock + fingerprint gate next step remains fail-closed")
           with open(sys.argv[1], "wb") as f:
               f.write(data)
-          print(f"keystore materialized at runner-temp path ({len(data)} bytes, JKS magic ok)")
+          print(f"keystore materialized at runner-temp path ({len(data)} bytes, JKS structure + integrity digest valid)")
           PYEOF
           chmod 600 "$KS_OUT"
           echo "KS_PATH=$KS_OUT" >> "$GITHUB_ENV"
