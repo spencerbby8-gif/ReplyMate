@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -71,20 +71,38 @@ jobs:
           python3 - "$KS_OUT" <<'PYEOF'
           import base64, binascii, os, sys
           s = "".join(os.environ["RM_KS_B64"].split())          # strip any whitespace
-          try:
-              data = base64.b64decode(s, validate=True)
-          except binascii.Error:
-              s2 = s.replace("-", "+").replace("_", "/")        # tolerate base64url
-              s2 += "=" * (-len(s2) % 4)                        # re-pad
+          s = s.strip('"').strip("'")                           # tolerate copy-paste quotes
+          def try_decode(x):
               try:
-                  data = base64.b64decode(s2, validate=True)
-                  print("note: secret decoded as base64url")
+                  return base64.b64decode(x, validate=True)
               except binascii.Error:
-                  print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url")
-                  print("::error::re-encode with: base64 -w0 arena.keystore  (Linux) or: base64 arena.keystore (macOS)")
-                  sys.exit(1)
+                  x2 = x.replace("-", "+").replace("_", "/")    # tolerate base64url
+                  x2 += "=" * (-len(x2) % 4)                    # re-pad
+                  try:
+                      return base64.b64decode(x2, validate=True)
+                  except binascii.Error:
+                      return None
+          data = try_decode(s)
+          if data is None:
+              print("::error::REPLYMATE_KEYSTORE_B64 is not valid base64/base64url. Safe classification of what was pasted:")
+              if "BEGIN" in s[:12].upper():
+                  print("::error::  → looks like PEM text — base64-encode the KEYSTORE FILE, not PEM")
+              elif s and all(c in "0123456789abcdefABCDEF" for c in s):
+                  print("::error::  → looks like hex — base64 the keystore file directly, not a hex dump")
+              elif len(s) < 1000:
+                  print(f"::error::  → suspiciously short ({len(s)} chars) — a JKS is ~2–4 KB → ~3–6 KB of base64")
+              else:
+                  print(f"::error::  → {len(s)} chars, unknown encoding")
+              print("::error::correct value:  base64 -w0 arena.keystore  (Linux) /  base64 arena.keystore  (macOS) → paste the single-line output")
+              sys.exit(1)
           if data[:4] != bytes.fromhex("feedfeed"):
-              print("::error::decoded bytes are not a JKS store (bad magic) — the secret must be the keystore FILE itself, base64-encoded")
+              if data[:5] == b"-----":
+                  hint = "decoded content is PEM text — the secret must cover the JKS *file* bytes"
+              elif data[:2] == b"0\x82":
+                  hint = "decoded content looks like a DER key/certificate, not a JKS — base64 the .keystore file itself"
+              else:
+                  hint = "decoded bytes are not a JKS store"
+              print(f"::error::{hint}")
               sys.exit(1)
           with open(sys.argv[1], "wb") as f:
               f.write(data)
