@@ -604,6 +604,11 @@ jobs:
       - name: Build + sign APK with the verified historical key
         env:
           REPLYMATE_JKS_PASS: ${{ secrets.REPLYMATE_KEYSTORE_PASS }}
+          # ubuntu runners ship a read-only preinstalled Android SDK at $ANDROID_HOME
+          # (build-tools 36.x) — without this override the engine tries to unzip the
+          # PINNED toolchain into it and dies on chmod. Force the pinned, hash-verified
+          # bootstrap (engine/TOOLS.txt) into our own writable dir instead.
+          REPLYMATE_SDK: ${{ github.workspace }}/.engine-sdk
         run: |
           set -euo pipefail
           # the materialize step (when the digest validated) left the WORKING password
