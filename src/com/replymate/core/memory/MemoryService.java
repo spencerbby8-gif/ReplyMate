@@ -56,15 +56,25 @@ public final class MemoryService {
         public final String summaryMeta;       // \"covers 41 msgs through Tue 14:02 · v3\"
         public final List<String> facts;       // fact TEXTS recalled (audit)
         public final List<String> learnedStyle;// style line TEXTS recalled (audit)
+        public final List<String> retrieved;   // P-intel-13 M5: retrieved older-message TEXTS (audit)
 
         Recall(List<String> lines, List<String> why, String summaryText,
                String summaryMeta, List<String> facts, List<String> learnedStyle) {
+            this(lines, why, summaryText, summaryMeta, facts, learnedStyle,
+                Collections.<String>emptyList());
+        }
+
+        Recall(List<String> lines, List<String> why, String summaryText,
+               String summaryMeta, List<String> facts, List<String> learnedStyle,
+               List<String> retrieved) {
             this.lines = lines;
             this.why = why;
             this.summaryText = summaryText;
             this.summaryMeta = summaryMeta;
             this.facts = facts;
             this.learnedStyle = learnedStyle;
+            this.retrieved = retrieved == null
+                ? Collections.<String>emptyList() : retrieved;
         }
     }
 
@@ -109,10 +119,58 @@ public final class MemoryService {
                 + summary.summaryText.trim());
         }
 
+        // M5 — P-intelligence-13: RELEVANT retrieval over the deep history. The
+        // summary is budgeted, so a months/years-old fact can age out of it; when
+        // the NEW incoming text shares its topic, lift only the matching older
+        // messages (≤3, ≤460 chars, timestamped, newest marked authoritative) —
+        // the deep history is scanned, never flooded into the prompt.
+        List<String> retrievedTexts = new ArrayList<String>();
+        List<String> query = newestIncomingTexts(hotWindow);
+        if (!query.isEmpty()) {
+            long boundary = hotWindow == null || hotWindow.isEmpty()
+                ? 0 : hotWindow.get(0).id;
+            List<Message> pool = boundary <= 0
+                ? messages.lastMessages(c.id, HistoryRetriever.POOL_LIMIT)
+                : messages.olderThanId(c.id, boundary, HistoryRetriever.POOL_LIMIT);
+            List<HistoryRetriever.Hit> hits = HistoryRetriever.retrieve(pool, query);
+            int budget = HistoryRetriever.CHAR_BUDGET;
+            for (HistoryRetriever.Hit h : hits) {
+                String line = "- " + HistoryRetriever.render(h, c.displayName);
+                if (budget - line.length() < 0) break;
+                budget -= line.length();
+                lines.add(line);
+                retrievedTexts.add(h.message.body == null ? "" : h.message.body.trim());
+            }
+            if (!retrievedTexts.isEmpty()) {
+                why.add("retrieved " + retrievedTexts.size()
+                    + " older message(s) on this topic from beyond the recent window"
+                    + " (timestamped — latest is authoritative)");
+            }
+        }
+
         return new Recall(lines, why,
             summary == null ? "" : summary.summaryText,
             summary == null ? "" : metaLine(summary),
-            factTexts, Collections.<String>emptyList());
+            factTexts, Collections.<String>emptyList(), retrievedTexts);
+    }
+
+    /** The retrieval query: the freshest INCOMING readable texts of the hot window
+     *  (at most 2 — the active topic; outgoing owner lines and unusable bodies
+     *  never drive a lookup). */
+    private static List<String> newestIncomingTexts(List<Message> hotWindow) {
+        List<String> out = new ArrayList<String>();
+        if (hotWindow == null) return out;
+        for (int i = hotWindow.size() - 1; i >= 0 && out.size() < 2; i--) {
+            Message m = hotWindow.get(i);
+            if (m == null || m.direction != com.replymate.core.model.Direction.INCOMING) {
+                continue;
+            }
+            String body = m.body == null ? "" : m.body.trim();
+            if (body.isEmpty()
+                    || !com.replymate.core.prompt.PromptBuilder.usableText(body)) continue;
+            out.add(body);
+        }
+        return out;
     }
 
     /** Append the M4 learned-style layer (DraftService supplies the approved reply
@@ -147,13 +205,14 @@ public final class MemoryService {
                 + " rule(s)) — your explicit setting for this contact wins");
         }
         if (lines.isEmpty()) return new Recall(new ArrayList<String>(base.lines), newWhy,
-            base.summaryText, base.summaryMeta, base.facts, base.learnedStyle);
+            base.summaryText, base.summaryMeta, base.facts, base.learnedStyle,
+            base.retrieved);
         List<String> newLines = new ArrayList<String>(base.lines);
         for (String l : lines) newLines.add("- " + l);
         newWhy.add("learned style applied (" + lines.size()
             + " rule(s) from your approved replies)");
         return new Recall(newLines, newWhy, base.summaryText, base.summaryMeta,
-            base.facts, lines);
+            base.facts, lines, base.retrieved);
     }
 
     /** Unit-separator between control tag and line inside the v2 cache (never

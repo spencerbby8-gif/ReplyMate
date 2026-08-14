@@ -20,13 +20,20 @@ public final class ListenerFilter {
     private ListenerFilter() { }
 
     public static Verdict verdict(NotifEvent e) {
+        return verdict(e, false);
+    }
+
+    /** P-intelligence-13: when group chats are enabled (GroupPolicy, per app),
+     *  a real group message pings like a 1:1 — the generation/alert path treats
+     *  the group as its contact. Default/OFF keeps groups STORE_ONLY. */
+    public static Verdict verdict(NotifEvent e, boolean groupsAllowed) {
         if (e == null) return Verdict.SKIP;
         boolean emptyText = e.text == null || e.text.trim().isEmpty();
         com.replymate.core.model.ContentKind kind = e.contentKind;
         boolean nonText = kind != null && kind.isUnreadable();
         if (emptyText && !e.hasAttachment && !nonText) return Verdict.SKIP;
         if (emptyText || e.hasAttachment || nonText) return Verdict.STORE_ONLY;
-        if (e.group) return Verdict.STORE_ONLY;
+        if (e.group && !groupsAllowed) return Verdict.STORE_ONLY;
         return Verdict.STORE_AND_PING;
     }
 

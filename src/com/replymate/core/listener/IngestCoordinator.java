@@ -78,7 +78,10 @@ public final class IngestCoordinator {
                 continue;
             }
 
-            ListenerFilter.Verdict v = ListenerFilter.verdict(e);
+            // P-intelligence-13: group policy resolved ONCE per event — master
+            // switch with per-app override (GroupPolicy); default OFF.
+            boolean groupsAllowed = GroupPolicy.allowed(kv, e.channel);
+            ListenerFilter.Verdict v = ListenerFilter.verdict(e, groupsAllowed);
             if (v == ListenerFilter.Verdict.SKIP) { rep.filtered++; continue; }
 
             // P-background-9: reaction notices are not conversation — never stored,
@@ -94,10 +97,12 @@ public final class IngestCoordinator {
             // call or encryption is always a real message and passes.
             if (SystemLines.isSystemLine(e.text)) { rep.filtered++; continue; }
 
-            // P-intelligence-7: group/broadcast-style items and missed-call notices
-            // are stopped BEFORE any contact or message exists — they never become
-            // ReplyMate conversations, never ping, never draft.
-            NoiseGate.Drop noise = NoiseGate.evaluate(e);
+            // P-intelligence-7: broadcast-style items and missed-call notices are
+            // stopped BEFORE any contact or message exists. P-intelligence-13:
+            // groups specifically are OPT-IN (default off) — when the user enabled
+            // them for this app, they become first-class conversations that store,
+            // ping and draft like a 1:1 (sender attribution stays per member).
+            NoiseGate.Drop noise = NoiseGate.evaluate(e, groupsAllowed);
             if (noise.drop) { rep.filtered++; continue; }
 
             String convTitle = IdentityResolver.firstNonEmpty(
@@ -193,7 +198,8 @@ public final class IngestCoordinator {
             lastSnippet = body;
             lastChannel = e.channel;
 
-            // outgoing messages (ours) are context only; groups are store-only by policy.
+            // outgoing messages (ours) are context only; a group's messages ping
+            // only when the verdict allowed it (GroupPolicy opt-in, default off).
             boolean pingEligible = v == ListenerFilter.Verdict.STORE_AND_PING
                 && dir == Direction.INCOMING;
             if (dir == Direction.OUTGOING) {

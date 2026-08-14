@@ -6,8 +6,10 @@ import com.replymate.core.model.ContentKind;
  *  ReplyMate conversation — group/broadcast-style items, missed-call notices and
  *  app service summaries/architecture noise. These are dropped BEFORE any contact
  *  is created, before any row is stored, and long before a draft could be
- *  considered, because the owner's rule is absolute: real (direct, 1:1, human)
- *  messages only create ReplyMate conversations.
+ *  considered. P-intelligence-13 softens exactly ONE rule: group conversations
+ *  are a user OPT-IN ({@link GroupPolicy}, default OFF) — never globally blocked.
+ *  When enabled per app, a group conversation is captured with per-member
+ *  attribution and drafts replies like any contact; 1:1 behavior is unchanged.
  *
  *  Pure + Android-free so every rule is pinned by JVM tests. The geometry shapes
  *  are matched EXACTLY after normalization (like ContentSignals shapes): they are
@@ -30,12 +32,22 @@ public final class NoiseGate {
 
     public static final Drop KEEP = new Drop(false, "");
 
-    /** Group/broadcast-style items and missed-call notices — never a conversation. */
+    /** Default: groups are not conversations (P-intelligence-7, unchanged). */
     public static Drop evaluate(NotifEvent e) {
+        return evaluate(e, false);
+    }
+
+    /** P-intelligence-13: groups are opt-IN (GroupPolicy), never globally blocked.
+     *  When the user enabled group chats for this channel, a group item flows
+     *  like any other captured message (still subject to the call and
+     *  service-chat rules below). Default/OFF behavior is byte-identical to
+     *  the original gate. */
+    public static Drop evaluate(NotifEvent e, boolean groupsAllowed) {
         if (e == null) return new Drop(true, "null event");
-        if (e.group) {
+        if (e.group && !groupsAllowed) {
             return new Drop(true,
-                "group/broadcast notification — not a direct 1:1 conversation");
+                "group/broadcast notification — not a direct 1:1 conversation"
+                + " (enable group chats in Sources to listen)");
         }
         if (e.contentKind == ContentKind.CALL) {
             return new Drop(true, "missed/declined-call notice — not a message");

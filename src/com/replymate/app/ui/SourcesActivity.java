@@ -103,6 +103,26 @@ public final class SourcesActivity extends Activity {
         root.addView(accessRow);
         root.addView(Ui.divider(this));
 
+        // P-intelligence-13: group chats are OPT-IN. Master switch (default off)
+        // + per-app override on each card below. When enabled for an app, its
+        // group conversations are captured, attributed per member and get draft
+        // replies like a 1:1; 1:1 behavior is identical either way.
+        final boolean groupsOn =
+            com.replymate.core.listener.GroupPolicy.globalEnabled(c.kv());
+        LinearLayout groupRow = Ui.row(this, "Group chats",
+            groupsOn
+                ? "ON — group messages can be captured & replied (per-app override below)"
+                : "OFF (default) — group messages are ignored; tap to enable");
+        groupRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                c.kv().put(com.replymate.core.listener.GroupPolicy.KV_GLOBAL,
+                    groupsOn ? "0" : "1");
+                render();
+            }
+        });
+        root.addView(groupRow);
+        root.addView(Ui.divider(this));
+
         // --- per-app cards, all data-driven ------------------------------------
         ListenerStats stats = new ListenerStats(c.kv());
         for (Channel ch : catalogOrder()) {
@@ -162,6 +182,27 @@ public final class SourcesActivity extends Activity {
         card.addView(statusTv);
 
         if (isInstalled) {
+            // P-intelligence-13: per-app group override (tap to cycle
+            // inherit → on → off). The effective state is always shown as real
+            // data, never a claim.
+            final String ov =
+                com.replymate.core.listener.GroupPolicy.overrideFor(c.kv(), channel);
+            TextView groupTv = Ui.sub(this, "group chats: "
+                + com.replymate.core.listener.GroupPolicy.describe(c.kv(), channel)
+                + " · tap to change");
+            groupTv.setTextSize(12);
+            groupTv.setTextColor(Ui.ACCENT);
+            groupTv.setPadding(0, Ui.dp(this, 4), 0, 0);
+            groupTv.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    c.kv().put(
+                        com.replymate.core.listener.GroupPolicy.keyFor(channel),
+                        com.replymate.core.listener.GroupPolicy.nextOverride(ov));
+                    render();
+                }
+            });
+            card.addView(groupTv);
+
             TextView statsTv = Ui.sub(this,
                 "received " + stats.receivedOf(ch)
                 + " · parsed " + stats.parsedOf(ch)

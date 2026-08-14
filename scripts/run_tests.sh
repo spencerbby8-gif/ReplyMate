@@ -104,6 +104,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.usecase.GenerationHonestyTest \
     com.replymate.core.usecase.OneDraftPerMessageTest \
     com.replymate.core.usecase.VoicePromptProofTest \
+    com.replymate.core.memory.HistoryRetrieverTest \
+    com.replymate.core.memory.YearsMemoryRetrievalTest \
     com.replymate.core.search.SearchGateTest \
     com.replymate.core.search.SearchCacheTest \
     com.replymate.core.caps.ModelCapsTest \
@@ -129,6 +131,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.assistant.AssistantCatchUpTest \
     com.replymate.core.assistant.CatchupPolicyTest \
     com.replymate.core.listener.SystemLinesTest \
+    com.replymate.core.listener.GroupPolicyTest \
+    com.replymate.core.listener.GroupOptInTest \
     com.replymate.core.listener.NoiseEndToEndTest \
     com.replymate.core.listener.MessagingStyleParserTest \
     com.replymate.core.listener.TitleTextParserTest \
