@@ -352,6 +352,369 @@ public final class DraftService {
                 && PromptBuilder.usableText(lastIncoming.body)) {
             searchHearing = java.util.Collections.singletonList(lastIncoming.body.trim());
         }
+        boolean gateFired = applyLiveSearchGate(c, provider, searchHearing, thread,
+            bundle, why);
+        // P-intelligence-6 directive 3: automatic reasoning depth — simple stays
+        // fast; hard/ambiguous/search-grounded moments think deeper via the
+        // provider's OFFICIAL control. Level + reasons are audit metadata only.
+        com.replymate.core.reason.Reasoning.Decision think =
+            applyReasoning(plan, burstTail.size(), gateFired, searchHearing,
+                bundle, why);
+
+        ChatRequest request = PromptBuilder.build(bundle);
+
+        // P-background-8: the LAST gate before money moves. Everything above —
+        // style, memory, the search gate, the external lookup — is prep; a job
+        // that went stale during it stops here with an explicit outcome.
+        if (abort != null && abort.aborted()) {
+            return Result.err(SUPERSEDED_ERROR);
+        }
+
+        long t0 = clock.now();
+        Result<ChatReply> reply = provider.generate(request);
+        long latency = clock.now() - t0;
+        if (!reply.ok) {
+            log.w("DraftService", "generation failed for contact " + contactId + ": " + reply.error);
+            return Result.err(reply.error);
+        }
+
+        // P-bg-10: the pre-call gate above cannot see a message that arrived
+        // WHILE the provider was generating. Check the flag again now — before
+        // any purge, save, or alert — so the stale job leaves no trace and the
+        // newer job's job answers. The interrupted call was paid once.
+        if (abort != null && abort.aborted()) {
+            return Result.err(SUPERSEDED_AFTER_CALL_ERROR);
+        }
+
+        ChatReply r = reply.value;
+        if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
+
+        // P-intelligence-6 post-call: capability outcomes are audit metadata.
+        if (!r.note.isEmpty()) why.add(r.note);   // honest degradation, verbatim
+        appendCapabilityAudit(why, bundle, gateFired, think, r, provider);
+
+        // P-ux-fix: (Re)generate REPLACES the current draft instead of stacking duplicate
+        // cards. Only untouched drafts are cleared — anything the owner explicitly kept
+        // (⭐ favorite) or already used (copied/edited/sent) stays. Old drafts are
+        // purged only AFTER the provider succeeded, so a failed regen never wipes
+        // the draft the owner still has.
+        int replaced = purgeUnsavedDrafts(contactId);
+        if (replaced > 0) why.add("regenerate replaced " + replaced + " unsaved draft(s)");
+
+        long now = clock.now();
+        String group = ids.next();
+        String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        String snapshot = PromptBuilder.snapshot(request, model, "reply", why,
+            auditContextFor(c, lastIncoming, mem));
+        int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
+
+        // P-background-12: ONE current draft per message — persist the FIRST
+        // usable variant only. The request now asks for a single candidate, but
+        // some providers still return extras (or the multi-candidate fallback
+        // path produced them); persisting every variant was the on-device
+        // "2–3 identical drafts" report. Extra variants are dropped (the draft
+        // card gets Regenerate for a different take; interactive previews keep
+        // showing all samples without persisting anything).
+        List<Draft> saved = new ArrayList<Draft>();
+        for (String variant : r.variants) {
+            String text = variant == null ? "" : variant.trim();
+            if (text.isEmpty()) continue;
+            if (!saved.isEmpty()) break;    // one message ⇒ one current draft
+            Draft d = new Draft();
+            d.contactId = contactId;
+            d.inReplyToId = lastIncoming.id > 0 ? lastIncoming.id : null;
+            d.promptSnapshotJson = snapshot;
+            d.replyText = text;
+            d.model = model;
+            d.variantGroup = group;
+            d.status = DraftStatus.GENERATED;
+            d.latencyMs = latency;
+            d.tokensIn = r.tokensIn;
+            d.tokensOut = outEach;
+            d.createdAt = now;
+            d.id = drafts.insert(d);
+            saved.add(d);
+        }
+        if (saved.isEmpty()) return Result.err("The provider returned empty replies.");
+
+        UsageEvent u = new UsageEvent();
+        u.ts = now;
+        u.model = model;
+        u.tokensIn = r.tokensIn;
+        u.tokensOut = r.tokensOut;
+        u.kind = UsageKind.REPLY;
+        usage.insert(u);
+
+        log.i("DraftService", "generated " + saved.size() + " variants for contact " + contactId
+            + " in " + latency + "ms");
+        return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
+    }
+
+    /** P-intelligence-14: INTENTIONAL generation — follow-up bump / clarifying
+     *  question / topic continuation / fresh opener. Runs the SAME pipeline as a
+     *  reply (voice, memory layers, contact settings, learning, Search gate,
+     *  reasoning decision, capability audit, one-current-draft save, usage
+     *  metering) with the kind's own deterministic task. The result is a DRAFT:
+     *  it lands in the same approve/edit/copy flow — nothing ever auto-sends. */
+    public Result<DraftOutcome> composeForContact(long contactId,
+            com.replymate.core.prompt.ComposeKind kind) {
+        return composeForContact(contactId, kind, null);
+    }
+
+    public Result<DraftOutcome> composeForContact(long contactId,
+            com.replymate.core.prompt.ComposeKind kind, AbortCheck abort) {
+        if (kind == null) kind = com.replymate.core.prompt.ComposeKind.REPLY;
+        if (kind == com.replymate.core.prompt.ComposeKind.REPLY) {
+            return generateForContact(contactId, abort);
+        }
+        synchronized (lockFor(contactId)) {
+            return composeForContactLocked(contactId, kind, abort);
+        }
+    }
+
+    private Result<DraftOutcome> composeForContactLocked(long contactId,
+            com.replymate.core.prompt.ComposeKind kind, AbortCheck abort) {
+        Contact c = contacts.get(contactId);
+        if (c == null) return Result.err("Contact not found.");
+        if (c.privateMode) return Result.err("This contact is private — AI generation is disabled.");
+        if (!c.aiEnabled) return Result.err("AI replies are disabled for this contact.");
+
+        AiProvider provider = gateway.active();
+        if (provider == null) {
+            return Result.err("Set up an AI provider first (Settings → AI providers) — add your API key.");
+        }
+
+        List<Message> thread = messages.lastMessages(contactId, 30);
+
+        // ---- admission: each kind needs its honest anchor ----------------
+        String lastOutgoing = null;
+        Message lastIncoming = null;
+        String lastAny = null;
+        for (int i = thread.size() - 1; i >= 0; i--) {
+            Message m = thread.get(i);
+            if (m == null || !PromptBuilder.usableText(m.body)) continue;
+            if (lastAny == null) lastAny = m.body.trim();
+            if (m.direction == Direction.OUTGOING && lastOutgoing == null) {
+                lastOutgoing = m.body.trim();
+            }
+            if (m.direction == Direction.INCOMING && lastIncoming == null) lastIncoming = m;
+        }
+        switch (kind) {
+            case FOLLOW_UP:
+                if (lastOutgoing == null) {
+                    return Result.err("Follow-up needs a message FROM YOU that "
+                        + c.displayName + " hasn't answered yet — nothing to bump.");
+                }
+                if (lastIncoming != null && lastIncoming.body != null) {
+                    // an incoming message NEWER than our last outgoing means it is
+                    // THEIR turn, not a bump — say so honestly.
+                    boolean incomingIsNewer = false;
+                    for (int i = thread.size() - 1; i >= 0; i--) {
+                        Message m = thread.get(i);
+                        if (m == null || !PromptBuilder.usableText(m.body)) continue;
+                        incomingIsNewer = m.direction == Direction.INCOMING;
+                        break;
+                    }
+                    if (incomingIsNewer) {
+                        return Result.err("Their latest message is still fresh — reply to"
+                            + " it instead of bumping (use Generate).");
+                    }
+                }
+                break;
+            case CLARIFY:
+                if (lastIncoming == null) {
+                    return Result.err("Nothing from " + c.displayName
+                        + " to clarify yet — wait for their message.");
+                }
+                break;
+            case CONTINUE:
+                if (lastAny == null) {
+                    return Result.err("No conversation to continue with " + c.displayName
+                        + " yet — use Opener for a fresh start.");
+                }
+                break;
+            default: break;   // OPENER: always admissible
+        }
+
+        String styleRules = "";
+        StyleProfile global = styles.get(Scope.GLOBAL, null);
+        if (global != null && global.derivedRules != null) styleRules = global.derivedRules;
+        com.replymate.core.style.StyleService.ComposedVoice voice =
+            styleService == null ? null : styleService.compose(c);
+        java.util.List<String> why = new java.util.ArrayList<String>();
+        why.addAll(profiles.excludedSections());
+        if (voice != null) why.addAll(voice.why);
+        why.add("intentional generation: " + kind.wire
+            + " (task composed for the intention; reply planner is reply-scoped)");
+
+        com.replymate.core.memory.MemoryService.Recall mem = null;
+        if (memory != null) {
+            java.util.Set<String> explicitControls = new java.util.HashSet<String>();
+            if (styleService != null) {
+                java.util.Map<String, String> crows = styleService.contactRows(contactId);
+                if (com.replymate.core.style.StyleSettings.level(crows, "length") != null) {
+                    explicitControls.add("length");
+                }
+                if (com.replymate.core.style.StyleSettings.level(crows, "emoji") != null) {
+                    explicitControls.add("emoji");
+                }
+            }
+            mem = memory.withLearnedStyle(memory.recall(c, thread), c,
+                approvedTextsFor(contactId), explicitControls);
+            why.addAll(mem.why);
+            if (!c.memoryEnabled) {
+                why.add("memory disabled for this contact — no summary, facts"
+                    + " or learned style were used");
+            }
+        }
+
+        // P-intelligence-14 (audit parity with the reply path): an intentional
+        // draft credits the same raw FEEDBACK counters — never a learned hint
+        // without its evidence trail, whatever the generation intention.
+        com.replymate.core.learning.LearningEngine.Counters feedback =
+            learningService == null ? null : learningService.counters(contactId);
+        int signalsTotal = feedback == null ? 0 : feedback.total();
+        if (feedback != null) {
+            StringBuilder fb = new StringBuilder("feedback so far for ")
+                .append(c.displayName).append(": ")
+                .append(feedback.approved).append(" approved");
+            if (feedback.approved > 0) {
+                fb.append(" (");
+                boolean firstPart = true;
+                if (feedback.copiedAsIs > 0) {
+                    fb.append(feedback.copiedAsIs).append(" copied as-is");
+                    firstPart = false;
+                }
+                if (feedback.quickSent > 0) {
+                    if (!firstPart) fb.append(", ");
+                    fb.append(feedback.quickSent).append(" sent via quick-reply");
+                    firstPart = false;
+                }
+                if (feedback.manualMatched > 0) {
+                    if (!firstPart) fb.append(", ");
+                    fb.append(feedback.manualMatched).append(" manual matches");
+                }
+                fb.append(')');
+            }
+            fb.append(" · ").append(feedback.edited).append(" edited");
+            if (feedback.manualTotal() > 0) {
+                fb.append(" (manual sends: ").append(feedback.manualMatched)
+                  .append(" matched word-for-word, ").append(feedback.manualCorrected)
+                  .append(" corrected)");
+            }
+            fb.append(" · ").append(feedback.regenerated).append(" regenerated · ")
+              .append(feedback.rejected).append(" rejected (recent window)");
+            if (signalsTotal == 0) fb.append(" — no signals yet");
+            why.add(fb.toString());
+        }
+
+        PromptBundle bundle = new PromptBundle(
+            profiles.loadFiltered(), c, styleRules, thread,
+            voice == null ? "" : voice.voiceLine,
+            voice == null ? null : voice.extraLines,
+            profiles.extraFiltered(),
+            mem == null ? null : mem.lines);
+        bundle.composeKind = kind;
+
+        com.replymate.core.live.LiveContext.Snapshot live = liveFor(thread);
+        bundle.liveLine = live.promptLine;
+        why.add(live.whyLine);
+
+        // Same Search gate + reasoning decision as a reply — the intentional
+        // kinds hear their ANCHOR (an opener has no anchor: no search, default
+        // reasoning — an honest nothing-to-look-up).
+        java.util.List<String> hearing = new java.util.ArrayList<String>();
+        switch (kind) {
+            case FOLLOW_UP:
+                if (lastOutgoing != null) hearing.add(lastOutgoing);
+                break;
+            case CLARIFY:
+                if (lastIncoming != null) hearing.add(lastIncoming.body.trim());
+                break;
+            case CONTINUE:
+                if (lastAny != null) hearing.add(lastAny);
+                break;
+            default: break;
+        }
+        boolean gateFired = applyLiveSearchGate(c, provider, hearing, thread,
+            bundle, why);
+        com.replymate.core.reason.Reasoning.Decision think =
+            applyReasoning(null, 0, gateFired, hearing, bundle, why);
+
+        ChatRequest request = PromptBuilder.build(bundle);
+        if (abort != null && abort.aborted()) {
+            return Result.err(SUPERSEDED_ERROR);
+        }
+        long t0 = clock.now();
+        Result<ChatReply> reply = provider.generate(request);
+        long latency = clock.now() - t0;
+        if (!reply.ok) {
+            log.w("DraftService", "compose(" + kind.wire + ") failed for contact "
+                + contactId + ": " + reply.error);
+            return Result.err(reply.error);
+        }
+        if (abort != null && abort.aborted()) {
+            return Result.err(SUPERSEDED_AFTER_CALL_ERROR);
+        }
+
+        ChatReply r = reply.value;
+        if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
+        if (!r.note.isEmpty()) why.add(r.note);
+        appendCapabilityAudit(why, bundle, gateFired, think, r, provider);
+
+        int replaced = purgeUnsavedDrafts(contactId);
+        if (replaced > 0) why.add("compose replaced " + replaced + " unsaved draft(s)");
+
+        long now = clock.now();
+        String group = ids.next();
+        String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        String snapshot = PromptBuilder.snapshot(request, model, kind.wire, why,
+            auditContextFor(c, lastIncoming, mem));
+        List<Draft> saved = new ArrayList<Draft>();
+        for (String variant : r.variants) {
+            String text = variant == null ? "" : variant.trim();
+            if (text.isEmpty()) continue;
+            if (!saved.isEmpty()) break;          // one intention ⇒ one current draft
+            Draft d = new Draft();
+            d.contactId = contactId;
+            d.inReplyToId = null;                 // intentional: NOT a reply anchor
+            d.promptSnapshotJson = snapshot;
+            d.replyText = text;
+            d.model = model;
+            d.variantGroup = group;
+            d.status = DraftStatus.GENERATED;
+            d.latencyMs = latency;
+            d.tokensIn = r.tokensIn;
+            d.tokensOut = r.tokensOut;
+            d.createdAt = now;
+            d.id = drafts.insert(d);
+            saved.add(d);
+        }
+        if (saved.isEmpty()) return Result.err("The provider returned empty text.");
+
+        UsageEvent u = new UsageEvent();
+        u.ts = now;
+        u.model = model;
+        u.tokensIn = r.tokensIn;
+        u.tokensOut = r.tokensOut;
+        u.kind = UsageKind.REPLY;
+        usage.insert(u);
+
+        log.i("DraftService", "composed " + kind.wire + " for contact " + contactId
+            + " in " + latency + "ms");
+        return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
+    }
+
+    /* ------------------------------------------------------ shared pipeline bits */
+
+    /** P-intelligence-6 (extracted P-intel-14 shared): the automatic live-search
+     *  gate. Decides locally whether the HEARING texts need live facts, consults
+     *  the on-device cache, otherwise asks for the provider's native search
+     *  in-call or looks the subject up on the free encyclopedia path. Mutates
+     *  bundle + why; returns whether the gate fired. Never throws into a reply. */
+    private boolean applyLiveSearchGate(Contact c, AiProvider provider,
+            java.util.List<String> searchHearing, List<Message> thread,
+            PromptBundle bundle, java.util.List<String> why) {
         java.util.List<String> historyWords = new java.util.ArrayList<String>();
         java.util.Set<String> burstSet = new java.util.HashSet<String>();
         for (String b : searchHearing) if (b != null) burstSet.add(b.trim());
@@ -429,59 +792,41 @@ public final class DraftService {
                 }
             }
         }
+        return gateFired;
+    }
 
-        // P-intelligence-6 directive 3: automatic reasoning depth — simple stays
-        // fast; hard/ambiguous/search-grounded moments think deeper via the
-        // provider's OFFICIAL control. Level + reasons are audit metadata only.
+    /** P-intelligence-6 directive 3 (extracted P-intel-14 shared): automatic
+     *  reasoning depth from the deterministic signals. */
+    private com.replymate.core.reason.Reasoning.Decision applyReasoning(
+            com.replymate.core.plan.ReplyPlanner.Plan plan, int burstSize,
+            boolean gateFired, java.util.List<String> hearing,
+            PromptBundle bundle, java.util.List<String> why) {
         int qMarks = 0;
-        for (String s : searchHearing) {
+        for (String s : hearing) {
             if (s == null) continue;
             for (int qi = 0; qi < s.length(); qi++) if (s.charAt(qi) == '?') qMarks++;
         }
         com.replymate.core.reason.Reasoning.Decision think =
-            com.replymate.core.reason.Reasoning.decide(
-                plan, burstTail.size(), gateFired, qMarks);
+            com.replymate.core.reason.Reasoning.decide(plan, burstSize, gateFired, qMarks);
         bundle.reasoningLevel = think.level;
         if (think.whyLine() != null) why.add(think.whyLine());
+        return think;
+    }
 
-        ChatRequest request = PromptBuilder.build(bundle);
-
-        // P-background-8: the LAST gate before money moves. Everything above —
-        // style, memory, the search gate, the external lookup — is prep; a job
-        // that went stale during it stops here with an explicit outcome.
-        if (abort != null && abort.aborted()) {
-            return Result.err(SUPERSEDED_ERROR);
-        }
-
-        long t0 = clock.now();
-        Result<ChatReply> reply = provider.generate(request);
-        long latency = clock.now() - t0;
-        if (!reply.ok) {
-            log.w("DraftService", "generation failed for contact " + contactId + ": " + reply.error);
-            return Result.err(reply.error);
-        }
-
-        // P-bg-10: the pre-call gate above cannot see a message that arrived
-        // WHILE the provider was generating. Check the flag again now — before
-        // any purge, save, or alert — so the stale job leaves no trace and the
-        // newer job's job answers. The interrupted call was paid once.
-        if (abort != null && abort.aborted()) {
-            return Result.err(SUPERSEDED_AFTER_CALL_ERROR);
-        }
-
-        ChatReply r = reply.value;
-        if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
-
-        // P-intelligence-6 post-call: capability outcomes are audit metadata.
-        if (!r.note.isEmpty()) why.add(r.note);   // honest degradation, verbatim
+    /** P-intelligence-6 post-call (extracted P-intel-14 shared): SEARCH metering
+     *  + capability outcomes as audit metadata — executed-search credit, the
+     *  requested-but-not-executed mirror, billed-reasoning confirmation and the
+     *  UNCONFIRMED marker for unbillable deeper thinking. */
+    private void appendCapabilityAudit(java.util.List<String> why, PromptBundle bundle,
+            boolean gateFired, com.replymate.core.reason.Reasoning.Decision think,
+            ChatReply r, AiProvider provider) {
         if (gateFired) {
             // live-search generations are metered as their own kind so the usage
             // dashboard prices them honestly: native searches show the provider's
             // token/call figures; free paths (cache, encyclopedia) show zero.
             UsageEvent su = new UsageEvent();
             su.ts = clock.now();
-            su.model = gateway.activeModel() == null ? provider.type()
-                : gateway.activeModel();
+            su.model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
             su.kind = UsageKind.SEARCH;
             su.tokensIn = bundle.requestSearch ? r.tokensIn : 0;
             su.tokensOut = bundle.requestSearch ? r.tokensOut : 0;
@@ -516,62 +861,6 @@ public final class DraftService {
                 + " tokens — treat any 'thought deeper' claim as UNCONFIRMED"
                 + " for this provider/model");
         }
-
-        // P-ux-fix: (Re)generate REPLACES the current draft instead of stacking duplicate
-        // cards. Only untouched drafts are cleared — anything the owner explicitly kept
-        // (⭐ favorite) or already used (copied/edited/sent) stays. Old drafts are
-        // purged only AFTER the provider succeeded, so a failed regen never wipes
-        // the draft the owner still has.
-        int replaced = purgeUnsavedDrafts(contactId);
-        if (replaced > 0) why.add("regenerate replaced " + replaced + " unsaved draft(s)");
-
-        long now = clock.now();
-        String group = ids.next();
-        String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
-        String snapshot = PromptBuilder.snapshot(request, model, "reply", why,
-            auditContextFor(c, lastIncoming, mem));
-        int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
-
-        // P-background-12: ONE current draft per message — persist the FIRST
-        // usable variant only. The request now asks for a single candidate, but
-        // some providers still return extras (or the multi-candidate fallback
-        // path produced them); persisting every variant was the on-device
-        // "2–3 identical drafts" report. Extra variants are dropped (the draft
-        // card gets Regenerate for a different take; interactive previews keep
-        // showing all samples without persisting anything).
-        List<Draft> saved = new ArrayList<Draft>();
-        for (String variant : r.variants) {
-            String text = variant == null ? "" : variant.trim();
-            if (text.isEmpty()) continue;
-            if (!saved.isEmpty()) break;    // one message ⇒ one current draft
-            Draft d = new Draft();
-            d.contactId = contactId;
-            d.inReplyToId = lastIncoming.id > 0 ? lastIncoming.id : null;
-            d.promptSnapshotJson = snapshot;
-            d.replyText = text;
-            d.model = model;
-            d.variantGroup = group;
-            d.status = DraftStatus.GENERATED;
-            d.latencyMs = latency;
-            d.tokensIn = r.tokensIn;
-            d.tokensOut = outEach;
-            d.createdAt = now;
-            d.id = drafts.insert(d);
-            saved.add(d);
-        }
-        if (saved.isEmpty()) return Result.err("The provider returned empty replies.");
-
-        UsageEvent u = new UsageEvent();
-        u.ts = now;
-        u.model = model;
-        u.tokensIn = r.tokensIn;
-        u.tokensOut = r.tokensOut;
-        u.kind = UsageKind.REPLY;
-        usage.insert(u);
-
-        log.i("DraftService", "generated " + saved.size() + " variants for contact " + contactId
-            + " in " + latency + "ms");
-        return Result.ok(new DraftOutcome(group, saved, latency, r.tokensIn, r.tokensOut));
     }
 
     /* ---------------------------------------------------------------- audit ctx */
@@ -651,6 +940,22 @@ public final class DraftService {
             Contact c, Message latest, com.replymate.core.memory.MemoryService.Recall mem) {
         com.replymate.core.model.ProviderRef ref = gateway.activeMeta();
         if (ref == null) return null;
+        if (latest == null) {
+            // P-intelligence-14: anchor-free intentions (a fresh OPENER) answer NO
+            // message — the audit context must still render, saying exactly that.
+            com.replymate.core.prompt.AuditContext ctx =
+                new com.replymate.core.prompt.AuditContext(ref.wire, ref.label, ref.baseUrl,
+                    ref.modelName, com.replymate.core.prompt.AuditContext.endpointFor(
+                        ref.wire, ref.baseUrl, ref.modelName),
+                    "", "", 0L, "", "", false, "", "",
+                    "Intentional opener — no message is being answered");
+            ctx.withLatestExtras(null, "");
+            if (mem != null) {
+                ctx.withMemory(new com.replymate.core.prompt.AuditContext.Memory(
+                    mem.summaryText, mem.summaryMeta, mem.facts, mem.learnedStyle));
+            }
+            return ctx;
+        }
         String appLabel = latest.channel == com.replymate.core.model.Channel.MANUAL
             ? "" : com.replymate.core.listener.WatchedApps.labelFor(latest.channel);
         String appPackage = com.replymate.core.listener.WatchedApps.primaryPackageFor(

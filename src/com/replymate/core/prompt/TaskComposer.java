@@ -10,6 +10,67 @@ public final class TaskComposer {
 
     private TaskComposer() { }
 
+    /** P-intelligence-14: INTENTIONAL generation tasks. Same honesty contract as
+     *  the reply task (quote the real anchor, say what must NOT happen, end with
+     *  \"Output only the reply text.\"). Every text is deterministic.
+     *  @param anchorText the message the intention hangs on (FOLLOW_UP: the
+     *    owner's last unanswered outgoing; CLARIFY: their ambiguous latest;
+     *    CONTINUE: the pausing message). Never null for those kinds in practice —
+     *    {@code DraftService} admission-gates them. OPENER passes null. */
+    public static Turn intentionalTask(ComposeKind kind, String ownerName,
+                                       String partnerName, String anchorText,
+                                       String anchorSender, String appLabel) {
+        StringBuilder t = new StringBuilder();
+        String anchor = anchorText == null ? "" : anchorText.trim();
+        if (anchor.length() > 400) anchor = anchor.substring(0, 400) + "…";
+        switch (kind) {
+            case FOLLOW_UP:
+                t.append("Read the conversation above. ").append(ownerName)
+                 .append("'s last message — \"").append(anchor)
+                 .append("\" — is still UNANSWERED by ").append(partnerName).append(".\n")
+                 .append("Write ").append(ownerName)
+                 .append("'s short follow-up bumping THAT message: light, natural,"
+                    + " no guilt-tripping, no \"why are you ignoring me\", and never a"
+                    + " repeat of the same words. It must fit the relationship and"
+                    + " voice above.");
+                break;
+            case CLARIFY:
+                t.append(partnerName).append("'s latest message — \"").append(anchor)
+                 .append("\" — is ambiguous or hard to answer confidently.\n")
+                 .append("Write ").append(ownerName)
+                 .append("'s short clarifying question about THAT message: ask exactly"
+                    + " what is unclear (one thing), in ").append(ownerName)
+                 .append("'s own voice. Do not answer the message itself, do not"
+                    + " stack multiple questions.");
+                break;
+            case CONTINUE:
+                t.append("The conversation with ").append(partnerName)
+                 .append(" paused at: \"").append(anchor).append("\".\n")
+                 .append("Write ").append(ownerName)
+                 .append("'s next message CONTINUING that same topic naturally —"
+                    + " move it forward (new detail, next step or shared thought),"
+                    + " do not re-answer the quoted message and do not pivot to a"
+                    + " random new topic.");
+                break;
+            case OPENER:
+                t.append("Write ").append(ownerName).append("'s opening message to ")
+                 .append(partnerName)
+                 .append(" — a fresh opener with no topic to continue. Make it natural"
+                    + " for the relationship, notes and voice above (a check-in,"
+                    + " a shared interest, or a plan hook from what you remember"
+                    + " about them). Never creepy, never needy.");
+                break;
+            default:
+                t.append("Write ").append(ownerName).append("'s next message to ")
+                 .append(partnerName).append('.');
+        }
+        if (appLabel != null && !appLabel.trim().isEmpty()) {
+            t.append("\nThis chat is on ").append(appLabel.trim()).append('.');
+        }
+        t.append("\nOutput only the reply text.");
+        return Turn.user(t.toString());
+    }
+
     public static Turn defaultTask(String ownerName, String partnerName) {
         return defaultTask(ownerName, partnerName, null, null);
     }

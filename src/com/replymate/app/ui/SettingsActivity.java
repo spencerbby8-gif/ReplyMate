@@ -28,6 +28,8 @@ public final class SettingsActivity extends Activity {
     private LinearLayout root;
     private LinearLayout providerRow, listenRow, notifRow, accountRow, depthRowRef;
     private Ui.ToggleRow assistantRow;
+    /** Guards the switch's listener while we programmatically revert it (P-intel-14). */
+    private boolean suppressAssistantToggle;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -128,12 +130,32 @@ public final class SettingsActivity extends Activity {
         assistantRow.sw.setOnCheckedChangeListener(
             new android.widget.CompoundButton.OnCheckedChangeListener() {
                 @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
-                    c.kv().put(
-                        com.replymate.app.assistant.AssistantRunner.KV_ENABLED, on ? "1" : "0");
-                    // P-background-6: toggling ON drives Android's proper approval
-                    // flow (notification access / show-notifications / battery),
-                    // each explained; the subtitle keeps any gap honest.
-                    if (on) runAssistantApprovalFlow();
+                    if (suppressAssistantToggle) return;
+                    if (!on) {
+                        c.kv().put(
+                            com.replymate.app.assistant.AssistantRunner.KV_ENABLED, "0");
+                        refreshRows();
+                        return;
+                    }
+                    // P-intelligence-14: the switch may only READ ON when Android can
+                    // genuinely run us in the background — never a claimed \"on\" while
+                    // the listener/battery/notification levers are missing. Blocked
+                    // ON: persist OFF, revert the switch, and walk the approval flow.
+                    java.util.EnumSet<com.replymate.app.assistant.AssistantPrereq.Need> missing =
+                        com.replymate.app.assistant.AssistantPrereq.missing(SettingsActivity.this);
+                    if (missing.isEmpty()) {
+                        c.kv().put(
+                            com.replymate.app.assistant.AssistantRunner.KV_ENABLED, "1");
+                        Toast.makeText(SettingsActivity.this,
+                            "Background replies on — Ready ✓", Toast.LENGTH_SHORT).show();
+                    } else {
+                        c.kv().put(
+                            com.replymate.app.assistant.AssistantRunner.KV_ENABLED, "0");
+                        suppressAssistantToggle = true;
+                        assistantRow.sw.setChecked(false);
+                        suppressAssistantToggle = false;
+                        runAssistantApprovalFlow();
+                    }
                     refreshRows();
                 }
             });
@@ -500,8 +522,10 @@ public final class SettingsActivity extends Activity {
             // the REAL capability — any missing Android approval is named, and the
             // row is tappable to fix it. Never a fake "on".
             assistantRow.sw.setEnabled(true);
+            suppressAssistantToggle = true;
             assistantRow.sw.setChecked(
                 com.replymate.app.assistant.AssistantRunner.enabled(c));
+            suppressAssistantToggle = false;
             if (!com.replymate.app.assistant.AssistantRunner.enabled(c)) {
                 Ui.setRowSub(assistantRow.row,
                     "off — new pings only alert, nothing is drafted");
@@ -510,15 +534,17 @@ public final class SettingsActivity extends Activity {
                     com.replymate.app.assistant.AssistantPrereq.missing(this);
                 if (missing.isEmpty()) {
                     Ui.setRowSub(assistantRow.row,
-                        "on ✓ — access ✓ notifications ✓ battery ✓ · you approve every send");
+                        "Ready ✓ — access ✓ notifications ✓ battery ✓ · you approve every send");
                 } else {
+                    // only reachable from an older build's persisted ON or a REVOKED
+                    // grant — label it degraded, never a clean \"on\".
                     StringBuilder chips = new StringBuilder();
                     for (com.replymate.app.assistant.AssistantPrereq.Need n : missing) {
                         if (chips.length() > 0) chips.append(" · ");
                         chips.append(com.replymate.app.assistant.AssistantPrereq.chip(n));
                     }
                     Ui.setRowSub(assistantRow.row,
-                        "on — blocked by: " + chips + " (tap to fix)");
+                        "limited — blocked by: " + chips + " (tap to fix)");
                 }
             }
         }

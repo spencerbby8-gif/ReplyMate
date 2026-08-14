@@ -41,6 +41,12 @@ public final class PromptBundle {
     public boolean requestSearch;
     public String reasoningLevel = "default";
 
+    /** P-intelligence-14: which intentional generation this bundle carries.
+     *  REPLY = legacy behavior (byte-identical everything). Non-REPLY kinds
+     *  replace the task turn with the kind's own composition (TaskComposer)
+     *  and skip the reply-scoped burst/planner work. */
+    public ComposeKind composeKind = ComposeKind.REPLY;
+
     /** P-background-12: how many reply candidates the provider is ASKED to
      *  produce. Default is ONE — a background/alert generation must persist
      *  exactly one current draft per message, never a row per provider variant

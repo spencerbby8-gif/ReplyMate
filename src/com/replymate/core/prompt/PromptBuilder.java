@@ -57,9 +57,46 @@ public final class PromptBuilder {
         // summarizing it into its single point — not message by message.
         // P-intelligence-6: scoped by the answered watermark — a pending draft's
         // messages are never re-answered as part of a newer burst.
-        java.util.List<String> burst = burstTailUsableIncoming(
-            bundle.thread, 6, bundle.answeredWatermark);
-        Turn task = burst.size() >= 2
+        java.util.List<String> burst = bundle.composeKind != null
+                && bundle.composeKind != ComposeKind.REPLY
+            ? java.util.Collections.<String>emptyList()   // intentional kinds: no burst task
+            : burstTailUsableIncoming(bundle.thread, 6, bundle.answeredWatermark);
+        Turn task;
+        if (bundle.composeKind != null && bundle.composeKind != ComposeKind.REPLY) {
+            // P-intelligence-14: intentional generation carries its OWN task text;
+            // burst/planner machinery is reply-scoped. Anchor by kind:
+            // FOLLOW_UP → owner's last unanswered outgoing; CLARIFY → their
+            // latest incoming; CONTINUE → the pausing message (either side);
+            // OPENER → none.
+            String anchor;
+            String anchorSender = null;
+            switch (bundle.composeKind) {
+                case FOLLOW_UP: {
+                    com.replymate.core.model.Message lastOut = null;
+                    for (int i = bundle.thread.size() - 1; i >= 0; i--) {
+                        com.replymate.core.model.Message m = bundle.thread.get(i);
+                        if (m != null && m.direction
+                                == com.replymate.core.model.Direction.OUTGOING
+                                && usableText(m.body)) { lastOut = m; break; }
+                    }
+                    anchor = lastOut == null ? null : lastOut.body;
+                    break;
+                }
+                case CLARIFY:
+                    anchor = latest == null ? null : latest.body;
+                    anchorSender = latest == null ? null : latest.senderName;
+                    break;
+                case CONTINUE:
+                    anchor = latestUsableText(bundle.thread);
+                    break;
+                default:
+                    anchor = null;
+            }
+            task = TaskComposer.intentionalTask(bundle.composeKind,
+                bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
+                bundle.contact.displayName, anchor, anchorSender, appLabel);
+        } else {
+        task = burst.size() >= 2
             ? TaskComposer.burstTask(
                 bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
                 bundle.contact.displayName, burst, appLabel,
@@ -72,6 +109,7 @@ public final class PromptBuilder {
                 bundle.contact.displayName,
                 latest == null ? null : latest.body, appLabel, kind,
                 latest == null ? null : latest.senderName);
+        }
         // P-intelligence-5: the deterministic plan grounds the read; it rides the
         // END of the task turn, after the quoted message, before nothing — the
         // final instruction remains "Output only the reply text." (BASIC depth
@@ -135,6 +173,18 @@ public final class PromptBuilder {
     /** The message a reply would answer: the LATEST incoming message whose body carries
      *  usable text (non-empty, not the media placeholder). Single source of truth shared
      *  by the generation gate in DraftService and the task composer here. */
+    /** Newest readable message text of the thread — EITHER direction (P-intel-14
+     *  CONTINUE anchor). Null when nothing readable exists. */
+    public static String latestUsableText(
+            java.util.List<com.replymate.core.model.Message> thread) {
+        if (thread == null) return null;
+        for (int i = thread.size() - 1; i >= 0; i--) {
+            com.replymate.core.model.Message m = thread.get(i);
+            if (m != null && m.body != null && usableText(m.body)) return m.body;
+        }
+        return null;
+    }
+
     public static com.replymate.core.model.Message latestUsableIncoming(
             java.util.List<com.replymate.core.model.Message> thread) {
         if (thread == null) return null;

@@ -117,6 +117,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.prompt.BurstWatermarkTest \
     com.replymate.core.usecase.PendingDraftContextTest \
     com.replymate.core.memory.LongChatCorrectionTest \
+    com.replymate.core.memory.MemoryRestartTest \
+    com.replymate.core.usecase.IntentionalComposeTest \
     com.replymate.core.prompt.PromptSecurityTest \
     com.replymate.core.auth.AuthFlowTest \
     com.replymate.core.listener.StatusFilterTest \

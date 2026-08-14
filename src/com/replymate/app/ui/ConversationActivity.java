@@ -1,6 +1,7 @@
 package com.replymate.app.ui;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -33,6 +34,7 @@ import com.replymate.core.model.Message;
 import com.replymate.core.model.Source;
 import com.replymate.core.model.StyleSignal;
 import com.replymate.core.model.ToneTransform;
+import com.replymate.core.prompt.ComposeKind;
 import com.replymate.core.usecase.DraftOutcome;
 import com.replymate.core.util.Result;
 import com.replymate.core.util.TimeFmt;
@@ -51,6 +53,7 @@ public final class ConversationActivity extends Activity {
     public static final String EXTRA_CONTACT_ID = "contact_id";
 
     private Button btnGen;
+    private Button btnIntent;
     private AppContainer c;
     private Contact contact;
     private LinearLayout draftList;
@@ -82,6 +85,7 @@ public final class ConversationActivity extends Activity {
         search = (EditText) findViewById(R.id.conv_search);
         scroll = (ScrollView) findViewById(R.id.conv_scroll);
         btnGen = (Button) findViewById(R.id.btn_gen);
+        btnIntent = (Button) findViewById(R.id.btn_intent);
 
         ((TextView) findViewById(R.id.conv_name)).setText(contact.displayName);
         ((TextView) findViewById(R.id.conv_rel)).setText(
@@ -117,6 +121,9 @@ public final class ConversationActivity extends Activity {
         });
         btnGen.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { generate(); }
+        });
+        btnIntent.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickIntention(); }
         });
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int n) { }
@@ -345,6 +352,68 @@ public final class ConversationActivity extends Activity {
                 } else {
                     LastProviderError.save(c, r.error);
                     showStatus("Couldn't generate:\n" + r.error, Ui.RED);
+                }
+            }
+        });
+    }
+
+    /* -------------------------------------------------- intentional generation */
+
+    /** P-intelligence-14 (topic 3): INTENTIONAL generation. The owner picks the
+     *  intention; the SAME reply pipeline (voice, memory, contact settings,
+     *  learning, Search, reasoning) composes it; the result lands in this
+     *  timeline as a DRAFT — explicit approval is still required before anything
+     *  is sent. Nothing ever auto-sends. */
+    private void pickIntention() {
+        if (generating) return;
+        final String[] labels = {
+            "Follow-up — bump my unanswered message",
+            "Clarify — ask about their latest message",
+            "Continue — move the current topic forward",
+            "Opener — start a fresh conversation",
+        };
+        final ComposeKind[] kinds = {
+            ComposeKind.FOLLOW_UP,
+            ComposeKind.CLARIFY,
+            ComposeKind.CONTINUE,
+            ComposeKind.OPENER,
+        };
+        new AlertDialog.Builder(this)
+            .setTitle("Intentional draft (you approve before sending)")
+            .setItems(labels, new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface dlg, int which) {
+                    composeIntentional(kinds[which]);
+                }
+            })
+            .show();
+    }
+
+    private void composeIntentional(final ComposeKind kind) {
+        if (generating) return;
+        generating = true;
+        btnGen.setEnabled(false);
+        btnIntent.setEnabled(false);
+        showStatus("Composing…", Ui.ACCENT);
+        final long contactId = contact.id;
+        Tasks.call(new Tasks.Job<Result<DraftOutcome>>() {
+            @Override public Result<DraftOutcome> run() {
+                return c.draftService().composeForContact(contactId, kind);
+            }
+        }, new Tasks.Done<Result<DraftOutcome>>() {
+            @Override public void accept(Result<DraftOutcome> r) {
+                generating = false;
+                btnGen.setEnabled(true);
+                btnIntent.setEnabled(true);
+                if (r.ok) {
+                    // deliberately NO learning signal: an intentional compose is
+                    // NOT a "re-generate" judgment on a previous draft.
+                    showStatus("Composed — approve the draft below before sending",
+                        Ui.GREEN);
+                    refreshDrafts();
+                    scrollToBottom();
+                } else {
+                    LastProviderError.save(c, r.error);
+                    showStatus("Couldn't compose:\n" + r.error, Ui.RED);
                 }
             }
         });
