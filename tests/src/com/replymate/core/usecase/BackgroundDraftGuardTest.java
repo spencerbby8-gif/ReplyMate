@@ -144,4 +144,50 @@ public final class BackgroundDraftGuardTest {
         assertTrue(String.valueOf(r.ok ? "" : r.error), r.ok);
         assertEquals(1, f.provider.calls);
     }
+
+    /** P-bg-10: a provider call that flips the latch DURING it — a newer
+     *  message landing mid-generation, exactly the window the pre-call gate
+     *  cannot see. */
+    private static final class FlipMidCallProvider implements com.replymate.core.ports.AiProvider {
+        final boolean[] latch;
+        int calls;
+        ChatRequest lastRequest;
+        FlipMidCallProvider(boolean[] latch) { this.latch = latch; }
+        @Override public String type() { return "deepseek"; }
+        @Override public Result<ChatReply> generate(ChatRequest request) {
+            calls++;
+            lastRequest = request;
+            latch[0] = true;   // the newer message arrives while money is in flight
+            return Result.ok(new ChatReply(new ArrayList<String>(
+                Collections.singletonList("stale take")), 9, 5, RateLimitInfo.NONE));
+        }
+        @Override public Result<Boolean> validateKey() { return Result.ok(Boolean.TRUE); }
+        @Override public Result<List<String>> listModels() {
+            return Result.ok(Collections.singletonList("deepseek-chat"));
+        }
+    }
+
+    @Test public void supersededDuringThePaidCallSavesNothing() {
+        // The race P-background-8's gate structurally cannot close: the abort
+        // flag is CLEAN at the pre-call gate, then a newer message supersedes
+        // the job while the provider is generating. The stale result must be
+        // discarded after the call — no purge, no saved draft, no alert — with
+        // its own diagnosable outcome (the interrupted call was paid once).
+        final boolean[] superseded = { false };
+        Fixture f = fixture(new SlowRetrieval(20, null));
+        final FlipMidCallProvider flip = new FlipMidCallProvider(superseded);
+        f.gateway.provider = flip;
+        say(f.messages, 1L, "wetin be 'odogwu' abeg");
+        Result<DraftOutcome> r = f.service.generateForContact(1L,
+            new DraftService.AbortCheck() {
+                @Override public boolean aborted() { return superseded[0]; }
+            });
+        assertEquals("the in-flight call ran exactly once — paid once, not zero, not twice",
+            1, flip.calls);
+        assertFalse("a stale result is not a success", r.ok);
+        assertTrue("the outcome names the post-call supersede",
+            String.valueOf(r.error).contains("after the provider call"));
+        assertTrue("no stale draft row may be saved",
+            f.drafts.byContact(1L, 10).isEmpty());
+    }
 }

@@ -40,6 +40,20 @@ public final class NoiseGate {
         if (e.contentKind == ContentKind.CALL) {
             return new Drop(true, "missed/declined-call notice — not a message");
         }
+        // P-bg-10: the app's OWN service chat (WhatsApp/Telegram system notices,
+        // login codes, "you joined…" cards) arrives shaped exactly like a 1:1 —
+        // its only tell is the title being precisely the app label. A real
+        // person is never saved under exactly "WhatsApp"/"Telegram" (nor any
+        // other watched app's label variants), while a contact named e.g.
+        // "Amara WhatsApp" must never drop. Unknown channels fall back to the
+        // wire key from labelFor, which can never equal the label here.
+        if (e.channel != null) {
+            String label = WatchedApps.labelFor(e.channel);
+            if (!label.isEmpty() && !label.equals(e.channel.wire)
+                    && norm(e.conversationTitle).equals(norm(label))) {
+                return new Drop(true, "the app's own service chat (system notices) — not a person");
+            }
+        }
         return KEEP;
     }
 

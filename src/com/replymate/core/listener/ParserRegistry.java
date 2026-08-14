@@ -59,6 +59,16 @@ public final class ParserRegistry {
             return new Outcome(OutcomeKind.DISABLED, ch, null, "watch disabled");
         }
 
+        // P-bg-10: Channels/broadcast/status traffic arrives dressed as a 1:1
+        // chat; its only reliable tell is the native conversation id ending
+        // "@newsletter"/"@broadcast". Reject it here, before parsing produces
+        // events that could create a contact, store a row, or buy a provider
+        // call for a one-way announcement no reply could ever reach.
+        if (raw != null && SystemLines.isAnnouncementId(raw.conversationId)) {
+            if (stats != null) stats.ignored(ch, "announcement/broadcast conversation id");
+            return new Outcome(OutcomeKind.IGNORED, ch, null, "announcement/broadcast conversation id");
+        }
+
         NotifParser.Result r;
         try {
             r = def.parser.parse(raw);

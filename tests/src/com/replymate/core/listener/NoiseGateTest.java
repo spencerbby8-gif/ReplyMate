@@ -46,6 +46,43 @@ public final class NoiseGateTest {
         assertTrue(NoiseGate.evaluate(null).drop);
     }
 
+    /* ----------------------------------------- P-bg-10: app service chats */
+
+    private static NotifEvent serviceEv(com.replymate.core.model.Channel ch, String title) {
+        NotifEvent e = new NotifEvent();
+        e.text = "WhatsApp Web session opened";
+        e.contentKind = ContentKind.TEXT;
+        e.group = false;
+        e.channel = ch;
+        e.conversationTitle = title;
+        return e;
+    }
+
+    @Test public void appLabeledServiceChatsDropBeforeAnythingExists() {
+        // the app's OWN system chat is shaped exactly like a 1:1 — only its
+        // title gives it away: it IS the app label
+        NoiseGate.Drop wa = NoiseGate.evaluate(
+            serviceEv(com.replymate.core.model.Channel.WHATSAPP, "WhatsApp"));
+        assertTrue(wa.drop);
+        assertTrue(wa.reason.contains("service chat"));
+        NoiseGate.Drop tg = NoiseGate.evaluate(
+            serviceEv(com.replymate.core.model.Channel.TELEGRAM, "telegram"));
+        assertTrue("title case-variant of the label still drops", tg.drop);
+        assertTrue(tg.reason.contains("service chat"));
+    }
+
+    @Test public void realContactsMentioningAppNamesNeverDrop() {
+        // a REAL person whose display name happens to contain an app name is a
+        // conversation, not a service chat — the label must match the WHOLE title
+        assertFalse(NoiseGate.evaluate(
+            serviceEv(com.replymate.core.model.Channel.WHATSAPP, "Amara WhatsApp")).drop);
+        assertFalse(NoiseGate.evaluate(
+            serviceEv(com.replymate.core.model.Channel.WHATSAPP, "Chidi")).drop);
+        // and no channel at all must never crash nor drop on the label rule
+        NotifEvent bare = ev("you still coming tonight?", ContentKind.TEXT, false);
+        assertFalse(NoiseGate.evaluate(bare).drop);
+    }
+
     /* -------------------------------------------------- service-summary chrome */
 
     @Test public void appServiceSummaryGeometryIsRecognized() {

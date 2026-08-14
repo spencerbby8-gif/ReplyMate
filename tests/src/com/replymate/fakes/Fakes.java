@@ -5,6 +5,7 @@ import com.replymate.core.ai.ChatRequest;
 import com.replymate.core.ai.RateLimitInfo;
 import com.replymate.core.model.Channel;
 import com.replymate.core.model.Contact;
+import com.replymate.core.model.Direction;
 import com.replymate.core.model.ContactChannel;
 import com.replymate.core.model.Draft;
 import com.replymate.core.model.DraftStatus;
@@ -134,6 +135,18 @@ public final class Fakes {
                 for (Message m : list) {
                     if (m.channel == channel && notifKey.equals(m.notifKey)) return m;
                 }
+            }
+            return null;
+        }
+        /** Near-identity window check: same contact+channel+direction+exact body
+         *  whose stored timestamp is within {@code windowMs} of {@code ts}. */
+        @Override public Message findRecentSame(long contactId, Channel channel, Direction dir, String body, long ts, long windowMs) {
+            if (body == null) return null;
+            List<Message> all = byContact.get(contactId);
+            if (all == null) return null;
+            for (Message m : all) {
+                if (m.channel == channel && m.direction == dir && body.equals(m.body)
+                        && Math.abs(m.sentAt - ts) <= windowMs) return m;
             }
             return null;
         }

@@ -72,6 +72,14 @@ public final class DraftService {
     public static final String SUPERSEDED_ERROR =
         "superseded by a newer message before the provider call";
 
+    /** P-bg-10: the pre-call gate cannot see a message that lands DURING the
+     *  provider call. A job whose abort flag trips while the call is in flight
+     *  returns this instead of purging/saving/alerting a stale draft; the newer
+     *  job owns the conversation. The interrupted call was paid once — the
+     *  why-lines + diag say so honestly rather than hiding the cost. */
+    public static final String SUPERSEDED_AFTER_CALL_ERROR =
+        "superseded by a newer message after the provider call";
+
     private static String joinAudit(java.util.List<String> items) {
         if (items == null || items.isEmpty()) return "";
         StringBuilder b = new StringBuilder();
@@ -364,8 +372,13 @@ public final class DraftService {
                 // the provider's own official search tool rides the SAME generation
                 // call — search happens in-call, its result grounds the text.
                 bundle.requestSearch = true;
-                why.add("live search: " + gateNeed.reason + " → the provider's native"
-                    + " web search grounds this reply (billed by the provider)");
+                // P-bg-10 honesty: REQUESTED is not RAN. The provider may bill
+                // the feature yet execute zero searches — say exactly that below
+                // from the response metadata instead of claiming grounding here.
+                why.add("live search: " + gateNeed.reason
+                    + " → requested the provider's native web search in-call"
+                    + " (billed by the provider); whether it actually RAN is"
+                    + " judged from the response metadata below — never assumed");
             } else {
                 // retrieval fallback (official free encyclopedias) BEFORE generation.
                 facts = retrieval == null
@@ -422,6 +435,14 @@ public final class DraftService {
             return Result.err(reply.error);
         }
 
+        // P-bg-10: the pre-call gate above cannot see a message that arrived
+        // WHILE the provider was generating. Check the flag again now — before
+        // any purge, save, or alert — so the stale job leaves no trace and the
+        // newer job's job answers. The interrupted call was paid once.
+        if (abort != null && abort.aborted()) {
+            return Result.err(SUPERSEDED_AFTER_CALL_ERROR);
+        }
+
         ChatReply r = reply.value;
         if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
 
@@ -446,10 +467,28 @@ public final class DraftService {
                 + (r.searchSources.isEmpty() ? ""
                     : " — sources: " + joinAudit(r.searchSources)));
         }
+        // P-bg-10 honesty: the mirror image. Search was requested but the
+        // provider reported zero executed queries — the why-trail must say the
+        // answer is unverified, never imply grounding that did not happen.
+        if (bundle.requestSearch && r.searchQueries == 0) {
+            why.add("the provider ran NO web search for this reply despite the"
+                + " request — it answered from its own knowledge, unverified live");
+        }
         if (r.reasoningTokens > 0) {
             why.add("model thinking: " + r.reasoningTokens
                 + " reasoning tokens billed (the reasoning itself stays at the"
                 + " provider — never shown, never stored)");
+        }
+        // P-bg-10 honesty for thinking: a non-default reasoning level with no
+        // billed reasoning tokens cannot support any "thought harder" claim.
+        if (think != null
+                && !com.replymate.core.reason.Reasoning.DEFAULT.equals(think.level)
+                && r.reasoningTokens == 0) {
+            why.add("deeper thinking ("
+                + think.level.toUpperCase(java.util.Locale.US)
+                + ") was requested but the provider reported no billed reasoning"
+                + " tokens — treat any 'thought deeper' claim as UNCONFIRMED"
+                + " for this provider/model");
         }
 
         // P-ux-fix: (Re)generate REPLACES the current draft instead of stacking duplicate

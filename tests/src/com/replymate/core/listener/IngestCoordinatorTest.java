@@ -417,4 +417,90 @@ public class IngestCoordinatorTest {
             1, rep.pings.size());
         assertEquals("bringing Tunde too", rep.pings.get(0).snippet);
     }
+
+    // ---- P-bg-10: duplicate-collapse regression pins -----------------------
+    // One real notification must produce ONE stored message and ONE generation
+    // job even when the app re-posts it with a drifted identity/timestamp.
+
+    @Test public void remoteKeyFlipRepostCollapsesToOneRowOneJob() {
+        // first post: legacy shape, no native id
+        IngestReport rep1 = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "are you home?", 1000L, false, false)),
+            allOn());
+        assertEquals(1, rep1.stored);
+        assertEquals(1, rep1.pings.size());
+        // a beat later the app re-posts the SAME message, now carrying the
+        // native conversation id — the content-hash key changes (cid:…), which
+        // used to store a second row and schedule a second job
+        com.replymate.core.listener.NotifEvent re = ev(
+            Channel.WHATSAPP, "Amara", "Amara", "Me", "are you home?", 2000L, false, false);
+        re.conversationId = "2348012345678@s.whatsapp.net";
+        IngestReport rep2 = engine.handle(list(re), allOn());
+        assertEquals("the re-post is the same event, not a new one", 0, rep2.stored);
+        assertEquals(1, rep2.duplicates);
+        assertEquals("no second burst, no second job", 0, rep2.pings.size());
+        assertEquals("no contact fork", 1, contacts.all().size());
+        assertEquals("exactly one stored message",
+            1, countMessages(contacts.all().get(0).id));
+    }
+
+    @Test public void timestampRebaseRepostCollapses() {
+        // MessagingStyle history without per-message times falls back to the
+        // post time: every re-post rebases the timestamp, so the content-hash
+        // key moves. Same body inside the window = the same event.
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Kelechi", "Kelechi", "Me", "send the file", 1000L, false, false)),
+            allOn());
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Kelechi", "Kelechi", "Me", "send the file", 4000L, false, false)),
+            allOn());
+        assertEquals(0, rep.stored);
+        assertEquals(1, rep.duplicates);
+        assertEquals(0, rep.pings.size());
+        assertEquals(1, countMessages(contacts.all().get(0).id));
+    }
+
+    @Test public void identicalBanterOutsideTheWindowSurvives() {
+        // the documented trade: a deliberate repeat AFTER the window is a new
+        // message, stored and pinged like any other
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "ok", 1000L, false, false)), allOn());
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "ok",
+                1000L + IngestCoordinator.NEAR_DUP_WINDOW_MS + 60_000L, false, false)),
+            allOn());
+        assertEquals("a real repeat outside the window stores", 1, rep.stored);
+        assertEquals(2, countMessages(contacts.all().get(0).id));
+    }
+
+    @Test public void identicalTextInAnotherChatNeverCollapses() {
+        // the window is contact- and channel-scoped: the same sentence from a
+        // different person on a different app is a different message
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "see you at 6", 1000L, false, false)),
+            allOn());
+        IngestReport rep = engine.handle(list(
+            ev(Channel.TELEGRAM, "Sam", "Sam", "Me", "see you at 6", 1500L, false, false)),
+            allOn());
+        assertEquals(1, rep.stored);
+        assertEquals(1, rep.pings.size());
+        assertEquals(2, contacts.all().size());
+    }
+
+    @Test public void ownersIdenticalReplyIsNeverCollateral() {
+        // direction is part of the identity: the owner typing back the same
+        // words must never be swallowed by the window
+        engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me", "on my way", 1000L, false, false)),
+            allOn());
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Me", "Me", "on my way", 2000L, false, false)),
+            allOn());
+        assertEquals("the owner's own reply stores", 1, rep.stored);
+        assertEquals("outgoing rows never ping", 0, rep.pings.size());
+        List<Message> msgs = messages.lastMessages(contacts.all().get(0).id, 10);
+        assertEquals(2, msgs.size());
+        assertEquals(Direction.INCOMING, msgs.get(0).direction);
+        assertEquals(Direction.OUTGOING, msgs.get(1).direction);
+    }
 }

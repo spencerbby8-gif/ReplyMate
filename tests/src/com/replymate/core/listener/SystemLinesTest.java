@@ -77,6 +77,29 @@ public final class SystemLinesTest {
 
     /* ------------------------------------------------------ sender identity */
 
+    /* ----------------------------- P-bg-10: announcement ids + time-tailed cards */
+
+    @Test public void announcementNativeIdsAreDetected() {
+        assertTrue(SystemLines.isAnnouncementId("120363406601234567@newsletter"));
+        assertTrue(SystemLines.isAnnouncementId("2348012345678-1610000000@broadcast"));
+        assertTrue(SystemLines.isAnnouncementId("status@broadcast"));
+        assertTrue("case-insensitive", SystemLines.isAnnouncementId("XX@NEWSLETTER"));
+        assertFalse("a real 1:1 thread id is not an announcement",
+            SystemLines.isAnnouncementId("2348012345678@s.whatsapp.net"));
+        assertFalse("telegram-style ids are not announcement-shaped",
+            SystemLines.isAnnouncementId("-1001234567890"));
+        assertFalse(SystemLines.isAnnouncementId(null));
+        assertFalse(SystemLines.isAnnouncementId(""));
+    }
+
+    @Test public void timeTailedCallCardsDropButConversationDoesNot() {
+        assertTrue(SystemLines.isSystemLine("Missed voice call at 2:14 pm"));
+        assertTrue(SystemLines.isSystemLine("Missed call at 9:01 AM"));
+        assertFalse("a person's sentence ABOUT a time-stamped call is chat, not a card",
+            SystemLines.isSystemLine("sorry, missed your call at 2 though 🙏"));
+        assertFalse(SystemLines.isSystemLine("call me at 5 when you land"));
+    }
+
     @Test public void senderIdentityRule() {
         assertFalse(SystemLines.hasSenderIdentity(null, null, null));
         assertFalse(SystemLines.hasSenderIdentity("", " ", "\t"));

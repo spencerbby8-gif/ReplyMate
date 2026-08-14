@@ -52,7 +52,25 @@ public final class SystemLines {
         // ("Missed voice call (tap to call back)" variants): canonical core only.
         int paren = t.lastIndexOf('(');
         if (paren > 0 && t.endsWith(")")) t = t.substring(0, paren).trim();
+        // P-bg-10: some skins append the time to the card itself — "Missed
+        // voice call at 2:14 pm". Strip a trailing " at <digit…>" tail so the
+        // canonical core still matches; a person's sentence like "sorry,
+        // missed your call at 2 though 🙏" is not in CALL_CARDS anyway.
+        int at = t.indexOf(" at ");
+        if (at > 0 && t.substring(at).matches(" at \\d.*")) {
+            t = t.substring(0, at).trim();
+        }
         return CALL_CARDS.contains(t);
+    }
+
+    /** P-bg-10: WhatsApp Channels / broadcast lists / status updates publish a
+     *  native conversation id ending "@newsletter" or "@broadcast" while the
+     *  rest of the notification looks like an ordinary 1:1 chat. Detect the id
+     *  shape itself so the parser can drop the event before any contact, row,
+     *  burst, or provider call exists. */
+    public static boolean isAnnouncementId(String conversationId) {
+        String id = conversationId == null ? "" : conversationId.trim().toLowerCase(java.util.Locale.US);
+        return id.endsWith("@newsletter") || id.endsWith("@broadcast");
     }
 
     private static final java.util.Set<String> CALL_CARDS =

@@ -192,6 +192,18 @@ public final class AssistantRunner {
                     "aborted before the provider call (after research)", "");
                 return;
             }
+            // P-bg-10: the race the pre-call gate cannot see — a message landed
+            // WHILE the provider was generating. The stale job's result is
+            // discarded with its own honest audit line (the interrupted call
+            // was paid once) and the newer job answers instead.
+            if (r != null && DraftService.SUPERSEDED_AFTER_CALL_ERROR.equals(r.error)) {
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.GENERATE,
+                    "a newer message arrived while this generation was in flight",
+                    "stale result discarded before any draft or alert"
+                        + " (the interrupted call was paid once; the newer job answers)", "");
+                return;
+            }
             if (r == null || !r.ok || r.value == null || r.value.drafts.isEmpty()) {
                 String reason = safe(r == null ? "no result" : r.error, 90);
                 AssistantDiag.record(c, contactId, who, tag, "",

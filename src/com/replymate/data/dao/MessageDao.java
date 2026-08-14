@@ -58,6 +58,27 @@ public final class MessageDao {
         }
     }
 
+    /** P-background-10: any stored row for this contact with the same channel,
+     *  direction and exact body, whose timestamp sits within {@code windowMs} of
+     *  {@code ts} — the SAME source event re-posted under a drifted identity.
+     *  null when none (a genuinely new message, or real repeated banter outside
+     *  the window). */
+    public Message findRecentSame(long contactId, Channel channel, Direction dir,
+                                  String body, long ts, long windowMs) {
+        if (body == null) return null;
+        Cursor c = helper.getReadableDatabase().query("message", null,
+            "contact_id=? AND channel=? AND direction=? AND body=?"
+                + " AND abs(sent_at - ?) <= ?",
+            new String[] {String.valueOf(contactId), channel.wire, dir.wire, body,
+                String.valueOf(ts), String.valueOf(windowMs)},
+            null, null, "sent_at DESC", "1");
+        try {
+            return c.moveToFirst() ? message(c) : null;
+        } finally {
+            c.close();
+        }
+    }
+
     /** Latest {@code limit} messages for the contact, returned oldest-first. */
     public List<Message> lastMessages(long contactId, int limit) {
         Cursor c = helper.getReadableDatabase().query("message", null, "contact_id=?",

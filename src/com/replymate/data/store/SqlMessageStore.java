@@ -16,6 +16,11 @@ public final class SqlMessageStore implements MessageStore {
     @Override public Message getByNotifKey(Channel channel, String notifKey) {
         return dao.getByNotifKey(channel, notifKey);
     }
+    @Override public Message findRecentSame(long contactId, Channel channel,
+                        com.replymate.core.model.Direction dir,
+                        String body, long ts, long windowMs) {
+        return dao.findRecentSame(contactId, channel, dir, body, ts, windowMs);
+    }
     @Override public List<Message> lastMessages(long contactId, int limit) {
         return dao.lastMessages(contactId, limit);
     }

@@ -28,6 +28,15 @@ public final class IngestCoordinator {
     public static final String KV_STORED_TOTAL = "listener.stored_total";
     public static final String KV_LAST_EVENT = "listener.last_event";
 
+    /** P-bg-10: near-identity window. Messaging apps re-post the same message
+     *  with a fresh notification (id flip from channel|title key to a native
+     *  conversationId, or a MessagingStyle timestamp rebase) a beat after the
+     *  first post; the content-hash key then differs though the message is the
+     *  same. Same contact + channel + direction + exact body inside this window
+     *  is treated as the same event. A deliberate repeat later than the window
+     *  survives as its own row. */
+    public static final long NEAR_DUP_WINDOW_MS = 120_000L;
+
     private final ContactService contactService;
     private final MessageStore messages;
     private final KvStore kv;
@@ -138,6 +147,23 @@ public final class IngestCoordinator {
                 e.channel.wire, remoteKey, e.senderName, keyBody, ts);
 
             if (messages.getByNotifKey(e.channel, notifKey) != null) {
+                rep.duplicates++;
+                continue;
+            }
+
+            // P-bg-10: remote-key drift defeats the content hash on re-posts —
+            // (a) the first post keys channel|title|sender..., the re-post a
+            // beat later carries a native conversationId so the key becomes
+            // cid:...; (b) MessagingStyle entries without a per-message time
+            // fall back to the post time, which moves on every re-post. Both
+            // shapes re-store the same message and fire a second job for one
+            // real event. Collapse them here: readable text only (media/voice
+            // placeholders legitimately repeat: two photos in a row are two
+            // messages), same contact+channel+direction+exact body within the
+            // window. Two identical "ok"s a minute apart collapse to one row —
+            // accepted, documented trade; a repeat outside the window survives.
+            if (NoiseGate.isReadableText(kind, body)
+                    && messages.findRecentSame(contact.id, e.channel, dir, body, ts, NEAR_DUP_WINDOW_MS) != null) {
                 rep.duplicates++;
                 continue;
             }

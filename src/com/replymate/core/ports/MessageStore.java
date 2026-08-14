@@ -15,6 +15,21 @@ public interface MessageStore {
     }
 
     Message getByNotifKey(Channel channel, String notifKey);      // dedupe, null if absent
+
+    /** P-background-10: near-duplicate suppression for notification identity drift.
+     *  Source apps re-post the SAME message under changed geometry — the remote
+     *  key flips when the native conversation id appears a beat later (title-keyed
+     *  first post → cid-keyed re-post), and entries that lack their own timestamp
+     *  fall back to the post time, which REBASES on every re-post. The exact
+     *  content-hash key cannot catch those; the stable facts can: same contact,
+     *  same channel, same direction, same exact body, close timestamps.
+     *  Default null = feature off for other/legacy implementations. */
+    default Message findRecentSame(long contactId, Channel channel,
+                                   com.replymate.core.model.Direction dir,
+                                   String body, long ts, long windowMs) {
+        return null;
+    }
+
     List<Message> lastMessages(long contactId, int limit);        // oldest-first within the window
 
     /** Everything OLDER than a message id (rolling-summary boundary, P-memory-audit):
