@@ -140,9 +140,20 @@ the trail, aura→Arsenal topic reset (JVM-pinned), 48h sweep age guard.
 ## Gate status — updated 2026-08-14
 
 - Regression audit → fixes → pins: DONE (§0–§2). JVM **804/804**; local engine
-  build GREEN.
-- CI proof build: see release message (run id, artifact, sha256 posted there) —
-  cert gates re-verified MATCH on the fixed tree.
+  build GREEN (`VERSION_CODE=904` dev-check, artifact discarded after compile
+  verification).
+- CI proof build: **GREEN** — run **31800924794** on commit `1dc3cf2`
+  (release.yml dispatch). In-run cert gates: **KEYSTORE-VERDICT: MATCH**,
+  **APK-CERT-PROOF: MATCH**. Artifact **9219231315**
+  `ReplyMate-1.5.9-background-proof-2-vc904` → APK
+  `ReplyMate-1.5.9-background-proof-2.apk`, 588,106 bytes, versionCode 904 /
+  versionName `1.5.9-background-proof-2`. Independently re-verified OFF-CI:
+  sha256 **`adda056b44c5045128447de8ee05ff3ec84ff179eba61af43b6f66343a5bee89`**
+  and signing cert SHA-256
+  `b15f2f37fce19b564683fe6b85725a9d3192df93181ef2f36286b5e21c6a85ed`
+  (B1:5F:2F:37…6A:85:ED — the historical ReplyMate identity; update-in-place
+  over ≤1.5.8 preserved).
 - **Owner device verdicts — OPEN.** §3–§5 are real-phone rows; no next phase
   until duplicates, noise filtering, Search-execution and reasoning-execution
-  all PASS on-device.
+  all PASS on-device. 1.5.9 stays unshipped (releases/RELEASES.md untouched)
+  until then.
