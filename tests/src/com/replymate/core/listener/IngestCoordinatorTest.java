@@ -349,4 +349,72 @@ public class IngestCoordinatorTest {
     private int countMessages(long contactId) {
         return messages.countByContact(contactId);
     }
+
+    /* ---------------- P-background-9: in-chat system/service lines ------------- */
+
+    @Test public void encryptionNoticeNeverCreatesContactChatPing() {
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "🔒 Messages and calls are end-to-end encrypted. Tap to learn more.",
+                1000L, false, false)), allOn());
+        assertEquals(0, rep.stored);
+        assertEquals(1, rep.filtered);
+        assertTrue("no contact row", contacts.all().isEmpty());
+        assertTrue("no ping", rep.pings.isEmpty());
+        assertTrue("no message row", messages.byContact.isEmpty());
+    }
+
+    @Test public void securityCodeAndWaitingLinesNeverCreateAnything() {
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "Your security code with Amara changed. Tap to learn more.",
+                1000L, false, false),
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "Waiting for this message. This may take a while.",
+                2000L, false, false)), allOn());
+        assertEquals(0, rep.stored);
+        assertEquals(2, rep.filtered);
+        assertTrue(contacts.all().isEmpty());
+        assertTrue(rep.pings.isEmpty());
+    }
+
+    @Test public void noCategoryMissedCallCardNeverCreatesContact() {
+        // the app omitted the call category — the bare whole-card text still drops
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "Missed voice call", 1000L, false, false),
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "📵 Missed video call", 2000L, false, false)), allOn());
+        assertEquals(0, rep.stored);
+        assertTrue(contacts.all().isEmpty());
+        assertTrue(rep.pings.isEmpty());
+    }
+
+    @Test public void humanMissedCallSentenceStoresAndPings() {
+        // adjacent words, human sentence — never a card: must keep flowing to a
+        // contact, a stored row and exactly one ping
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "sorry i missed your call 🙏", 1000L, false, false)), allOn());
+        assertEquals(1, rep.stored);
+        assertEquals(1, rep.pings.size());
+        assertEquals(1, contacts.all().size());
+        assertEquals(1, countMessages(contacts.all().get(0).id));
+    }
+
+    @Test public void systemLineInsideARealBurstDropsWithoutTouchingTheRest() {
+        IngestReport rep = engine.handle(list(
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "you still coming tonight?", 1000L, false, false),
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "🔒 Messages and calls are end-to-end encrypted. Tap to learn more.",
+                1500L, false, false),
+            ev(Channel.WHATSAPP, "Amara", "Amara", "Me",
+                "bringing Tunde too", 2000L, false, false)), allOn());
+        assertEquals("real lines store, the system line does not", 2, rep.stored);
+        assertEquals(1, rep.filtered);
+        assertEquals("one contact, one burst, one ping",
+            1, rep.pings.size());
+        assertEquals("bringing Tunde too", rep.pings.get(0).snippet);
+    }
 }

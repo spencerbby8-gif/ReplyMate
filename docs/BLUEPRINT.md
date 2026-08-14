@@ -73,8 +73,11 @@ User pastes msg → ConversationScreen
 ```
 
 ### 1.3 Process & threading
-- One app process. Background work on a single `ExecutorService` (daemon); results posted to UI via
-  main-thread `Handler`. No loaders, no Rx, no coroutines (Track A = Java 8).
+- One app process. Background work runs on SEPARATE daemon lanes (P-background-9):
+  a single-threaded INGEST lane (listener capture only — ordered, never blocked by
+  network), a 2-thread GEN lane (research/reasoning/paid provider calls), and the
+  original small BG pool (UI/misc). Results post to UI via main-thread `Handler`.
+  No loaders, no Rx, no coroutines (Track A = Java 8).
 - No components exported. No broadcast receivers in P0/P1. Listener service arrives in P2 (manifest delta §8).
 - Lifecycle: `ReplyMateApp` holds `AppContainer`; `LockManager` gates UI on cold start & idle timeout.
 

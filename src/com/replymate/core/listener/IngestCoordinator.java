@@ -76,6 +76,15 @@ public final class IngestCoordinator {
             // never pinged, never able to anchor memory/bursts/drafts (any app).
             if (ContentSignals.isReactionNotice(e.text)) { rep.filtered++; continue; }
 
+            // P-background-9: in-chat SYSTEM/SERVICE lines (encryption notices,
+            // security-code changes, decryption "waiting" placeholders, and bare
+            // missed-call cards that arrived with no call category) are dropped
+            // BEFORE a contact/conversation can be created or touched, before any
+            // row is stored, and long before a draft/ping/provider call. Canonical
+            // whole-card shapes only — a person's sentence that mentions a missed
+            // call or encryption is always a real message and passes.
+            if (SystemLines.isSystemLine(e.text)) { rep.filtered++; continue; }
+
             // P-intelligence-7: group/broadcast-style items and missed-call notices
             // are stopped BEFORE any contact or message exists — they never become
             // ReplyMate conversations, never ping, never draft.

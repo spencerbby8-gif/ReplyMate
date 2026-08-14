@@ -57,8 +57,28 @@ public final class MessagingStyleParser implements NotifParser {
                 classify(e, null, false, text, callEvent);
                 return Result.events(single(e));
             }
+            // P-background-9: apps inject their own chrome INTO a chat's history
+            // (encryption notices, security-code lines, upsell cards) as entries
+            // with NO sender identity. Human senders on every watched app always
+            // publish at least one of name/key/uri — so when the SAME payload
+            // carries sendered entries, sender-less entries are system inserts and
+            // are dropped here. When EVERY entry lacks identity (an app that simply
+            // never names senders) nothing is dropped — legacy behavior, zero risk
+            // of swallowing a real thread.
+            boolean anyNamedSender = false;
+            for (RawNotif.Entry probe : raw.messages) {
+                if (SystemLines.hasSenderIdentity(
+                        probe.senderName, probe.senderKey, probe.senderUri)) {
+                    anyNamedSender = true;
+                    break;
+                }
+            }
             List<NotifEvent> out = new java.util.ArrayList<NotifEvent>();
             for (RawNotif.Entry m : raw.messages) {
+                if (anyNamedSender && !SystemLines.hasSenderIdentity(
+                        m.senderName, m.senderKey, m.senderUri)) {
+                    continue;   // sender-less system insert inside a real history
+                }
                 NotifEvent e = base(raw, group);
                 e.text = m.text;
                 e.timestampMs = m.timestampMs > 0 ? m.timestampMs : raw.postTimeMs;

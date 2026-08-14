@@ -85,7 +85,15 @@ public final class RmNotificationListener extends NotificationListenerService {
         // were dead (OEM kill, update, reboot) are caught up NOW instead of never.
         // Dedupe makes this idempotent: already-captured messages are skipped BEFORE
         // any ping/draft/job, so nothing re-alerts and nothing regenerates.
-        Tasks.bg(new Runnable() {
+        // P-background-9: capture lane ONLY (never queues behind network work), and
+        // the re-bind ends with the catch-up SWEEP — dedupe correctly skips
+        // already-STORED messages, but a message whose GENERATION died with the old
+        // process (or that arrived while the listener was unbound) is recovered by
+        // the sweep: it is still the contact's latest unanswered incoming, so the
+        // sweep re-drives it through the normal debounced pipeline. This is what
+        // makes capture → draft reliable across recents-swipe kills and rebinds
+        // without the owner ever opening ReplyMate.
+        Tasks.ingest(new Runnable() {
             @Override public void run() {
                 StatusBarNotification[] active;
                 try {
@@ -94,6 +102,9 @@ public final class RmNotificationListener extends NotificationListenerService {
                     active = null;
                 }
                 reconcile(c, active);
+                com.replymate.app.assistant.AssistantRunner.retryUnansweredThrottled(
+                    c, com.replymate.app.assistant.AssistantRunner
+                        .CONNECT_SWEEP_MIN_INTERVAL_MS);
             }
         });
     }
@@ -133,8 +144,10 @@ public final class RmNotificationListener extends NotificationListenerService {
         if (sbn == null) return;
         final AppContainer c = ReplyMateApp.containerOf(this);
         if (c == null) return;
-        // Callback runs on the service's main thread — move work off it.
-        Tasks.bg(new Runnable() {
+        // Callback runs on the service's main thread — move work off it, onto the
+        // CAPTURE lane (P-background-9): a single-threaded, generation-free queue
+        // so two slow background drafts can never delay real-time capture again.
+        Tasks.ingest(new Runnable() {
             @Override public void run() {
                 process(sbn, c);
             }

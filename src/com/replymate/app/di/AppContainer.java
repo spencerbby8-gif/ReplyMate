@@ -189,7 +189,10 @@ public final class AppContainer {
                 com.replymate.provider.retrieval.WikimediaRetrieval.tightHttpClient()));
     }
 
-    public AiProvider providerOrNull() {
+    /** P-background-9: synchronized — with the lane split, generation threads and
+     *  UI callers can hit this concurrently (two backgrounds + a settings screen).
+     *  The build is idempotent but the cache/signature pair must never tear. */
+    public synchronized AiProvider providerOrNull() {
         String secret;
         try {
             ProviderDef active = this.providerStore.active();
@@ -240,7 +243,7 @@ public final class AppContainer {
         return this.providerStore.active();
     }
 
-    public void invalidateProvider() {
+    public synchronized void invalidateProvider() {
         this.cachedProvider = null;
         this.cachedSignature = null;
     }

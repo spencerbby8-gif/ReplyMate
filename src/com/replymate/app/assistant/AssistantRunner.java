@@ -43,6 +43,21 @@ public final class AssistantRunner {
 
     public static final String KV_ENABLED = "assistant.enabled";
 
+    /** P-background-9: sweep throttles. Listener (re)connects can be frequent on
+     *  some OEM builds, and connectivity callbacks fire per network flap — the
+     *  catch-up sweep they trigger is idempotent but not free (one full contact
+     *  scan). */
+    public static final long CONNECT_SWEEP_MIN_INTERVAL_MS = 15000L;
+    public static final long NETWORK_SWEEP_MIN_INTERVAL_MS = 45000L;
+
+    /** P-background-9: last catch-up sweep timestamp (throttle anchor). */
+    private static final String KV_LAST_SWEEP = "assistant.catchup.last_run";
+
+    /** P-background-9: diag-dedupe marker for aged-out conversations —
+     *  "…catchup.aged.<contactId>" holds the message id we already logged about,
+     *  so a stale unanswered chat is explained ONCE, not on every sweep. */
+    private static final String KV_AGED_PREFIX = "assistant.catchup.aged.";
+
     /** P-background-6: extra settle time ON TOP of the shared 5s batch window —
      *  a rapid burst coalesces into ONE scheduled job (rolling re-arm on every new
      *  ping), keeping "collect for a short window after the last message" true. */
@@ -79,7 +94,9 @@ public final class AssistantRunner {
                     PENDING.remove(contactId);
                 }
                 // RC1 FIX: leave the timer thread BEFORE touching the pipeline.
-                Tasks.bg(new Runnable() {
+                // P-background-9: the GENERATION lane — slow research/retries can
+                // never sit on the capture lane's threads.
+                Tasks.gen(new Runnable() {
                     @Override public void run() {
                         if (!JOBS.isCurrent(contactId, token)) return;   // superseded
                         try {
@@ -104,7 +121,7 @@ public final class AssistantRunner {
     public static void regenerateNow(AppContainer c, long contactId, String name) {
         final long token = JOBS.begin(contactId);
         final long cid = contactId;
-        Tasks.bg(new Runnable() {
+        Tasks.gen(new Runnable() {
             @Override public void run() {
                 if (!JOBS.isCurrent(cid, token)) return;
                 try {
@@ -262,7 +279,11 @@ public final class AssistantRunner {
      *  checks the live path uses. */
     public static void retryUnanswered(final AppContainer c) {
         if (c == null || !enabled(c)) return;
-        Tasks.bg(new Runnable() {
+        c.kv().put(KV_LAST_SWEEP, String.valueOf(c.clock().now()));
+        // P-background-9: the sweep scans every contact's latest state and may
+        // schedule generations — it belongs on the GENERATION lane so capture
+        // keeps flowing underneath it.
+        Tasks.gen(new Runnable() {
             @Override public void run() {
                 for (com.replymate.core.model.Contact ct : c.contacts().all()) {
                     try {
@@ -273,17 +294,28 @@ public final class AssistantRunner {
         });
     }
 
+    /** P-background-9: throttled entry point for automatic triggers (listener
+     *  (re)connect, connectivity return). Same sweep as retryUnanswered, skipped
+     *  when the last sweep ran less than {@code minIntervalMs} ago. Manual/UI
+     *  triggers keep calling the always-run form. */
+    public static void retryUnansweredThrottled(AppContainer c, long minIntervalMs) {
+        if (c == null || !enabled(c)) return;
+        long last;
+        try {
+            last = Long.parseLong(c.kv().get(KV_LAST_SWEEP, "0"));
+        } catch (NumberFormatException nfe) {
+            last = 0;
+        }
+        if (c.clock().now() - last < minIntervalMs) return;
+        retryUnanswered(c);
+    }
+
+    /** P-background-9: one contact inside the sweep. All DECISIONS live in the
+     *  pure, JVM-pinned CatchupPolicy; this driver only gathers state and acts. */
     private static void retryOne(AppContainer c, com.replymate.core.model.Contact ct) {
         java.util.List<Message> lastOne = c.messages().lastMessages(ct.id, 1);
         if (lastOne.isEmpty()) return;
         Message m = lastOne.get(0);
-        if (m.direction != Direction.INCOMING) return;
-        if (m.body == null
-                || com.replymate.core.listener.ListenerFilter.isPlaceholder(m.body)) {
-            return;
-        }
-        String doneHash = c.kv().get(AssistantPlanner.hashKvKey(ct.id), "");
-        if (!AssistantPlanner.needsReply(m, doneHash)) return;
 
         Draft pending = null;
         for (Draft d : c.drafts().byContact(ct.id, 5)) {
@@ -297,15 +329,43 @@ public final class AssistantRunner {
         // waiting draft (it arrived while a slow generation was still pending)
         // makes that draft stale: re-alerting it would mark the new message
         // "answered" and its own scheduled job would then skip — the owner would
-        // get yesterday's answer pinned to today's question. Stale ⇒ fall
-        // through to a fresh scheduled generation instead.
+        // get yesterday's answer pinned to today's question. Stale ⇒ a fresh
+        // scheduled generation instead. (Rule carried into CatchupPolicy.)
         boolean waitsOnLatest = pending != null && pending.inReplyToId != null
             && pending.inReplyToId.longValue() == m.id;
-        if (waitsOnLatest) {
-            // A draft for exactly this message already waits in-app (generated
-            // while alerts were denied): re-alert it — never pay for a
-            // duplicate generation.
-            if (ListenerStatus.canPostNotifications(c.app())) {
+        String doneHash = c.kv().get(AssistantPlanner.hashKvKey(ct.id), "");
+        boolean alertedArmed =
+            "1".equals(c.kv().get(AssistantPlanner.alertedKvKey(ct.id), "0"));
+
+        com.replymate.core.assistant.CatchupPolicy.Action action =
+            com.replymate.core.assistant.CatchupPolicy.decide(m, doneHash,
+                waitsOnLatest, alertedArmed, c.clock().now(),
+                com.replymate.core.assistant.CatchupPolicy.DEFAULT_MAX_AGE_MS);
+
+        switch (action) {
+            case SKIP:
+                return;
+
+            case SKIP_AGED:
+                // Explain ONCE per message (never spam the ring on every sweep).
+                String agedKey = KV_AGED_PREFIX + ct.id;
+                if (!String.valueOf(m.id).equals(c.kv().get(agedKey, ""))) {
+                    c.kv().put(agedKey, String.valueOf(m.id));
+                    AssistantDiag.record(c, ct.id, ct.displayName,
+                        AssistantPlanner.notifTag(ct.id), "",
+                        AssistantEvent.Stage.SCHEDULE,
+                        "an unanswered message older than the catch-up window",
+                        "no background draft scheduled (a late reply would be noise"
+                            + " and a surprise provider bill) — it stays in the chat",
+                        "open the conversation to answer it by hand");
+                }
+                return;
+
+            case RE_ALERT:
+                // A draft for exactly this message already waits in-app (generated
+                // while alerts were denied): re-alert it — never pay for a
+                // duplicate generation.
+                if (!ListenerStatus.canPostNotifications(c.app())) return;
                 c.kv().put(AssistantPlanner.hashKvKey(ct.id),
                     AssistantPlanner.hashOf(m.body + "|" + m.sentAt + "|" + m.id));
                 notifyDraft(c, ct.id, ct.displayName, m, pending, false);
@@ -315,18 +375,39 @@ public final class AssistantRunner {
                     "approval granted after the draft was generated",
                     "existing draft re-alerted (no duplicate generation)",
                     "");
-            }
-            return;
+                return;
+
+            case RE_ALERT_SILENT:
+                // P-background-9: the draft was answered AND the alert flag says
+                // its card should be in the shade — but a system restart / app
+                // update wiped every posted notification. Bring the SAME card
+                // back silently (armed flag ⇒ notifyDraft stays pop-free), with
+                // zero provider cost. A swipe clears the flag first, so a
+                // deliberately dismissed draft is never re-shown by this path.
+                if (!ListenerStatus.canPostNotifications(c.app())) return;
+                notifyDraft(c, ct.id, ct.displayName, m, pending, false);
+                AssistantDiag.record(c, ct.id, ct.displayName,
+                    AssistantPlanner.notifTag(ct.id), "",
+                    AssistantEvent.Stage.NOTIFY,
+                    "the waiting draft's alert was wiped by a restart/update",
+                    "the same draft card was re-posted silently"
+                        + " (no duplicate generation, no provider cost)",
+                    "");
+                return;
+
+            case RE_GENERATE:
+            default:
+                if (pending != null) {
+                    AssistantDiag.record(c, ct.id, ct.displayName,
+                        AssistantPlanner.notifTag(ct.id), "",
+                        AssistantEvent.Stage.SCHEDULE,
+                        "a newer message outdates the waiting draft",
+                        "catch-up schedules a fresh generation instead of re-alerting the stale one",
+                        "");
+                }
+                schedule(c, new IngestReport.PingRequest(
+                    ct.id, ct.displayName, m.body, m.sentAt));
         }
-        if (pending != null) {
-            AssistantDiag.record(c, ct.id, ct.displayName,
-                AssistantPlanner.notifTag(ct.id), "",
-                AssistantEvent.Stage.SCHEDULE,
-                "a newer message outdates the waiting draft",
-                "catch-up schedules a fresh generation instead of re-alerting the stale one",
-                "");
-        }
-        schedule(c, new IngestReport.PingRequest(ct.id, ct.displayName, m.body, m.sentAt));
     }
 
     /** Map known honest gate errors to a human next-step. Unknowns stay generic. */
@@ -346,7 +427,8 @@ public final class AssistantRunner {
             return "expected — can't answer media/empty messages; open the app to read it";
         }
         if (r.contains("network") || r.contains("timeout") || r.contains("unable to resolve")) {
-            return "network was down — it retries on the next message";
+            return "network was down — ReplyMate retries by itself when"
+                + " connectivity returns, on listener rebind, and on the next message";
         }
         return "";
     }

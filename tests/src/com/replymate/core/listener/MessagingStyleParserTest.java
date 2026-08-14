@@ -256,4 +256,51 @@ public class MessagingStyleParserTest {
         assertEquals("tel:+2348012345678", parsed.senderUri);
         assertEquals("owner-jid", parsed.ownerKey);
     }
+
+    /* ---------------- P-background-9: sender-less system inserts ---------------- */
+
+    @Test public void senderlessSystemInsertDropsFromMixedHistory() {
+        // WhatsApp's encryption notice rides INSIDE the real chat history with no
+        // sender identity at all; human entries on watched apps always carry one.
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.convTitle = "Amara";
+        raw.ownerName = "Me";
+        RawNotif.Entry sys = ParserFixtures.msg(
+            "🔒 Messages and calls are end-to-end encrypted. Tap to learn more.",
+            500L, null, false);
+        raw.messages.add(sys);
+        raw.messages.add(ParserFixtures.msg(ParserFixtures.T_GREET, 1000L, "Amara", false));
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals(NotifParser.Result.Kind.EVENTS, r.kind);
+        assertEquals("the sender-less insert is dropped; the real message survives",
+            1, r.events.size());
+        assertEquals(ParserFixtures.T_GREET, r.events.get(0).text);
+        assertEquals("Amara", r.events.get(0).senderName);
+    }
+
+    @Test public void namedEntrySurvivesEvenWhenItIsTheOnlyIdentity() {
+        // owner-line + contact-line + one sender-less insert: both human lines keep
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.ownerName = "Me";
+        raw.messages.add(ParserFixtures.msg("from me", 500L, "Me", false));
+        raw.messages.add(ParserFixtures.msg(null, 700L, null, true));   // sender-less media card
+        raw.messages.add(ParserFixtures.msg(ParserFixtures.T_GREET, 1000L, "Amara", false));
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals(2, r.events.size());
+        assertEquals("from me", r.events.get(0).text);
+        assertEquals(ParserFixtures.T_GREET, r.events.get(1).text);
+    }
+
+    @Test public void allSenderlessHistoryLosesNothing() {
+        // an app that NEVER names senders: zero information is dropped (legacy
+        // behavior) — the mixed-history rule can never swallow a real thread.
+        RawNotif raw = ParserFixtures.raw("com.whatsapp");
+        raw.title = "Amara";
+        raw.messages.add(ParserFixtures.msg(ParserFixtures.T_GREET, 1000L, null, false));
+        raw.messages.add(ParserFixtures.msg(ParserFixtures.T_FOLLOW, 2000L, null, false));
+        NotifParser.Result r = parser.parse(raw);
+        assertEquals(2, r.events.size());
+    }
 }
