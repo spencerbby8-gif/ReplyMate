@@ -189,8 +189,17 @@ after an answered burst (the aura→Arsenal rule — JVM-pinned too).
   tests, release tooling, docs, release history, engine + signing setup.
   Verified: repo root clean, `git status` clean.
 - Re-audit + three blocking fixes + regression tests: DONE (this file §0–§2).
-- JVM gate **785/785**; full-app local build GREEN; CI proof build: see the
-  release message for the artifact + cert-fingerprint proof.
+- JVM gate **785/785**; full-app local build GREEN (commit `1c97f63`).
+- **CI proof build GREEN — run `31770815912`** (dispatched on `1c97f63`):
+  - `KEYSTORE-VERDICT: MATCH` — materialized PKCS12 (owner's keystore from
+    Actions secrets) carries the historical identity.
+  - `APK-CERT-PROOF: MATCH` — artifact `ReplyMate-1.5.9-background-proof.apk`
+    signs with cert SHA-256 `B15F2F37…6A85ED` ⇒ in-place update over ≤1.5.8
+    preserved; all chats/drafts/settings kept.
+  - Artifact `ReplyMate-1.5.9-background-proof-vc902` (id `9208057812`), APK
+    size 584,010 bytes; APK sha256 **recomputed off-CI in the sandbox**:
+    `0e91c7910ad933077348c9733130f04bf9efa13cf88415742d865128c00e9d4d`;
+    embedded cert re-extracted off-CI = `b15f2f37…6a85ed` ✓.
 - **Owner device verdicts — OPEN.** §3–§6 are real-phone PASS/FAIL rows; the
   next phase must not start until capture, filtering and fast background
   generation all PASS on-device. Nothing in engineering verification marks
