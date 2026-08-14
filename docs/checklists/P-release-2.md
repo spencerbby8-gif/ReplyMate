@@ -74,6 +74,19 @@ is hardened (dual-format JKS+PKCS#12, integrity/MAC arbitration of paste
 injuries, historical-cert needle, two-stray scan, end-exact structure, content
 free diagnostics).
 
+**RESOLVED — run `31768345001` (commit `325fc82`): FULL GREEN.** After the owner
+re-pasted the complete secret (2469-byte PKCS#12, exactly the geometry
+prediction): keystore materialized → cert B15F2F37…6A85ED →
+**KEYSTORE-VERDICT: MATCH** → engine signed with the recovery path
+(`--ks-type PKCS12`) → APK signer cert SHA-256 equals the historical identity
+→ **APK-CERT-PROOF: MATCH — update-in-place over ≤1.5.8 is preserved.**
+Artifact `ReplyMate-1.5.8-ci-proof-vc901` (277,749 bytes, 30-day retention);
+independently re-verified off-CI: APK sha256
+`bbf38ec541af084a49aee4c6a2589e657ee62e8d79c046800e1074d4ec13f3b8`, ARENA.RSA
+cert sha256 = historical. Signing continuity RESTORED. Remaining CI hardening
+notes: runner $ANDROID_HOME is read-only — engine bootstrap is pinned to the
+workspace via REPLYMATE_SDK.
+
 Owner actions to unblock (run history newest → oldest):
 
 - Run `31740863887` (bf13675): paste decodes to 2433 bytes but the store's own
@@ -87,8 +100,9 @@ Owner actions to unblock (run history newest → oldest):
 
 ## Remaining blockers (honest list)
 
-1. **Owner:** re-paste `REPLYMATE_KEYSTORE_B64` complete (~3292 chars; it was
-   truncated at 3245) — then the CI proof re-runs.
+1. ~~Owner re-paste~~ DONE — `31768345001` full green; signing continuity
+   proven. Keystore is now backed up ONLY as the two GH secrets (treat them as
+   the key's canonical store; export an offline copy of the .keystore file too).
 2. **Owner:** run the device baseline runbook; reply per its completion rule.
 3. **Owner:** confirm no personal backup of the original keystore (else use
    the recovery path BEFORE the first post-1.5.8 release).
