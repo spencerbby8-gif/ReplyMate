@@ -40,6 +40,15 @@ public final class PromptBundle {
      *  and the reasoning level ("default" leaves the provider's own choice). */
     public boolean requestSearch;
     public String reasoningLevel = "default";
+
+    /** P-background-12: how many reply candidates the provider is ASKED to
+     *  produce. Default is ONE — a background/alert generation must persist
+     *  exactly one current draft per message, never a row per provider variant
+     *  (VARIANT_COUNT=3 rows for one message was the on-device "identical
+     *  drafts" report; it also tripled output-token cost). Interactive previews
+     *  set this explicitly when they want several samples. */
+    public static final int DEFAULT_CANDIDATES = 1;
+    public int candidates = DEFAULT_CANDIDATES;
     /* P-intelligence-6 (context-expiry fix): id of the newest message already
      *  answered by an existing draft (pending or used). The burst/task is built
      *  only from messages ABOVE it, so a pending draft never becomes permanent

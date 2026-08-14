@@ -56,14 +56,19 @@ public class DraftServiceTest {
                 new Fakes.MemoryStoreFake(), messages, kv, Fakes.FIXED_CLOCK));
     }
 
-    @Test public void happyPathGeneratesPersistsVariantsAndUsage() {
+    @Test public void happyPathGeneratesPersistsOneCurrentDraftAndUsage() {
+        // P-background-12: the provider still returns two takes here — but the
+        // background persistence contract is ONE current draft per message.
         Fakes.FakeProvider provider = Fakes.FakeProvider.returning("nice one!", "great to hear");
         Result<DraftOutcome> r = service(new Fakes.GatewayFake(provider)).generateForContact(1);
 
         assertTrue(r.ok);
-        assertEquals(2, r.value.drafts.size());
-        assertEquals(2, drafts.saved.size());
-        assertEquals(r.value.drafts.get(0).variantGroup, r.value.drafts.get(1).variantGroup);
+        assertEquals("one message ⇒ one current draft (never one row per variant)",
+            1, r.value.drafts.size());
+        assertEquals(1, drafts.saved.size());
+        assertEquals("the FIRST usable variant is the draft", "nice one!",
+            drafts.saved.get(0).replyText);
+        assertFalse(drafts.saved.get(0).variantGroup.isEmpty());
         assertEquals("test-model", drafts.saved.get(0).model);   // gateway display name recorded
         assertEquals(1, usage.events.size());
         assertEquals(11, usage.events.get(0).tokensIn);

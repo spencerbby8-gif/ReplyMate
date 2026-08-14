@@ -32,7 +32,12 @@ public final class Tasks {
     private static final ExecutorService INGEST = Executors.newSingleThreadExecutor(
         named("rm-ingest"));
 
-    private static final ExecutorService GEN = Executors.newFixedThreadPool(2,
+    // P-background-12: 3 lanes, not 2 — two simultaneously-slow conversations
+    // (research crawl + provider retries can both park for tens of seconds) must
+    // never queue-block every OTHER conversation's draft. Per-contact generation
+    // is serialized inside DraftService, so widening the pool cannot double-run
+    // one conversation; it only lets different conversations proceed in parallel.
+    private static final ExecutorService GEN = Executors.newFixedThreadPool(3,
         named("rm-gen"));
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());

@@ -11,7 +11,10 @@ import java.util.List;
 /** Assembles the full provider request (BLUEPRINT §5.3, P1 scope: L0 + L3 + L4). */
 public final class PromptBuilder {
 
-    public static final int VARIANT_COUNT = 3;
+    /** Kept for the interactive preview UIs (voice/global previews show several
+     *  sample phrasings). NEVER the background default — see
+     *  PromptBundle.DEFAULT_CANDIDATES. */
+    public static final int PREVIEW_VARIANTS = 3;
 
     private PromptBuilder() { }
 
@@ -85,7 +88,11 @@ public final class PromptBuilder {
             task = Turn.user(base);
         }
         ChatRequest req = new ChatRequest(system, turns, task,
-            GenerationOpts.of(VARIANT_COUNT, 0.8, 220)
+            // P-background-12: candidate count comes from the bundle — 1 for
+            // background drafts (one message ⇒ one current draft), set higher
+            // only by interactive preview flows.
+            GenerationOpts.of(bundle.candidates < 1 ? PromptBundle.DEFAULT_CANDIDATES
+                    : bundle.candidates, 0.8, 220)
                 .withSearch(bundle.requestSearch)
                 .withReasoning(bundle.reasoningLevel));
         return TokenBudgeter.fit(req, TokenBudgeter.DEFAULT_MAX_INPUT);

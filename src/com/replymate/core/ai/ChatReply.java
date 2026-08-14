@@ -31,7 +31,18 @@ public final class ChatReply {
                      int searchQueries, List<String> searchSources,
                      int reasoningTokens, String note) {
         List<String> copy = new ArrayList<String>();
-        if (variants != null) copy.addAll(variants);
+        if (variants != null) {
+            // P-background-12: dedupe byte-identical variants (ignoring surrounding
+            // whitespace). Providers occasionally return the same text twice for
+            // n>1 requests, which read to the owner as "the same draft generated
+            // twice" — exact duplicates carry zero information.
+            for (String v : variants) {
+                if (v == null) continue;
+                String key = v.trim();
+                if (copy.contains(key)) continue;
+                copy.add(key);
+            }
+        }
         this.variants = Collections.unmodifiableList(copy);
         this.tokensIn = tokensIn;
         this.tokensOut = tokensOut;

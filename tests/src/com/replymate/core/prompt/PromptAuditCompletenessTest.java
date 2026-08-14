@@ -109,7 +109,9 @@ public class PromptAuditCompletenessTest {
         assertTrue(prov.str("endpoint"), prov.str("endpoint").startsWith(
             "POST https://generativelanguage.googleapis.com/v1beta/models/test-model"));
         assertEquals("0.8", String.valueOf(root.raw("temperature")));
-        assertEquals("3", String.valueOf(root.raw("candidateCount")));
+        // P-background-12: background generation asks for ONE candidate — one
+        // message means one current draft (previews still ask for 3 samples).
+        assertEquals("1", String.valueOf(root.raw("candidateCount")));
         assertEquals("220", String.valueOf(root.raw("maxOutputTokens")));
         assertEquals("reply", root.str("kind"));
 

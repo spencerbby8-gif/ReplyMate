@@ -502,11 +502,18 @@ public final class ProviderEditActivity extends Activity {
             @Override public Result<Boolean> run() { return provider.validateKey(); }
         }, new Tasks.Done<Result<Boolean>>() {
             @Override public void accept(Result<Boolean> r) {
+                // P-background-12: health is a REAL PROBE VERDICT, persisted — the
+                // provider list renders "tested ✓ <when>" from this, never from
+                // configuration presence alone.
                 if (!r.ok || !Boolean.TRUE.equals(r.value)) {
                     LastProviderError.save(c, r.error);
+                    c.kv().put("provider.health." + type.wire,
+                        "fail|" + System.currentTimeMillis());
                     showStatus("Connection failed:\n" + r.error, Ui.RED);
                 } else {
                     if (!key.isEmpty()) c.registerSensitive(key);
+                    c.kv().put("provider.health." + type.wire,
+                        "ok|" + System.currentTimeMillis());
                     showStatus("Connection OK ✓ — provider is reachable"
                         + (type.needsKey ? " and the key works." : "."), Ui.GREEN);
                 }

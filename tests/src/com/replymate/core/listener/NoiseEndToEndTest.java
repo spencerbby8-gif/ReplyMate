@@ -173,6 +173,87 @@ public final class NoiseEndToEndTest {
         }
     }
 
+    /** P-background-12: further REAL device-shade shapes reported during the
+     *  blocking re-audit — including the layered ways the SAME housekeeping card
+     *  can arrive (ongoing flag, category, phrase text, progress-less backup). */
+    @Test public void newlyPlausibleNoiseShapesAreSilent() {
+        List<String> names = new ArrayList<String>();
+        List<RawNotif> battery = new ArrayList<RawNotif>();
+
+        // 13. the transient connection card, verbatim from the device shade
+        RawNotif checking = ParserFixtures.raw("com.whatsapp");
+        checking.title = "WhatsApp";
+        checking.text = "Checking for new messages";
+        checking.ongoing = true;
+        battery.add(checking); names.add("\"Checking for new messages\" (ongoing)");
+
+        // 14. the same card in its non-ongoing variant (posted transiently)
+        RawNotif checkingTransient = ParserFixtures.raw("com.whatsapp");
+        checkingTransient.title = "WhatsApp";
+        checkingTransient.text = "Checking for new messages…";
+        battery.add(checkingTransient);
+        names.add("\"Checking for new messages…\" (transient)");
+
+        // 15. the companion-session card
+        RawNotif web = ParserFixtures.raw("com.whatsapp");
+        web.title = "WhatsApp";
+        web.text = "WhatsApp Web is currently running";
+        battery.add(web); names.add("\"WhatsApp Web is currently running\"");
+
+        // 16. backup cards that carry NO progress bar — the category alone
+        //     must indict them (MessagingStyleParser's category gate)
+        RawNotif svc = ParserFixtures.raw("com.whatsapp");
+        svc.title = "WhatsApp";
+        svc.text = "Backing up messages…";
+        svc.category = "service";
+        battery.add(svc); names.add("backup card (service category, no progress)");
+        RawNotif prog = ParserFixtures.raw("com.whatsapp");
+        prog.title = "WhatsApp";
+        prog.text = "Preparing Google Drive backup…";
+        prog.category = "progress";
+        battery.add(prog); names.add("backup card (progress category, no progressMax)");
+
+        // 17. unread-count digest
+        RawNotif unread = ParserFixtures.raw("com.whatsapp");
+        unread.title = "WhatsApp";
+        unread.text = "2 unread chats";
+        battery.add(unread); names.add("\"2 unread chats\" digest");
+
+        // 18. group WITHOUT a native conversation id — the API 24–28 shape,
+        //     where the group flag alone must carry the drop
+        RawNotif legacyGroup = ParserFixtures.styleGroup("com.whatsapp",
+            "Devs hangout", "Emeka", "deploy finished ✅");
+        legacyGroup.conversationId = null;
+        battery.add(legacyGroup); names.add("group (API 24–28: no conversationId)");
+
+        assertEquals("battery size matches its names", battery.size(), names.size());
+        for (int i = 0; i < battery.size(); i++) {
+            assertSilent(names.get(i), drive(battery.get(i)));
+        }
+    }
+
+    /** P-background-12: the service-chat kill is LABEL-DRIVEN, so it must hold
+     *  for EVERY watched app's label — not just the two cards seen on-device.
+     *  The pin is deliberately meaningful: the card DOES parse (it is shaped
+     *  exactly like a 1:1) and dies only inside the ingest gate. */
+    @Test public void serviceChatLabelEqualityIsSilentForEveryWatchedApp() {
+        for (WatchedApps.AppDef def : WatchedApps.all()) {
+            RawNotif svcChat = ParserFixtures.raw(def.packageName);
+            svcChat.title = def.label;
+            svcChat.convTitle = def.label;
+            svcChat.ownerName = "Me";
+            svcChat.group = Boolean.FALSE;
+            svcChat.text = "Your login code is 45231.";
+            svcChat.messages.add(ParserFixtures.msg(
+                "Your login code is 45231.", 1000L, def.label, false));
+            Run r = drive(svcChat);
+            assertEquals(def.packageName + " (" + def.label + "): a service-chat"
+                + " card is 1:1-shaped, so it MUST parse and die at ingest",
+                ParserRegistry.OutcomeKind.PARSED, r.out.kind);
+            assertSilent(def.label + " service chat", r);
+        }
+    }
+
     /* -------------------------------------------------------------- controls */
 
     @Test public void realOneToOneStillFlowsToOnePing() {

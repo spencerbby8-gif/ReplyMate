@@ -98,18 +98,23 @@ public final class AssistantNotifier {
             nm.cancel(AssistantPlanner.notifTag(contactId), NOTIF_ID);
         }
 
+        // P-background-12 hierarchy: THE DRAFT IS THE PRIMARY CONTENT — it leads
+        // both the collapsed and expanded forms. The exact source message becomes
+        // a clearly-labeled CONTEXT BLOCK below it (never interleaved, so the eye
+        // never confuses who wrote what), with both times explicit.
         StringBuilder body = new StringBuilder();
+        body.append(draftText);                                   // ① the AI reply
+        if (generatedAt > 0) {
+            body.append("\n— drafted ")
+                .append(com.replymate.core.util.TimeFmt.dayTime(generatedAt)).append(" —");
+        }
         if (incomingText != null && !incomingText.trim().isEmpty()) {
-            body.append("Replying to ").append(name);
+            body.append("\n\n· · · · · · · · · · · · · · ·\n")  // hard divider
+                .append("Replying to ").append(name);           // ② its source
             if (incomingTs > 0) {
                 body.append(" · ").append(com.replymate.core.util.TimeFmt.dayTime(incomingTs));
             }
-            body.append(":\n").append(incomingText.trim()).append("\n\n");
-        }
-        body.append(draftText);
-        if (generatedAt > 0) {
-            body.append("\n\n— drafted ")
-                .append(com.replymate.core.util.TimeFmt.dayTime(generatedAt)).append(" —");
+            body.append(":\n“").append(incomingText.trim()).append("”");
         }
         body.append("\n\n").append(AssistantPlanner.caption(appLabel, cap));
 
@@ -117,10 +122,12 @@ public final class AssistantNotifier {
             ? new Notification.Builder(ctx, CHANNEL_ID)
             : new Notification.Builder(ctx);
         brand(ctx, b)
-            .setContentTitle("Reply ready for " + name
+            .setContentTitle("Draft reply for " + name
                 + (appLabel == null || appLabel.isEmpty() ? "" : " · " + appLabel))
             .setContentText(draftText)
-            .setStyle(new Notification.BigTextStyle().bigText(body.toString()))
+            .setStyle(new Notification.BigTextStyle()
+                .bigText(body.toString())
+                .setSummaryText(name))
             .setContentIntent(openPi(ctx, contactId))
             // P-background-8: a swipe-away is a signal — rejected draft + re-arm the alert.
             .setDeleteIntent(dismissPi(ctx, contactId, draftId))

@@ -120,6 +120,32 @@ public final class DraftService {
      *  so a job superseded while it was stuck in research never burns a request
      *  and never saves a stale draft. Null = legacy behavior, byte-identical. */
     public Result<DraftOutcome> generateForContact(long contactId, AbortCheck abort) {
+        // P-background-12: per-contact generation MUTEX. The JobCoalescer cancels
+        // superseded jobs, but two independently-triggered generations for the
+        // SAME conversation can still overlap on the 2-thread GEN lane (a catch-up
+        // sweep firing while a live job is mid-provider-call, then finishing its
+        // own gates before the live job's hash commit lands). Their purge/insert
+        // sequences would interleave and STACK identical draft rows. Serializing
+        // here makes purge→insert atomic per contact — the second run sees the
+        // first run's complete committed state and (de)duplicates correctly.
+        synchronized (lockFor(contactId)) {
+            return generateForContactLocked(contactId, abort);
+        }
+    }
+
+    /** Striped locks keyed by contact — distinct conversations never wait on
+     *  each other (that would be the blocking the owner forbade). */
+    private static final Object[] CONTACT_LOCKS = new Object[32];
+    static {
+        for (int i = 0; i < CONTACT_LOCKS.length; i++) CONTACT_LOCKS[i] = new Object();
+    }
+    private static Object lockFor(long contactId) {
+        int slot = (int) ((contactId ^ (contactId >>> 32)) & 0x7fffffff)
+            % CONTACT_LOCKS.length;
+        return CONTACT_LOCKS[slot];
+    }
+
+    private Result<DraftOutcome> generateForContactLocked(long contactId, AbortCheck abort) {
         Contact c = contacts.get(contactId);
         if (c == null) return Result.err("Contact not found.");
         if (c.privateMode) return Result.err("This contact is private — AI generation is disabled.");
@@ -506,10 +532,18 @@ public final class DraftService {
             auditContextFor(c, lastIncoming, mem));
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
 
+        // P-background-12: ONE current draft per message — persist the FIRST
+        // usable variant only. The request now asks for a single candidate, but
+        // some providers still return extras (or the multi-candidate fallback
+        // path produced them); persisting every variant was the on-device
+        // "2–3 identical drafts" report. Extra variants are dropped (the draft
+        // card gets Regenerate for a different take; interactive previews keep
+        // showing all samples without persisting anything).
         List<Draft> saved = new ArrayList<Draft>();
         for (String variant : r.variants) {
             String text = variant == null ? "" : variant.trim();
             if (text.isEmpty()) continue;
+            if (!saved.isEmpty()) break;    // one message ⇒ one current draft
             Draft d = new Draft();
             d.contactId = contactId;
             d.inReplyToId = lastIncoming.id > 0 ? lastIncoming.id : null;
@@ -727,6 +761,10 @@ public final class DraftService {
             voice == null ? null : voice.extraLines,
             profiles.extraFiltered(),
             mem == null ? null : mem.lines);
+        // previews keep showing several sample phrasings (interactive only; the
+        // background default is one — see PromptBundle.candidates)
+        previewBundle.candidates =
+            com.replymate.core.prompt.PromptBuilder.PREVIEW_VARIANTS;
         // previews mirror the real prompt — the live-context line rides here too.
         previewBundle.liveLine = liveFor(sample).promptLine;
         // …and so does the planning layer (identical depth semantics).
