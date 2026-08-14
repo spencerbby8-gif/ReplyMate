@@ -260,8 +260,19 @@ Background:
 
 ## Gate status — updated 2026-08-14
 
-- Audit → fixes → pins: DONE (§0–§2). JVM **820/820**; local engine build GREEN.
-- CI proof build: (run id / artifact / sha256 filled after dispatch — see below).
+- Audit → fixes → pins: DONE (§0–§2). JVM **820/820**; local engine build GREEN
+  (`VERSION_CODE=905` dev-check, artifact discarded after compile verification).
+- CI proof build: **GREEN** — run **31807914336** on commit `c6d074e`
+  (release.yml dispatch). In-run cert gates: **KEYSTORE-VERDICT: MATCH**,
+  **APK-CERT-PROOF: MATCH**. Artifact **9221925741**
+  `ReplyMate-1.5.9-provider-audit-proof-vc905` → APK
+  `ReplyMate-1.5.9-provider-audit-proof.apk`, 592,202 bytes, versionCode 905 /
+  versionName `1.5.9-provider-audit-proof`. Independently re-verified OFF-CI:
+  sha256 **`3db1bb54803e780e011076d1f7a53de5d74345cd31165cba0cce213cceffc990`**
+  and signing cert SHA-256
+  `b15f2f37fce19b564683fe6b85725a9d3192df93181ef2f36286b5e21c6a85ed`
+  (B1:5F:2F:37…6A:85:ED — the historical ReplyMate identity; update-in-place
+  over ≤1.5.8 preserved).
 - **Owner device verdicts — OPEN.** P1–P7, V1–V5, D1–D3, N1–N5, S1–S2, B1–B4
   are real-phone rows; no next feature phase until the provider screen, clean
   Diagnostics, useful non-stacking notifications, generalized dismissed-send and
