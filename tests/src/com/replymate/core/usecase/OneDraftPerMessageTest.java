@@ -148,7 +148,7 @@ public final class OneDraftPerMessageTest {
             }
         });
         t1.start(); t2.start();
-        assertTrue(done.await(10, TimeUnit.SECONDS));
+        assertTrue("both generations complete", done.await(10, TimeUnit.SECONDS));
         assertTrue(String.valueOf(results[0].ok ? "" : results[0].error), results[0].ok);
         assertTrue(String.valueOf(results[1].ok ? "" : results[1].error), results[1].ok);
         assertEquals("the two generations must NEVER run inside each other",
@@ -158,10 +158,34 @@ public final class OneDraftPerMessageTest {
     }
 
     @Test public void concurrentGenerationsForDifferentContactsStayParallel() throws Exception {
-        // The counter-guard: per-contact serialization must NOT become global
-        // serialization — one slow conversation never blocks another's draft.
-        final ScriptedProvider p = new ScriptedProvider(250, "ok");
-        final DraftService svc = service(new Fakes.GatewayFake(p));
+        // The counter-guard, made DETERMINISTIC (no wall-clock): the provider
+        // blocks on a 2-slot barrier. If per-contact serialization ever collapsed
+        // into GLOBAL serialization, the first generation could never trip the
+        // barrier while holding a global lock, the 4s await would expire, and the
+        // replies would come back marked SERIALIZED — failing the draft-text
+        // assertions below with the actual stored text as evidence.
+        final CountDownLatch both = new CountDownLatch(2);
+        com.replymate.core.ports.AiProvider barrier = new com.replymate.core.ports.AiProvider() {
+            @Override public String type() { return "gemini"; }
+            @Override public Result<ChatReply> generate(ChatRequest request) {
+                both.countDown();
+                boolean overlapped;
+                try {
+                    overlapped = both.await(4, TimeUnit.SECONDS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    overlapped = false;
+                }
+                return Result.ok(new ChatReply(
+                    java.util.Collections.singletonList(overlapped ? "ok" : "SERIALIZED"),
+                    11, 7, RateLimitInfo.NONE));
+            }
+            @Override public Result<Boolean> validateKey() { return Result.ok(Boolean.TRUE); }
+            @Override public Result<List<String>> listModels() {
+                return Result.ok(java.util.Collections.singletonList("test-model"));
+            }
+        };
+        final DraftService svc = service(new Fakes.GatewayFake(barrier));
         final CountDownLatch done = new CountDownLatch(2);
         Thread t1 = new Thread(new Runnable() {
             @Override public void run() { svc.generateForContact(1); done.countDown(); }
@@ -169,12 +193,12 @@ public final class OneDraftPerMessageTest {
         Thread t2 = new Thread(new Runnable() {
             @Override public void run() { svc.generateForContact(2); done.countDown(); }
         });
-        long t0 = System.currentTimeMillis();
         t1.start(); t2.start();
-        assertTrue(done.await(10, TimeUnit.SECONDS));
-        long elapsed = System.currentTimeMillis() - t0;
-        assertTrue("two different contacts generate in parallel (one 250ms call "
-            + "each, ~500ms+ if serialized): " + elapsed + "ms", elapsed < 480);
+        assertTrue("both generations complete", done.await(15, TimeUnit.SECONDS));
+        assertEquals("contact 1's provider call truly overlapped contact 2's",
+            "ok", drafts.byContact(1, 10).get(0).replyText);
+        assertEquals("contact 2's provider call truly overlapped contact 1's",
+            "ok", drafts.byContact(2, 10).get(0).replyText);
         assertEquals(1, drafts.byContact(1, 10).size());
         assertEquals(1, drafts.byContact(2, 10).size());
     }
