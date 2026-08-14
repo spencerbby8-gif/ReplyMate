@@ -24,7 +24,10 @@ import java.util.EnumSet;
  *  nothing is ever faked). Every launch is guarded: canLaunch + try/catch. */
 public final class AssistantPrereq {
 
-    public enum Need { NOTIFICATION_ACCESS, POST_NOTIFICATIONS, BATTERY }
+    public enum Need { NOTIFICATION_ACCESS, POST_NOTIFICATIONS, BATTERY,
+        /** Android 9+ "Restricted" app-battery bucket — a separate lever from
+         *  battery-optimization whitelisting; kills background work outright. */
+        BACKGROUND_RESTRICTED }
 
     private AssistantPrereq() { }
 
@@ -34,6 +37,7 @@ public final class AssistantPrereq {
         if (!ListenerStatus.isServiceEnabled(ctx)) out.add(Need.NOTIFICATION_ACCESS);
         if (!ListenerStatus.canPostNotifications(ctx)) out.add(Need.POST_NOTIFICATIONS);
         if (!ListenerStatus.batteryWhitelisted(ctx)) out.add(Need.BATTERY);
+        if (ListenerStatus.backgroundRestricted(ctx)) out.add(Need.BACKGROUND_RESTRICTED);
         return out;
     }
 
@@ -46,6 +50,11 @@ public final class AssistantPrereq {
             case POST_NOTIFICATIONS:
                 return "Show notifications — lets ReplyMate show the ready-to-approve"
                     + " reply alert on top of other apps.";
+            case BACKGROUND_RESTRICTED:
+                return "App battery is set to RESTRICTED — Android is blocking ReplyMate"
+                    + " from running in the background at all. Switch it to"
+                    + " \"Unrestricted\" or \"Optimized\" (this is a second, separate switch"
+                    + " from battery optimization).";
             default:
                 return "Battery: Unrestricted — stops Android freezing ReplyMate, so"
                     + " background generation keeps running instead of dying silently.";
@@ -61,6 +70,9 @@ public final class AssistantPrereq {
                 return "In the box that appears, choose ALLOW so ReplyMate may always"
                     + " run in the background. (If no box appears, find ReplyMate in the"
                     + " list and pick \"Don't optimize\" / Battery \u2192 Unrestricted.)";
+            case BACKGROUND_RESTRICTED:
+                return "On the app-info screen that opens, tap Battery and choose"
+                    + " \"Unrestricted\" (or at least \"Optimized\" \u2014 never \"Restricted\").";
             default:
                 return "";   // POST_NOTIFICATIONS is an in-app runtime request
         }
@@ -71,6 +83,7 @@ public final class AssistantPrereq {
         switch (n) {
             case NOTIFICATION_ACCESS: return "notification access";
             case POST_NOTIFICATIONS: return "show-notifications";
+            case BACKGROUND_RESTRICTED: return "app battery restricted";
             default: return "battery";
         }
     }
@@ -91,6 +104,10 @@ public final class AssistantPrereq {
                     Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                     Uri.parse("package:" + ctx.getPackageName()))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            case BACKGROUND_RESTRICTED:
+                // only the app's own battery page can flip the Restricted bucket —
+                // there is no grant-dialog intent for it
+                return appDetailsIntent(ctx);
             default:
                 return null;
         }

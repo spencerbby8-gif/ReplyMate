@@ -134,8 +134,12 @@ public final class PromptAuditActivity extends Activity {
             @Override public void onClick(View v) {
                 open = !open;
                 if (open) {
+                    // P-background-11: even the audit payload renders redacted — a
+                    // custom base URL with userinfo or a provider that echoed key
+                    // material into a request field must never be readable here.
                     payload.setText(d.promptSnapshotJson == null || d.promptSnapshotJson.isEmpty()
-                        ? "(no snapshot recorded)" : pretty(d.promptSnapshotJson));
+                        ? "(no snapshot recorded)"
+                        : com.replymate.core.privacy.Secrets.redact(pretty(d.promptSnapshotJson)));
                     payload.setVisibility(View.VISIBLE);
                     toggle.setText("▾ hide prompt payload");
                 } else {

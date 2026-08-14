@@ -18,7 +18,9 @@ import com.replymate.core.assistant.AssistantEvent;
 import com.replymate.core.assistant.AssistantLearning;
 import com.replymate.core.assistant.AssistantPlanner;
 import com.replymate.core.model.Contact;
+import com.replymate.core.model.Direction;
 import com.replymate.core.model.DraftStatus;
+import com.replymate.core.model.Message;
 
 /** P-background-2: the notification buttons. Approve is the ONLY send path — it
  *  delivers the draft through the source app's own quick-reply contract
@@ -163,10 +165,19 @@ public final class AssistantReceiver extends BroadcastReceiver {
         // The action tap auto-canceled the alert — re-post it SILENTLY with the
         // edited text as the pending draft (same cycle: no new heads-up pop).
         boolean direct = intent != null && intent.getBooleanExtra(EXTRA_DIRECT, false);
+        // P-background-11: the re-posted card keeps the full "replying to <exact
+        // message> · time" context — the edit flow must not drop it.
+        String inText = null; long inTs = 0L;
+        java.util.List<Message> lastOne = c.messages().lastMessages(contactId, 5);
+        for (Message m : lastOne) {
+            if (m.direction == Direction.INCOMING && (inText == null || m.sentAt >= inTs)) {
+                inText = m.body; inTs = m.sentAt;
+            }
+        }
         AssistantNotifier.post(ctx, contactId,
             empty(name) ? who : name, appLabel, edited, draftId,
             direct ? AssistantPlanner.Capability.DIRECT : AssistantPlanner.Capability.NONE,
-            false);
+            false, inText, inTs, System.currentTimeMillis());
     }
 
     /* ----------------------------------------------------------------- dismiss */

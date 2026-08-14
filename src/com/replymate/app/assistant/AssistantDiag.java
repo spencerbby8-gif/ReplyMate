@@ -42,9 +42,12 @@ public final class AssistantDiag {
             e.alertTag = alertTag == null ? "" : alertTag;
             e.sbnKey = shortKey(sbnKey);
             e.stage = stage;
-            e.reason = reason == null ? "?" : reason;
-            e.action = action == null ? "" : action;
-            e.fix = fix == null ? "" : fix;
+            // P-background-11: the ledger is DURABLE — every free-text field passes
+            // the secret redactor before it can persist. (Provider reasons can
+            // quote raw error bodies; a key shape must never survive that.)
+            e.reason = com.replymate.core.privacy.Secrets.redact(reason == null ? "?" : reason);
+            e.action = com.replymate.core.privacy.Secrets.redact(action == null ? "" : action);
+            e.fix = com.replymate.core.privacy.Secrets.redact(fix == null ? "" : fix);
 
             String existing = c.kv().get(KV_KEY, "");
             List<Object> events = readAll(existing);

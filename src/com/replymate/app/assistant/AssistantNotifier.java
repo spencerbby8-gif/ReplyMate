@@ -38,6 +38,14 @@ public final class AssistantNotifier {
     public static final String LEGACY_CHANNEL_ID = "rm_assistant";
     public static final int NOTIF_ID = 7311;   // + contact-scoped tag = one per conversation
 
+    /** P-background-11: bounded shelf-life for a WAITING draft alert. Past this,
+     *  replying is usually no longer relevant — the card retires itself instead
+     *  of stacking forever in the shade. 12h covers the realistic "answer in the
+     *  morning" case; the draft row itself stays in the app either way. */
+    public static final long WAITING_TTL_MS = 12L * 3600_000L;
+    /** A settled state line ("Sent ✓ / Copied") confirms, then clears itself. */
+    public static final long SETTLED_TTL_MS = 120_000L;
+
     private static final int BRAND = 0xFF0A84FF;   // ReplyMate accent
 
     private AssistantNotifier() {
@@ -68,6 +76,19 @@ public final class AssistantNotifier {
     public static void post(Context ctx, long contactId, String name, String appLabel,
                             String draftText, long draftId, AssistantPlanner.Capability cap,
                             boolean freshAlert) {
+        post(ctx, contactId, name, appLabel, draftText, draftId, cap, freshAlert,
+            null, 0L, 0L);
+    }
+
+    /** P-background-11 full-context flavor: the alert must answer "what is the AI
+     *  replying TO?" at a glance — the exact incoming message (with its time)
+     *  sits above the generated draft (with its own time) in the expanded body,
+     *  and the shade's when-stamp is the INCOMING message time, not the re-post
+     *  time. The card expires itself after {@link #WAITING_TTL_MS} unactioned. */
+    public static void post(Context ctx, long contactId, String name, String appLabel,
+                            String draftText, long draftId, AssistantPlanner.Capability cap,
+                            boolean freshAlert,
+                            String incomingText, long incomingTs, long generatedAt) {
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
 
@@ -77,20 +98,39 @@ public final class AssistantNotifier {
             nm.cancel(AssistantPlanner.notifTag(contactId), NOTIF_ID);
         }
 
+        StringBuilder body = new StringBuilder();
+        if (incomingText != null && !incomingText.trim().isEmpty()) {
+            body.append("Replying to ").append(name);
+            if (incomingTs > 0) {
+                body.append(" · ").append(com.replymate.core.util.TimeFmt.dayTime(incomingTs));
+            }
+            body.append(":\n").append(incomingText.trim()).append("\n\n");
+        }
+        body.append(draftText);
+        if (generatedAt > 0) {
+            body.append("\n\n— drafted ")
+                .append(com.replymate.core.util.TimeFmt.dayTime(generatedAt)).append(" —");
+        }
+        body.append("\n\n").append(AssistantPlanner.caption(appLabel, cap));
+
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
             ? new Notification.Builder(ctx, CHANNEL_ID)
             : new Notification.Builder(ctx);
         brand(ctx, b)
-            .setContentTitle("Reply ready for " + name)
+            .setContentTitle("Reply ready for " + name
+                + (appLabel == null || appLabel.isEmpty() ? "" : " · " + appLabel))
             .setContentText(draftText)
-            .setStyle(new Notification.BigTextStyle()
-                .bigText(draftText + "\n\n" + AssistantPlanner.caption(appLabel, cap)))
+            .setStyle(new Notification.BigTextStyle().bigText(body.toString()))
             .setContentIntent(openPi(ctx, contactId))
             // P-background-8: a swipe-away is a signal — rejected draft + re-arm the alert.
             .setDeleteIntent(dismissPi(ctx, contactId, draftId))
             .setOnlyAlertOnce(!freshAlert)
             .setAutoCancel(true)
-            .setShowWhen(true);
+            .setShowWhen(true)
+            .setWhen(incomingTs > 0 ? incomingTs : System.currentTimeMillis());
+        // setTimeoutAfter is API 26+; on 24–25 a waiting card simply stays until
+        // replaced/dismissed (the per-conversation tag still prevents stacking).
+        if (Build.VERSION.SDK_INT >= 26) b.setTimeoutAfter(WAITING_TTL_MS);
 
         for (AssistantPlanner.Btn btn : AssistantPlanner.buttonsFor(cap)) {
             // P-background-5: preview vs send stays split: tap-body →
@@ -134,7 +174,12 @@ public final class AssistantNotifier {
             .setStyle(new Notification.BigTextStyle().bigText(line))
             .setContentIntent(openPi(ctx, contactId))
             .setOnlyAlertOnce(true)
-            .setAutoCancel(true);
+            .setAutoCancel(true)
+            // P-background-11: the state line confirms (with its time), then
+            // retires itself — old "Sent ✓ / Copied" cards never accrete.
+            .setShowWhen(true)
+            .setWhen(System.currentTimeMillis());
+        if (Build.VERSION.SDK_INT >= 26) b.setTimeoutAfter(SETTLED_TTL_MS);
         if (keepOpenButton) {
             b.addAction(new Notification.Action.Builder(null, "Open conversation",
                 openPi(ctx, contactId)).build());

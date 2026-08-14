@@ -265,6 +265,128 @@ public class DiagnosticsTest {
                 "{\"error\":{\"message\":\"Insufficient Balance\"}}")));
     }
 
+    /* ================= P-background-11: current-docs classification refresh =====
+     * Fixtures follow the OFFICIAL error models (ai.google.dev / cloud.google.com
+     * Vertex "API errors", platform.openai.com error-codes, Anthropic error
+     * envelope). The mandate: never call a real quota / rate-limit / permission /
+     * provider error an invalid key without evidence. */
+
+    /** Google PERMISSION_DENIED with NO bad-key evidence (the documented Vertex/
+     *  Gemini shape for "this project/key has no permission for this API"). */
+    static final String GEMINI_403_PERMISSION =
+        "{\"error\":{\"code\":403,\"message\":\"Generative Language API has not been used in "
+        + "project 123 before or it is disabled.\",\"status\":\"PERMISSION_DENIED\"}}";
+
+    static final String GEMINI_400_FAILED_PRECONDITION =
+        "{\"error\":{\"code\":400,\"message\":\"Gemini API free tier is not available in your "
+        + "country. Please enable billing on your project in Google AI Studio.\","
+        + "\"status\":\"FAILED_PRECONDITION\"}}";
+
+    static final String OPENAI_429_INSUFFICIENT_QUOTA =
+        "{\"error\":{\"message\":\"You exceeded your current quota, please check your plan and "
+        + "billing details.\",\"type\":\"insufficient_quota\",\"param\":null,"
+        + "\"code\":\"insufficient_quota\"}}";
+
+    static final String OPENAI_429_RATE_WINDOW =
+        "{\"error\":{\"message\":\"Rate limit reached for gpt-4o-mini in organization org-x on "
+        + "requests per min (RPM): Limit 500, Used 812.\",\"type\":\"tokens\","
+        + "\"param\":null,\"code\":\"rate_limit_exceeded\"}}";
+
+    static final String OPENAI_429_SPEND_LIMIT =
+        "{\"error\":{\"message\":\"Your organization reached its enforced spend limit.\","
+        + "\"type\":\"server_error\",\"param\":null,\"code\":\"organization_spend_limit_exceeded\"}}";
+
+    static final String ANTHROPIC_403_PERMISSION =
+        "{\"type\":\"error\",\"error\":{\"type\":\"permission_error\",\"message\":\"Your API key "
+        + "does not have permission to use the specified resource.\"},\"request_id\":\"req_x\"}";
+
+    static final String OPENAI_404_MODEL =
+        "{\"error\":{\"message\":\"The model `gpt-audit` does not exist or you do not have "
+        + "access to it.\",\"type\":\"invalid_request_error\",\"param\":\"model\","
+        + "\"code\":\"model_not_found\"}}";
+
+    static final String GEMINI_404_MODEL_GONE =
+        "{\"error\":{\"code\":404,\"message\":\"models/gemini-old is not found for API version "
+        + "v1beta, or is not supported for generateContent.\",\"status\":\"NOT_FOUND\"}}";
+
+    @Test public void plain403IsPermissionNeverABadKeyClaim() {
+        Diagnostics d = Diagnostics.build("gemini", "GET",
+            "https://generativelanguage.googleapis.com/v1beta/models", "",
+            new HttpResponse(403, GEMINI_403_PERMISSION, null),
+            GeminiParser.extractProviderMessage(GEMINI_403_PERMISSION));
+        assertEquals(Diagnostics.Cause.PERMISSION, d.cause);
+        assertEquals(ApiError.Type.AUTH, d.error.type);   // auth FAMILY, honest copy
+        assertFalse(d.error.retryable());
+        assertTrue(d.interpretation.contains("ACCEPTED the key"));
+        assertTrue("only ever named as a NEGATION — never claimed",
+            d.interpretation.contains("not an invalid-key error"));
+        assertTrue(d.suggestion.contains("enable the API"));
+    }
+
+    @Test public void freeTierRegionPreconditionIsAPlanProblem() {
+        Diagnostics d = Diagnostics.build("gemini", "POST",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            "gemini-2.5-flash", new HttpResponse(400, GEMINI_400_FAILED_PRECONDITION, null),
+            GeminiParser.extractProviderMessage(GEMINI_400_FAILED_PRECONDITION));
+        assertEquals(Diagnostics.Cause.PLAN, d.cause);
+        assertFalse(d.error.retryable());
+        assertTrue(d.interpretation.contains("plan precondition"));
+        assertTrue(d.suggestion.contains("billing"));
+        assertFalse("must not mislabel as a bad key", d.suggestion.contains("re-check the key"));
+    }
+
+    @Test public void openaiInsufficientQuotaIsBillingNeverAKeyAndNeverARetry() {
+        Diagnostics d = openaiStyle("openai", 429, OPENAI_429_INSUFFICIENT_QUOTA);
+        assertEquals(Diagnostics.Cause.NO_BALANCE, d.cause);
+        assertEquals(ApiError.Type.QUOTA, d.error.type);
+        assertFalse("billing exhaustion cannot succeed on retry", d.error.retryable());
+        assertTrue(d.suggestion.toLowerCase(java.util.Locale.US).contains("top up"));
+        assertFalse(d.interpretation.contains("key"));
+    }
+
+    @Test public void openaiWindowedRateLimitStillRetries() {
+        Diagnostics d = openaiStyle("openai", 429, OPENAI_429_RATE_WINDOW);
+        assertEquals(Diagnostics.Cause.QUOTA, d.cause);
+        assertTrue("a per-minute window is the retryable 429", d.error.retryable());
+        assertTrue(d.interpretation.contains("per-minute"));
+    }
+
+    @Test public void openaiSpendLimitIsBillingExhaustion() {
+        Diagnostics d = openaiStyle("openai", 429, OPENAI_429_SPEND_LIMIT);
+        assertEquals(Diagnostics.Cause.NO_BALANCE, d.cause);
+        assertFalse(d.error.retryable());
+    }
+
+    @Test public void anthropicPermissionErrorIsPermission() {
+        Diagnostics d = openaiStyle("anthropic", 403, ANTHROPIC_403_PERMISSION);
+        assertEquals(Diagnostics.Cause.PERMISSION, d.cause);
+        assertTrue(d.interpretation.contains("Permission denied"));
+    }
+
+    @Test public void modelErrorsAt404ClassifyAsModel() {
+        Diagnostics d1 = openaiStyle("openai", 404, OPENAI_404_MODEL);
+        assertEquals(Diagnostics.Cause.MODEL, d1.cause);
+        assertTrue(d1.suggestion.contains("Discover models"));
+        Diagnostics d2 = Diagnostics.build("gemini", "POST",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-old:generateContent",
+            "gemini-old", new HttpResponse(404, GEMINI_404_MODEL_GONE, null),
+            GeminiParser.extractProviderMessage(GEMINI_404_MODEL_GONE));
+        assertEquals(Diagnostics.Cause.MODEL, d2.cause);
+    }
+
+    @Test public void everyPersistedFieldIsSecretFree() {
+        String bodyWithSecrets = "{\"error\":{\"message\":\"bad call — tried key "
+            + "AIzaSyAuditOnly0123456789abcd and Authorization: Bearer sk-abcdef0123456789abcdef\"}}";
+        Diagnostics d = Diagnostics.build("gemini", "POST",
+            "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent?key=AIzaSyAuditOnly0123456789abcd",
+            "m", new HttpResponse(400, bodyWithSecrets, null),
+            GeminiParser.extractProviderMessage(bodyWithSecrets));
+        String all = d.display() + "\n" + d.rawBody + "\n" + d.providerMsg + "\n" + d.url;
+        assertFalse(all.contains("AIzaSyAuditOnly0123456789abcd"));
+        assertFalse(all.contains("sk-abcdef0123456789abcdef"));
+        assertTrue("the honest explanation still shows", d.display().contains("ReplyMate read:"));
+    }
+
     // ---- shape-tolerant extraction (the four real envelopes) ----
 
     @Test public void extractionCoversEveryRealShape() {

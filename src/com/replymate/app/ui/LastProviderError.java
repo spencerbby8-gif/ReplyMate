@@ -17,7 +17,10 @@ public final class LastProviderError {
 
     public static void save(AppContainer c, String errorBlock) {
         if (c == null || errorBlock == null || errorBlock.trim().isEmpty()) return;
-        String v = errorBlock.length() > 1800 ? errorBlock.substring(0, 1800) + "…" : errorBlock;
+        // P-background-11: persisted diagnostics must be secret-free even if a
+        // provider echoes material back — redact before it ever touches the kv.
+        String clean = com.replymate.core.privacy.Secrets.redact(errorBlock);
+        String v = clean.length() > 1800 ? clean.substring(0, 1800) + "…" : clean;
         String when = new SimpleDateFormat("MMM d, HH:mm:ss", Locale.US).format(new Date());
         c.kv().put(KV_KEY, when + "\n" + v);
     }

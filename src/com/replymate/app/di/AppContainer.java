@@ -85,6 +85,10 @@ public final class AppContainer {
         ScrubLogger wrap = ScrubLogger.wrap(new AndroidLogger());
         this.scrubLogger = wrap;
         this.logger = wrap;
+        // P-background-11: no cloud credential ever appears in logs — the Supabase
+        // publishable key is non-secret by design but the owner's audit rule is
+        // zero credentials in diagnostics; registered once here, unconditionally.
+        wrap.registerSensitive(com.replymate.core.supabase.SupabaseConfig.ANON_KEY);
         SystemClock systemClock = new SystemClock();
         this.clock = systemClock;
         UuidGen uuidGen = new UuidGen();

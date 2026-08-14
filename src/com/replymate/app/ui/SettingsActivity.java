@@ -398,7 +398,11 @@ public final class SettingsActivity extends Activity {
             .setMessage(msg.toString())
             .setPositiveButton(
                 fixNeed == com.replymate.app.assistant.AssistantPrereq.Need.BATTERY
-                    ? "Allow in background" : ("Open " + label + " settings"),
+                    ? "Allow in background"
+                    : fixNeed == com.replymate.app.assistant.AssistantPrereq.Need
+                            .BACKGROUND_RESTRICTED
+                        ? "Open app battery settings"
+                        : ("Open " + label + " settings"),
                 new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
                         if (fixNeed == com.replymate.app.assistant.AssistantPrereq.Need.BATTERY) {

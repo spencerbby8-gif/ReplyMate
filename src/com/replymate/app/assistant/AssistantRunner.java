@@ -277,7 +277,12 @@ public final class AssistantRunner {
         // burst pops again. force (the Regenerate button) never re-pops.
         String alertedKey = AssistantPlanner.alertedKvKey(contactId);
         boolean fresh = !force && !"1".equals(c.kv().get(alertedKey, "0"));
-        AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap, fresh);
+        // P-background-11: the alert names exactly WHAT is being answered — the
+        // fire-time latest incoming message (never a stale scheduled one) + its
+        // time, and the draft's own generation time.
+        AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap,
+            fresh, lastIncoming.body, lastIncoming.sentAt,
+            d.createdAt > 0 ? d.createdAt : System.currentTimeMillis());
         if (fresh) c.kv().put(alertedKey, "1");
     }
 

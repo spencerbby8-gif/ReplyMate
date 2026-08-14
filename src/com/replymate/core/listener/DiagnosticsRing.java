@@ -17,7 +17,10 @@ public final class DiagnosticsRing {
     public static String append(String ringJson, long ts, String line) {
         JsonArr arr = parse(ringJson);
         JsonArr next = JsonArr.create();
-        next.add(JsonObj.create().put("ts", ts).put("line", line == null ? "" : line));
+        // P-background-11: the ring persists — redact secret shapes at the single
+        // choke point so no caller can ever leak one into durable storage.
+        next.add(JsonObj.create().put("ts", ts).put("line",
+            com.replymate.core.privacy.Secrets.redact(line)));
         int kept = 0;
         for (int i = 0; i < arr.size() && kept < CAP - 1; i++) {
             JsonObj o = arr.obj(i);

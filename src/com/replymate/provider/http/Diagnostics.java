@@ -16,12 +16,30 @@ import java.util.Locale;
  *    - Mistral returns HTTP 401 {"detail":"Invalid API Key"} (no "error" envelope)
  *    - Gemini free-tier can return HTTP 429 with "limit: 0" — the model is unavailable
  *      on the key (plan/model restriction), NOT quota exhaustion. Never retry those.
- *    - 402 (DeepSeek/OpenRouter) = no balance/credits — top up, don't retry. */
+ *    - 402 (DeepSeek/OpenRouter) = no balance/credits — top up, don't retry.
+ *
+ *  P-background-11 refresh against the CURRENT official docs:
+ *    - HTTP 403 is PERMISSION_DENIED (Google) / permission_error (Anthropic) /
+ *      "country, region, or territory not supported" (OpenAI): the key was
+ *      ACCEPTED but lacks permission for the API/model/region. Calling that an
+ *      invalid key is the exact lie the audit forbids — 403 only means AUTH when
+ *      the body itself says the key is bad (Google's "unregistered callers",
+ *      API_KEY_INVALID), else it is its own PERMISSION outcome.
+ *    - HTTP 400 FAILED_PRECONDITION ("free tier is not available in your
+ *      country" / billing not enabled) is a PLAN problem, not a request bug.
+ *    - HTTP 429 splits two ways that must never be conflated: a windowed rate
+ *      limit (rate_limit_exceeded / RATE_LIMIT_EXCEEDED — retry after the
+ *      window) versus billing exhaustion (insufficient_quota /
+ *      credit_balance_exhausted / *_spend_limit_exceeded — only a top-up or a
+ *      raised limit fixes it; retrying is pointless).
+ *    - Model-unavailable can also surface as 404/400 "is not found for API
+ *      version" / "not supported for generateContent" / "model_not_found". */
 public final class Diagnostics {
 
     /** Why the call failed, finer-grained than ApiError.Type for interpretation. */
     public enum Cause {
-        TRANSPORT, AUTH, MODEL, NOT_FOUND, QUOTA_ZERO, QUOTA, NO_BALANCE, SERVER, OTHER
+        TRANSPORT, AUTH, PERMISSION, PLAN, MODEL, NOT_FOUND,
+        QUOTA_ZERO, QUOTA, NO_BALANCE, SERVER, OTHER
     }
 
     public final String providerLabel;
@@ -86,14 +104,42 @@ public final class Diagnostics {
                   + "and that the base URL + port are right."
                 : "Check the internet connection, then try again. If it persists, the provider "
                   + "may be blocking the network or the base URL may be wrong.";
-        } else if (status == 401 || status == 403 || looksAuthish(status, low)) {
+        } else if (status == 401 || looksBadKeyEvidence(low)) {
+            // 401 UNAUTHENTICATED / AuthenticationError: wrong, missing, expired or
+            // revoked credentials — plus 400/403 bodies that PROVE a bad key in the
+            // provider's own words (validated per-provider in DiagnosticsTest).
             cause = Cause.AUTH; type = ApiError.Type.AUTH; retryable = false;
             interpretation = "The provider rejected the API key for this call"
                 + (status == 400 ? " (yes — this provider reports bad keys as HTTP 400, "
                   + "not 401; verified against its live API)" : "") + ".";
             suggestion = "Open Settings → AI providers → this provider and re-check the key: "
                 + "paste it exactly with no spaces, or generate a fresh one from the provider's console.";
-        } else if (status == 400 && looksModelish(low)) {
+        } else if (status == 403) {
+            // P-background-11: PERMISSION_DENIED without bad-key evidence is NOT an
+            // auth failure — official docs: key accepted, but the API/model/region is
+            // not permitted for it (Anthropic permission_error; OpenAI unsupported
+            // country/region; Google PERMISSION_DENIED). "Re-check the key" would
+            // send the owner on the wrong errand.
+            cause = Cause.PERMISSION; type = ApiError.Type.AUTH; retryable = false;
+            interpretation = "Permission denied (HTTP 403) — the provider ACCEPTED the key"
+                + " but will not let it use this API/model/region. This is not an"
+                + " invalid-key error and a fresh key from the same account hits the same wall"
+                + (msg.isEmpty() ? "" : " — provider said: \"" + truncate(msg, 160) + "\"") + ".";
+            suggestion = "Check what this key is allowed to do: enable the API for the key's project"
+                + " (Google Cloud: the Generative Language API), confirm this model and your"
+                + " country/region are covered by the account, or use a key from a project that has access.";
+        } else if (status == 400 && looksPlanPrecondition(low)) {
+            // P-background-11: Google's FAILED_PRECONDITION — free tier unavailable in
+            // this country / billing not enabled. A plan problem, never a request bug.
+            cause = Cause.PLAN; type = ApiError.Type.UNKNOWN; retryable = false;
+            interpretation = "The provider refused on a plan precondition (HTTP 400"
+                + " FAILED_PRECONDITION) — e.g. the free tier is not available for this"
+                + " region or billing is not enabled. Nothing was consumed; retrying"
+                + " the same request cannot succeed.";
+            suggestion = "Enable billing for the key's project, or switch to a model/plan the"
+                + " account and region actually cover (run \"Discover models (live)\" to see"
+                + " which ones work right now).";
+        } else if ((status == 400 || status == 404) && looksModelish(low)) {
             cause = Cause.MODEL; type = ApiError.Type.UNKNOWN; retryable = false;
             interpretation = "The provider does not recognize this model"
                 + (model == null || model.isEmpty() ? "" : " (\"" + model + "\")")
@@ -122,6 +168,18 @@ public final class Diagnostics {
                 + "free tier actually covers today — see the rate-limits page; the Flash/Flash-Lite "
                 + "tier is the free workhorse), or enable billing for this model. Retrying the "
                 + "same model will never succeed.";
+        } else if (status == 429 && looksBillingExhaustion(low)) {
+            // P-background-11: OpenAI insufficient_quota / credit_balance_exhausted /
+            // *_spend_limit_exceeded, DeepSeek "exceeded your current quota" — the
+            // billing balance or a hard spend cap is gone. This is NOT the retryable
+            // per-minute window below; only the account can fix it.
+            cause = Cause.NO_BALANCE; type = ApiError.Type.QUOTA; retryable = false;
+            interpretation = "The account's credits or spend limit are exhausted (billing)"
+                + " — NOT a per-minute rate window. Waiting will not fix this call; nothing"
+                + " further was consumed.";
+            suggestion = "Top up credits or raise the spend/quota limit in the provider's"
+                + " billing console, then retry. (A plain per-minute limit would say"
+                + " 'rate limit' and carry a retry hint — this one is billing.)";
         } else if (status == 429) {
             cause = Cause.QUOTA; type = ApiError.Type.QUOTA; retryable = true;
             interpretation = "Rate limited — a per-minute or per-day cap was actually reached";
@@ -143,8 +201,14 @@ public final class Diagnostics {
         }
 
         ApiError error = new ApiError(type, interpretation, retryAfter, retryable);
-        return new Diagnostics(label, method, stripQuery(url), model, status,
-            truncate(raw, 900), truncate(msg, 300), cause, error, interpretation, suggestion);
+        // P-background-11: everything PERSISTED passes through the secret redactor —
+        // a provider error body must never be the reason a key (ours or a pasted
+        // example) lands in the on-device diagnostic kv.
+        return new Diagnostics(label, method,
+            com.replymate.core.privacy.Secrets.redact(stripQuery(url)), model, status,
+            com.replymate.core.privacy.Secrets.redact(truncate(raw, 900)),
+            com.replymate.core.privacy.Secrets.redact(truncate(msg, 300)),
+            cause, error, interpretation, suggestion);
     }
 
     /** One-line summary for logs/compact surfaces. */
@@ -169,11 +233,19 @@ public final class Diagnostics {
 
     // ---------- pattern helpers (kept regex-free; substrings verified against live bodies) ----------
 
-    /** Bad-key signals inside the message/body. Covers: Google's "API key not valid" +
-     *  API_KEY_INVALID reason; xAI's "Incorrect API key provided"; OpenRouter's
-     *  "Missing Authentication header"; Mistral "Invalid API Key"; generic auth phrases. */
+    /** Compat wrapper kept for existing callers/tests: the status shortcut is
+     *  still honored (401/403 are auth-FAMILY), but classification uses the
+     *  evidence-only form below so permission errors surface as permissions. */
     public static boolean looksAuthish(int status, String low) {
         if (status == 401 || status == 403) return true;
+        return looksBadKeyEvidence(low);
+    }
+
+    /** Body PROOF of a bad key (never the mere status). Covers: Google's
+     *  "API key not valid" + API_KEY_INVALID reason + "unregistered callers";
+     *  xAI's "Incorrect API key provided"; OpenRouter's "Missing Authentication
+     *  header"; Mistral "Invalid API Key"; generic auth phrases. */
+    public static boolean looksBadKeyEvidence(String low) {
         return low.contains("api key not valid")
             || low.contains("api_key_invalid")
             || low.contains("incorrect api key")
@@ -186,11 +258,39 @@ public final class Diagnostics {
             || low.contains("no auth credentials");
     }
 
-    /** Model-problem signals: xAI "Model not found: X", Google "does not exist …". */
+    /** Plan-precondition signals (Google FAILED_PRECONDITION family): free tier
+     *  unavailable in this region / billing not enabled. */
+    public static boolean looksPlanPrecondition(String low) {
+        return low.contains("failed_precondition")
+            || low.contains("free tier is not available")
+            || (low.contains("billing") && low.contains("not enabled"));
+    }
+
+    /** Billing-exhaustion 429 signals (official codes/messages): OpenAI
+     *  insufficient_quota / credit_balance_exhausted / spend limits, DeepSeek
+     *  "exceeded your current quota" / insufficient_user_quota. */
+    public static boolean looksBillingExhaustion(String low) {
+        return low.contains("insufficient_quota")
+            || low.contains("insufficient_user_quota")
+            || low.contains("credit_balance_exhausted")
+            || low.contains("spend_limit_exceeded")
+            || low.contains("exceeded your current quota")
+            || low.contains("insufficient balance")
+            || low.contains("billing_hard_limit");
+    }
+
+    /** Model-problem signals: xAI "Model not found: X", Google "does not exist…",
+     *  Google 404/400 "is not found for API version" / "not supported for
+     *  generateContent", OpenAI "model_not_found". */
     public static boolean looksModelish(String low) {
         return low.contains("model not found")
             || low.contains("model does not exist")
-            || low.contains("no such model");
+            || low.contains("no such model")
+            || low.contains("model_not_found")
+            || low.contains("is not found for api version")
+            || low.contains("not supported for generatecontent")
+            || low.contains("unsupported model")
+            || low.contains("invalid model");
     }
 
     /** "limit: 0" or "quotaValue": "0" anywhere in the body → quota was never granted. */
