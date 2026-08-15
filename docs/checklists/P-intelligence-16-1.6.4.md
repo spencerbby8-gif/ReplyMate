@@ -90,15 +90,38 @@ instead on the real engine with **zero persistence**: each file executed inside
 stage-1 audit re-run + rollback-only functional probes. Results recorded in Part C-proof below
 and in git history.
 
-### Part C-proof (filled after apply) — see commit log + Part E final numbers.
+### Part C-proof (executed 2026-08-15 13:21–13:23 UTC, transcript evidence)
+
+**2a — rollback dry-run (zero persistence):** 0003 executed clean; inside the txn: anon zero-grants PASS,
+authenticated exact-CRUD-on-10 PASS, ledger locked PASS, ledger showed `[1,2,3]`; rolled back ✓.
+0004 executed clean; bucket row `('avatars', true)` visible, 4 object policies visible, ledger `[1,2,4]`;
+rolled back ✓.
+
+**2b — apply:** both files APPLIED (committed). Ledger now **1,2,3,4** — versions 3,4 timestamped
+`2026-08-15 13:21:54.8Z` / `13:21:55.3Z` (live-read above).
+
+**2c — post-apply structural verify:** anon holds **zero grants on all 11 tables**; `authenticated`
+holds exactly `DELETE,INSERT,SELECT,UPDATE` on the 10 app tables; neither client role touches
+`rm_schema_migrations`; bucket `('avatars','avatars',public=t)`; 4 policies
+(`avatars_public_read` SELECT, `avatars_owner_insert` INSERT, `avatars_owner_update` UPDATE,
+`avatars_owner_delete` DELETE); RLS still enabled on every public table.
+
+**2d — functional probes (rolled back, residue-verified):** owner isolation intact (A sees 1, B sees 0);
+A can write `A.jpg`, B writing `A.jpg` denied **42501**; `avatars` public read works (B reads 1);
+**`anon` SELECT on `public.contact` now hard-errors 42501** (was silently-empty through RLS before 0003 —
+defense-in-depth restored to the 0001 §5 contract). Residue check: `auth.users=4`, `contact=0`,
+`storage.objects=0` — probes left nothing.
+
+**Post-apply full stage-1 re-audit:** every B.1 row still clean AND `grant_anomalies=[]`,
+`avatars_bucket=true` — **F1 and F2 closed; zero regressions; zero remaining drift.**
 
 ## Part D — build proof (this phase)
 
 | Check | Result |
 |---|---|
-| JVM gate @ HEAD `011de97` + docs | 891/891 (re-run before push) |
-| Engine devcheck | vc911 / `1.6.4-devcheck16`, local debug cert `446310cc…d2` — sha + cert verified, then deleted |
-| vc910 proof cert (apksigner) | historical B1:5F:2F…6A:85:ED MATCH (verified once SDK provisioned) |
+| JVM gate @ HEAD `011de97` + docs | **891/891 ALL SUITES PASSED** (run twice this phase) |
+| Engine devcheck | vc911 / `1.6.4-devcheck16` — sha256 `b0e62afe…a8664f`, 624,970 B, local debug cert `446310cc…d2` MATCH; verified then deleted |
+| vc910 proof cert (apksigner) | **B1:5F:2F:37…6A:85:ED MATCH** (`b15f2f37…6a85ed`), vc910 / 1.6.3-groups-proof, sha256 `1f82a6d9…4613` == CI artifact 9246933080 |
 | CI proof | run id: pending → filled below; artifact; KEYSTORE-VERDICT; APK-CERT-PROOF |
 | Off-CI independent verify | sha256 + apksigner + badging of CI artifact |
 
