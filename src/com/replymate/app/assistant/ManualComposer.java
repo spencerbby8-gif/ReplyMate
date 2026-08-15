@@ -63,8 +63,17 @@ public final class ManualComposer {
         String app = WatchedApps.labelFor(origin);
         AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
         RmNotificationListener listener = RmNotificationListener.active();
+        // P-intelligence-17: the answered message's own conversation identity
+        // feeds the DeliveryGuard — a foreign target refuses instead of borrowing.
+        Message latest = null;
+        for (Message x : c.messages().lastMessages(contactId, 5)) {
+            if (x.direction == Direction.INCOMING) latest = x;
+        }
         DirectDelivery.Outcome out =
-            DirectDelivery.deliver(c.app(), listener, t, app, text);
+            DirectDelivery.deliver(c.app(), listener, t, app, text,
+                WatchedApps.primaryPackageFor(origin),
+                latest == null ? "" : latest.convId,
+                latest == null ? "" : latest.convTitle);
         switch (out.how) {
             case LIVE:
                 return new Result(Outcome.SENT_LIVE, origin, app, "");

@@ -19,8 +19,9 @@ public final class SchemaV8Test {
         @Override public void setUserVersion(int v) { version = v; }
     }
 
-    @Test public void latestIsV8() {
-        assertEquals(8, Migrations.LATEST);
+    @Test public void v8IsSupersededButNeverEdited() {
+        assertTrue("schema v9 (P-intelligence-17) is the latest; v8's DDL and"
+            + " position in the chain stay untouched", Migrations.LATEST > 8);
     }
 
     @Test public void v8AddsSenderKeyToMessage() {
@@ -30,12 +31,12 @@ public final class SchemaV8Test {
         assertTrue(sql.contains("DEFAULT ''"));
     }
 
-    @Test public void migratingFromV7AppliesExactlySenderKeyAndLandsOn8() {
+    @Test public void migratingFromV7AppliesSenderKeyFirstThenMigratesOnToLatest() {
         FakeDb db = new FakeDb();
         db.version = 7;
         Migrations.migrate(db);
-        assertEquals(8, db.version);
-        assertEquals(1, db.ran.size());
-        assertTrue(db.ran.get(0).contains("sender_key"));
+        assertEquals(Migrations.LATEST, db.version);
+        assertTrue("v8's sender_key is still applied FIRST, in chain order",
+            db.ran.get(0).contains("sender_key"));
     }
 }

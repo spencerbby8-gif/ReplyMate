@@ -92,6 +92,16 @@ public final class DraftService {
     public static final String SUPERSEDED_AFTER_CALL_ERROR =
         "superseded by a newer message after the provider call";
 
+    /** P-intelligence-17: wire-string → ItemClass (null for legacy/unknown stamps). */
+    private static com.replymate.core.listener.ItemClass itemClassOf(String wire) {
+        if (wire == null || wire.isEmpty()) return null;
+        for (com.replymate.core.listener.ItemClass c
+                : com.replymate.core.listener.ItemClass.values()) {
+            if (c.wire.equals(wire)) return c;
+        }
+        return null;
+    }
+
     private static String joinAudit(java.util.List<String> items) {
         if (items == null || items.isEmpty()) return "";
         StringBuilder b = new StringBuilder();
@@ -199,6 +209,17 @@ public final class DraftService {
                     : " The notification also carried no usable media reference.")
                 + " I won't invent a reply without their actual words. Open " + app
                 + " to check it, or type their message into this chat and generate again.");
+        }
+
+        // P-intelligence-17: semantic NO-REPLY classes stop BEFORE research and
+        // long before the paid call — the mandated explanation, honestly: items
+        // that arrived as announcement/broadcast/service/system are not answerable
+        // chat messages. (schema v9 stamp; pre-v9 rows carry no stamp and flow on.)
+        com.replymate.core.listener.ItemClass newestClass = itemClassOf(lastIncoming.itemClass);
+        if (newestClass != null && newestClass.isNonReplyable()) {
+            return Result.err("This message can't be replied to from ReplyMate — it came"
+                + " through as " + newestClass.wire.replace('_', ' ')
+                + ", not something you can answer in a chat. No reply was written.");
         }
 
         // P-intelligence-16b: GROUP ENGAGEMENT GATE — a group draft is never

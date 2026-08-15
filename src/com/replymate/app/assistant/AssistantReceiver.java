@@ -209,6 +209,29 @@ public final class AssistantReceiver extends BroadcastReceiver {
     private static final int HOW_CONVERSATION = 1; // re-posted same conversation, live
     private static final int HOW_CACHED = 3;       // cached PendingIntent, unwatchable
 
+    /** P-intelligence-17: the message this draft ANSWERS (immutable source identity)
+     *  — resolved through draft.inReplyToId; falls back to the newest incoming row
+     *  (legacy drafts without the back-reference). Never throws. */
+    private static Message answeredMessage(AppContainer c, long contactId, long draftId) {
+        try {
+            com.replymate.core.model.Draft found = null;
+            for (com.replymate.core.model.Draft d : c.drafts().byContact(contactId, 8)) {
+                if (d.id == draftId) { found = d; break; }
+            }
+            java.util.List<Message> recent = c.messages().lastMessages(contactId, 30);
+            if (found != null && found.inReplyToId != null) {
+                for (Message m : recent) {
+                    if (m.id == found.inReplyToId.longValue()) return m;
+                }
+            }
+            for (int i = recent.size() - 1; i >= 0; i--) {
+                Message m = recent.get(i);
+                if (m.direction == Direction.INCOMING) return m;
+            }
+        } catch (RuntimeException ignored) { /* null ⇒ unverified, honest */ }
+        return null;
+    }
+
     private void approveAndSend(Context ctx, AppContainer c, long contactId, String name,
                                 String appLabel, String text, long draftId) {
         String app = empty(appLabel) ? "the app" : appLabel;
@@ -234,8 +257,44 @@ public final class AssistantReceiver extends BroadcastReceiver {
         RmNotificationListener listener = RmNotificationListener.active();
         AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
         sbnKey = t.sbnKey;
-        if (!t.usable()) {
+        // P-intelligence-17: SEND-INTEGRITY GUARD — before ANY fire flavor, the
+        // captured target must match the ANSWERED MESSAGE's own conversation
+        // identity (schema v9). A mismatch refuses: approved text is never sent
+        // into a different conversation (the Discord cross-channel borrow).
+        String guardWhy = null;
+        {
+            Message src = answeredMessage(c, contactId, draftId);
+            String pkgM = "";
+            for (com.replymate.core.model.ContactChannel ch
+                    : c.contacts().channelsByContact(contactId)) {
+                if (ch.channel != null && ch.channel != com.replymate.core.model.Channel.MANUAL) {
+                    pkgM = com.replymate.core.listener.WatchedApps.primaryPackageFor(ch.channel);
+                    break;
+                }
+            }
+            com.replymate.core.assistant.DeliveryGuard.Decision gd =
+                com.replymate.core.assistant.DeliveryGuard.check(
+                    t.usable(), t.packageName, t.conversationId, t.convTitle, t.title,
+                    pkgM, src == null ? "" : src.convId, src == null ? "" : src.convTitle);
+            if (!gd.allowed()) {
+                guardWhy = gd.reason;
+                AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                    AssistantEvent.Stage.APPROVE_RESOLVE,
+                    "target-integrity refusal: " + gd.reason,
+                    "nothing was sent anywhere — ReplyMate never borrows another"
+                        + " notification's reply target; copy the text yourself", "");
+            }
+        }
+        if (guardWhy != null) {
+            why = guardWhy;
+        } else if (!t.usable()) {
             why = "this notification never offered a quick-reply box";
+            // P-intelligence-17: the mandated explanation for non-replyable items.
+            AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+                AssistantEvent.Stage.APPROVE_RESOLVE,
+                "this message can't be replied to from ReplyMate"
+                    + " (the app never offered a reply box for it)",
+                "nothing sent; copy the text yourself instead", "");
         } else {
             StatusBarNotification sbn = listener == null ? null : listener.findActive(t.sbnKey);
             if (sbn != null) {

@@ -189,9 +189,25 @@ public class IngestCoordinatorTest {
         }
     }
 
-    @Test public void unknownConversationStillWorks() {
+    @Test public void unidentifiedItemFailsClosed() {
+        // P-intelligence-17: NO sender identity AND NO conversation identity ⇒
+        // UNKNOWN ⇒ fail CLOSED before any contact/row/ping/ledger exists
+        // (supersedes the old "Unknown conversation" fallback — unknown must
+        // never become a normal message).
         IngestReport rep = engine.handle(list(
             ev(Channel.TELEGRAM, null, null, "Me", "hey", 1000, false, false)), allOn());
+        assertEquals(0, rep.stored);
+        assertEquals(1, rep.filtered);
+        assertEquals(0, rep.pings.size());
+        assertTrue("no fallback contact may be created", contacts.all().isEmpty());
+    }
+
+    @Test public void senderlessEntryInsideAConversationStillKeepsConversationIdentity() {
+        // Companion to the fail-closed rule: a sender-less MessagingStyle entry
+        // that DOES carry conversation identity is not UNKNOWN — the classifier
+        // sees the conversation, so normal storage still works.
+        IngestReport rep = engine.handle(list(
+            ev(Channel.TELEGRAM, "Amara", null, "Me", "hey", 1000, false, false)), allOn());
         assertEquals(1, rep.stored);
         assertEquals(1, rep.pings.size());
         assertTrue(rep.pings.get(0).displayName.length() > 0);

@@ -91,11 +91,22 @@ public final class DirectDelivery {
 
     /** Full dismissal-safe chain (same order as the Approve button): live sbn →
      *  re-posted same-conversation sbn → cached PendingIntent. Used by the manual
-     *  composer; the notification Approve flow keeps its own ledgered inline copy. */
+     *  composer; the notification Approve flow keeps its own ledgered inline copy.
+     *  P-intelligence-17: {@code pkgM/convIdM/convTitleM} carry the ANSWERED
+     *  MESSAGE's conversation identity (schema v9) — the DeliveryGuard must pass
+     *  before any fire flavor; mismatches refuse, never borrow. */
     public static Outcome deliver(Context ctx, RmNotificationListener listener,
-                                  AssistantTargetStore.Target t, String app, String text) {
+                                  AssistantTargetStore.Target t, String app, String text,
+                                  String pkgM, String convIdM, String convTitleM) {
         if (t == null || !t.usable()) {
             return new Outcome(How.FAILED, "this notification never offered a quick-reply box");
+        }
+        com.replymate.core.assistant.DeliveryGuard.Decision gd =
+            com.replymate.core.assistant.DeliveryGuard.check(
+                t.usable(), t.packageName, t.conversationId, t.convTitle, t.title,
+                pkgM, convIdM, convTitleM);
+        if (!gd.allowed()) {
+            return new Outcome(How.FAILED, gd.reason);
         }
         StatusBarNotification sbn = listener == null ? null : listener.findActive(t.sbnKey);
         if (sbn != null) {

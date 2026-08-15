@@ -70,6 +70,10 @@ public final class IngestCoordinator {
         String lastTitle = "";
         String lastSnippet = "";
         Channel lastChannel = null;
+        String lastClass = "";
+        // P-intelligence-17: mention classification uses the owner's profile name.
+        String[] ownerTokens = com.replymate.core.convo.EngagementClassifier.ownerTokens(
+            kv.get(com.replymate.core.usecase.ProfileService.KEY_NAME, ""));
 
         for (NotifEvent e : events) {
             if (e == null || e.channel == null) { rep.filtered++; continue; }
@@ -83,6 +87,17 @@ public final class IngestCoordinator {
             boolean groupsAllowed = GroupPolicy.allowed(kv, e.channel);
             ListenerFilter.Verdict v = ListenerFilter.verdict(e, groupsAllowed);
             if (v == ListenerFilter.Verdict.SKIP) { rep.filtered++; continue; }
+
+            // P-intelligence-17: classify the item BEFORE anything else. UNKNOWN
+            // fails CLOSED — no contact, no row, no ping, no generation, ever.
+            ItemClassifier.Result ic = ItemClassifier.classify(e, ownerTokens);
+            if (ic.cls == ItemClass.UNKNOWN) { rep.filtered++; continue; }
+            // An announcement is context, never a reply target: stored (attributed)
+            // but never allowed to ping a burst/draft (generation also hard-stops
+            // on the class stamp — belt + braces).
+            if (ic.cls == ItemClass.ANNOUNCEMENT && v == ListenerFilter.Verdict.STORE_AND_PING) {
+                v = ListenerFilter.Verdict.STORE_ONLY;
+            }
 
             // P-background-9: reaction notices are not conversation — never stored,
             // never pinged, never able to anchor memory/bursts/drafts (any app).
@@ -202,12 +217,19 @@ public final class IngestCoordinator {
             // too — display names collide/rename, Person keys do not.
             m.senderKey = dir == Direction.INCOMING && e.senderKey != null
                 ? e.senderKey.trim() : "";
+            // P-intelligence-17 (schema v9): stamp WHAT it was + the message's own
+            // conversation identity — the DeliveryGuard's refusal evidence later
+            // compares the captured reply target against THIS identity.
+            m.itemClass = ic.cls.wire;
+            m.convId = e.conversationId == null ? "" : e.conversationId.trim();
+            m.convTitle = e.conversationTitle == null ? "" : e.conversationTitle.trim();
             messages.insertIgnore(m);
             rep.stored++;
 
             lastTitle = contact.displayName;
             lastSnippet = body;
             lastChannel = e.channel;
+            lastClass = ic.cls.wire;
 
             // outgoing messages (ours) are context only; a group's messages ping
             // only when the verdict allowed it (GroupPolicy opt-in, default off).
@@ -251,7 +273,8 @@ public final class IngestCoordinator {
             kv.put(KV_LAST_EVENT, String.valueOf(clock.now()));
             String chan = lastChannel == null ? "?" : lastChannel.wire;
             String line = chan + " · " + lastTitle + ": " + abbreviate(lastSnippet, 46)
-                + " (" + rep.summary() + ")";
+                + " (" + rep.summary() + ")"
+                + (lastClass.isEmpty() ? "" : " [" + lastClass + "]");
             kv.put(KV_RING, DiagnosticsRing.append(kv.get(KV_RING, ""), clock.now(), line));
             log.i("Ingest", rep.summary());
         }

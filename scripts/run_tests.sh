@@ -68,6 +68,12 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.usecase.GroupEngagementGateTest \
     com.replymate.core.prompt.GroupPromptWireTest \
     com.replymate.data.db.SchemaV8Test \
+    com.replymate.data.db.SchemaV9Test \
+    com.replymate.core.listener.ItemClassifierTest \
+    com.replymate.core.listener.FailClosedIngestTest \
+    com.replymate.core.assistant.DeliveryGuardTest \
+    com.replymate.core.assistant.TargetRulesTest \
+    com.replymate.core.usecase.NonReplyableStopTest \
     com.replymate.core.usecase.ChatRankerTest \
     com.replymate.core.usecase.LearningToPromptTest \
     com.replymate.core.understanding.BurstSignalsTest \

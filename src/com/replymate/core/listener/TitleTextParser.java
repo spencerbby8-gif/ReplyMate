@@ -104,6 +104,9 @@ public class TitleTextParser implements NotifParser {
         e.conversationTitle = MessagingStyleParser.firstNonBlank(raw.convTitle, raw.title);
         e.ownerName = raw.ownerName;
         e.group = group;
+        // P-intelligence-17: this item's own reply capability.
+        e.hasFreeFormReply =
+            com.replymate.core.assistant.AssistantPlanner.directAction(raw.actions) != null;
         return e;
     }
 

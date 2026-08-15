@@ -129,6 +129,9 @@ public final class MessagingStyleParser implements NotifParser {
         e.ownerName = raw.ownerName;
         e.ownerKey = raw.ownerKey;
         e.group = group;
+        // P-intelligence-17: this item's own reply capability (both action surfaces).
+        e.hasFreeFormReply =
+            com.replymate.core.assistant.AssistantPlanner.directAction(raw.actions) != null;
         return e;
     }
 

@@ -87,6 +87,23 @@ public final class AssistantTargetStore {
     /** Save the best reply target found on this raw notification for this contact. */
     public static void save(KvStore kv, long contactId, RawNotif raw, long nowMs) {
         if (kv == null || raw == null) return;
+        RawNotif.ActionRef incoming = AssistantPlanner.directAction(raw.actions);
+        // P-intelligence-17: an actionless re-post of the SAME conversation must
+        // never wipe a good captured target (apps post content without actions
+        // while the actioned sibling still lives). Rule pure + pinned in
+        // TargetRules.shouldReplaceOnCapture.
+        Target old = load(kv, contactId);
+        boolean sameConversation = old.identifiable()
+            && com.replymate.core.listener.ConversationMatch.same(
+                old.packageName, old.conversationId, old.convTitle, old.title,
+                raw.packageName,
+                raw.conversationId == null ? "" : raw.conversationId,
+                raw.convTitle == null ? "" : raw.convTitle,
+                raw.title == null ? "" : raw.title);
+        if (!com.replymate.core.assistant.TargetRules.shouldReplaceOnCapture(
+                old.usable(), incoming != null, sameConversation)) {
+            return;   // keep the existing target (and its cached PI) untouched
+        }
         Target t = new Target();
         t.contactId = contactId;
         t.packageName = raw.packageName == null ? "" : raw.packageName;
@@ -255,6 +272,11 @@ public final class AssistantTargetStore {
         if (kv == null || packageName == null || packageName.isEmpty() || actives == null) {
             return false;
         }
+        // P-intelligence-17: adoption is ONLY ever allowed from THE SAME
+        // conversation (strict identity). Matching on the package alone was the
+        // cross-notification borrow (a Discord announcement adopting another
+        // channel's Reply action). Rule pure + pinned in TargetRules.mayAdoptLive.
+        Target stored = load(kv, contactId);
         for (android.service.notification.StatusBarNotification sbn : actives) {
             if (sbn == null || !packageName.equals(sbn.getPackageName())) continue;
             RawNotif raw;
@@ -264,7 +286,15 @@ public final class AssistantTargetStore {
                 continue;
             }
             if (raw == null) continue;
-            if (AssistantPlanner.directAction(raw.actions) != null) {
+            boolean sameConv = com.replymate.core.listener.ConversationMatch.same(
+                stored.packageName, stored.conversationId, stored.convTitle, stored.title,
+                raw.packageName,
+                raw.conversationId == null ? "" : raw.conversationId,
+                raw.convTitle == null ? "" : raw.convTitle,
+                raw.title == null ? "" : raw.title);
+            if (com.replymate.core.assistant.TargetRules.mayAdoptLive(
+                    stored.identifiable(), sameConv,
+                    AssistantPlanner.directAction(raw.actions) != null)) {
                 save(kv, contactId, raw, System.currentTimeMillis());
                 cachePendingIntent(kv, contactId, sbn);   // P-background-7
                 return true;

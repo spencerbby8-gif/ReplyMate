@@ -22,6 +22,11 @@ public final class NotifEvent {
      *  ping a burst/draft. */
     public boolean historic;
     public boolean hasAttachment;
+    /** P-intelligence-17: this item's OWN notification exposes a free-form quick-
+     *  reply action (RemoteInput allowFreeFormInput on standard OR wearable
+     *  surface). Feeds the DIRECT_REPLY item class — capability evidence belongs
+     *  to this item, never borrowed from another notification. */
+    public boolean hasFreeFormReply;
     /** WHAT the item is (null = not classified by the parser; the ingest pipeline
      *  re-derives it from evidence). Separate from source identity by design. */
     public com.replymate.core.model.ContentKind contentKind;

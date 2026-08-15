@@ -44,6 +44,9 @@ public final class MessageDao {
         v.put("media_uri", m.mediaUri == null ? "" : m.mediaUri);
         v.put("sender_name", m.senderName == null ? "" : m.senderName);
         v.put("sender_key", m.senderKey == null ? "" : m.senderKey);   // schema v8
+        v.put("item_class", m.itemClass == null ? "" : m.itemClass);   // schema v9
+        v.put("conv_id", m.convId == null ? "" : m.convId);            // schema v9
+        v.put("conv_title", m.convTitle == null ? "" : m.convTitle);   // schema v9
         return v;
     }
 
@@ -169,6 +172,9 @@ public final class MessageDao {
         o.mediaUri = safe(c, "media_uri");
         o.senderName = safe(c, "sender_name");   // schema v6 — same defensive read
         o.senderKey = safe(c, "sender_key");     // schema v8 — same defensive read
+        o.itemClass = safe(c, "item_class");     // schema v9 — same defensive read
+        o.convId = safe(c, "conv_id");           // schema v9
+        o.convTitle = safe(c, "conv_title");     // schema v9
         return o;
     }
 

@@ -19,6 +19,9 @@ public class Message {
     public String mediaUri = "";         // content:// reference (local-only, never sent)
     public String senderName = "";       // actual sender (schema v6, group attribution);
     public String senderKey = "";        // platform's stable sender id (schema v8, Person key);
+    public String itemClass = "";        // what the item was classified as (schema v9 wire)
+    public String convId = "";           // conversation identity: shortcut id (schema v9)
+    public String convTitle = "";        // conversation identity: title (schema v9)
                                          // "" = unknown/outgoing/manual/legacy
 
     public Message() { }
