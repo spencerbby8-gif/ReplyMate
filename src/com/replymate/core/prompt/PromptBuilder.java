@@ -39,6 +39,12 @@ public final class PromptBuilder {
         if (bundle.searchLine != null && !bundle.searchLine.trim().isEmpty()) {
             situationLines.add(bundle.searchLine.trim());
         }
+        // P-intelligence-15: the GROUP context line — capture-time fact only
+        // (isGroupConversation persisted on the contact); 1:1 prompts unchanged.
+        String groupLine = GroupContext.header(bundle.thread,
+            bundle.contact.displayName, bundle.contact.isGroup,
+            bundle.profile == null ? "" : bundle.profile.displayName());
+        if (!groupLine.isEmpty()) situationLines.add(groupLine);
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
             bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines,
             situationLines);

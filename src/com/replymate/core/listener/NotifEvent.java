@@ -17,6 +17,10 @@ public final class NotifEvent {
     public String text;              // nullable/empty for media-only
     public long timestampMs;
     public boolean group;
+    /** P-intelligence-15: came from MessagingStyle's HISTORIC list — older context
+     *  the app volunteered for grounding. Stored (deduped) but NEVER allowed to
+     *  ping a burst/draft. */
+    public boolean historic;
     public boolean hasAttachment;
     /** WHAT the item is (null = not classified by the parser; the ingest pipeline
      *  re-derives it from evidence). Separate from source identity by design. */

@@ -127,6 +127,13 @@ public final class IngestCoordinator {
             Contact contact = contactService.ensureChannelContact(
                 e.channel, remoteKey, IdentityResolver.displayNameFor(convTitle), keys);
 
+            // P-intelligence-15 (schema v7): persist the capture-time GROUP fact —
+            // MessagingStyle's isGroupConversation, never a downstream guess.
+            if (Boolean.TRUE.equals(e.group) && !contact.isGroup) {
+                contact.isGroup = true;
+                contactService.update(contact);
+            }
+
             Direction dir = MessageClassifier.directionFor(
                 e.senderName, e.ownerName, e.senderKey, e.ownerKey);
 
@@ -200,8 +207,10 @@ public final class IngestCoordinator {
 
             // outgoing messages (ours) are context only; a group's messages ping
             // only when the verdict allowed it (GroupPolicy opt-in, default off).
+            // P-intelligence-15: HISTORIC context stores (deduped) but NEVER pings —
+            // it is grounding for the burst, not a new event.
             boolean pingEligible = v == ListenerFilter.Verdict.STORE_AND_PING
-                && dir == Direction.INCOMING;
+                && dir == Direction.INCOMING && !e.historic;
             if (dir == Direction.OUTGOING) {
                 // P-intelligence-1: a freshly-stored owner-typed row MAY be a manual
                 // answer to a live draft — flag the contact for the learner (once

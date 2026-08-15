@@ -37,6 +37,7 @@ public final class ContactDao {
         v.put("ai_enabled", c.aiEnabled ? 1 : 0);
         v.put("memory_enabled", c.memoryEnabled ? 1 : 0);
         v.put("private_mode", c.privateMode ? 1 : 0);
+        v.put("is_group", c.isGroup ? 1 : 0);
         v.put("created_at", c.createdAt);
         v.put("updated_at", c.updatedAt);
         return v;
@@ -82,6 +83,7 @@ public final class ContactDao {
         o.aiEnabled = c.getInt(c.getColumnIndexOrThrow("ai_enabled")) == 1;
         o.memoryEnabled = c.getInt(c.getColumnIndexOrThrow("memory_enabled")) == 1;
         o.privateMode = c.getInt(c.getColumnIndexOrThrow("private_mode")) == 1;
+        o.isGroup = c.getInt(c.getColumnIndexOrThrow("is_group")) == 1;
         o.createdAt = c.getLong(c.getColumnIndexOrThrow("created_at"));
         o.updatedAt = c.getLong(c.getColumnIndexOrThrow("updated_at"));
         return o;

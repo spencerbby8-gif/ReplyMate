@@ -35,7 +35,12 @@ public final class TaskComposer {
                     + " voice above.");
                 break;
             case CLARIFY:
-                t.append(partnerName).append("'s latest message — \"").append(anchor)
+                // P-intelligence-15: in a group, attribute the ambiguous message to
+                // its ACTUAL sender (1:1: senderName carries the partner — no change).
+                String who = anchorSender == null || anchorSender.trim().isEmpty()
+                    || anchorSender.trim().equalsIgnoreCase(partnerName)
+                    ? partnerName : anchorSender.trim();
+                t.append(who).append("'s latest message — \"").append(anchor)
                  .append("\" — is ambiguous or hard to answer confidently.\n")
                  .append("Write ").append(ownerName)
                  .append("'s short clarifying question about THAT message: ask exactly"

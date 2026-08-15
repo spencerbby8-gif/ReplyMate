@@ -121,6 +121,9 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.usecase.IntentionalComposeTest \
     com.replymate.core.usecase.AutoFollowUpTest \
     com.replymate.core.usecase.AllDialsWireProofTest \
+    com.replymate.core.listener.GroupHistoryTest \
+    com.replymate.core.usecase.GroupChatUnderstandingTest \
+    com.replymate.core.usecase.EditContactWireProofTest \
     com.replymate.core.prompt.PromptSecurityTest \
     com.replymate.core.auth.AuthFlowTest \
     com.replymate.core.listener.StatusFilterTest \

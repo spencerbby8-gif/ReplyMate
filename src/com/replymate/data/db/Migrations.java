@@ -8,7 +8,7 @@ import java.util.List;
  *  Runs identically on device (DbHelper) and in tests (JDBC). */
 public final class Migrations {
 
-    public static final int LATEST = 6;
+    public static final int LATEST = 7;
 
     public interface Migration {
         int version();
@@ -42,6 +42,10 @@ public final class Migrations {
         list.add(new Migration() {
             @Override public int version() { return 6; }
             @Override public List<String> statements() { return SchemaV6.DDL; }
+        });
+        list.add(new Migration() {
+            @Override public int version() { return 7; }
+            @Override public List<String> statements() { return SchemaV7.DDL; }
         });
         // V7 … append here. Never edit earlier migrations.
         return list;

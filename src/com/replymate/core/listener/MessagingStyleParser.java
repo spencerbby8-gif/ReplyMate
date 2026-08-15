@@ -74,6 +74,27 @@ public final class MessagingStyleParser implements NotifParser {
                 }
             }
             List<NotifEvent> out = new java.util.ArrayList<NotifEvent>();
+            // P-intelligence-15: HISTORIC context first (older, chronological) —
+            // same sender-identity hygiene as live entries, flagged so ingest
+            // stores them as grounding but never lets them ping/draft.
+            for (RawNotif.Entry m : raw.historic) {
+                if (anyNamedSender && !SystemLines.hasSenderIdentity(
+                        m.senderName, m.senderKey, m.senderUri)) {
+                    continue;
+                }
+                NotifEvent e = base(raw, group);
+                e.text = m.text;
+                e.timestampMs = m.timestampMs > 0 ? m.timestampMs : raw.postTimeMs;
+                e.senderName = m.senderName;
+                e.senderKey = m.senderKey;
+                e.senderUri = m.senderUri;
+                e.hasAttachment = m.hasAttachment;
+                e.mediaMime = m.mimeType;
+                e.mediaUri = m.dataUri;
+                e.historic = true;
+                classify(e, m.mimeType, m.hasAttachment, m.text, false);
+                out.add(e);
+            }
             for (RawNotif.Entry m : raw.messages) {
                 if (anyNamedSender && !SystemLines.hasSenderIdentity(
                         m.senderName, m.senderKey, m.senderUri)) {

@@ -31,6 +31,7 @@ public final class NotifExtractor {
 
     private static final String TAG = "NotifExtractor";
     private static final String K_MESSAGES = "android.messages";
+    private static final String K_HISTORIC = "android.messages.historic";
     private static final String K_TEXT = "text";
     private static final String K_TIME = "time";
     private static final String K_SENDER = "sender";
@@ -87,6 +88,18 @@ public final class NotifExtractor {
                 if (!(item instanceof Bundle)) continue;
                 RawNotif.Entry e = entry((Bundle) item, sbn.getPostTime());
                 if (e != null) raw.messages.add(e);
+            }
+        }
+        // P-intelligence-15: documented MessagingStyle HISTORIC context (API 26+,
+        // Notification.MessagingStyle.getHistoricMessages) — same bundle shape as
+        // live messages, older context the app offers explicitly.
+        Object hist = x.get(K_HISTORIC);
+        Parcelable[] histArr = hist instanceof Parcelable[] ? (Parcelable[]) hist : null;
+        if (histArr != null) {
+            for (Parcelable item : histArr) {
+                if (!(item instanceof Bundle)) continue;
+                RawNotif.Entry e = entry((Bundle) item, sbn.getPostTime());
+                if (e != null) raw.historic.add(e);
             }
         }
         extractActions(n, raw);

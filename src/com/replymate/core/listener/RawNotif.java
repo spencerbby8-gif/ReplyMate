@@ -60,6 +60,12 @@ public final class RawNotif {
     public String ownerName;           // messagingUser/selfDisplayName (nullable)
     public String ownerKey;            // messagingUser Person key (nullable)
     public Boolean group;              // isGroupConversation tri-state: null = not provided
+    /** P-intelligence-15: MessagingStyle HISTORIC messages ("android.messages.historic",
+     *  getHistoricMessages(), API 26+) — older context the posting app includes
+     *  explicitly "...not the main subject... may give context to a conversation".
+     *  Captured separately so ingest can store them as context WITHOUT ever letting
+     *  them trigger a burst/draft. */
+    public final List<Entry> historic = new ArrayList<Entry>();
     public long postTimeMs;
     public String sbnKey;              // StatusBarNotification.getKey() (P-background, nullable)
     public final List<ActionRef> actions = new ArrayList<ActionRef>();  // P-background capability
