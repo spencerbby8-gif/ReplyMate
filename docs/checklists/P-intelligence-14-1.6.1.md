@@ -55,6 +55,51 @@ Research applied (current docs, checked 2026-08-14):
 - **Device proof (owner):** BG rows §D — incl. fresh install, reboot,
   screen-off, recents removal, listener rebind, slow network.
 
+### Item 1 (extended spec) — ColorOS battery routing, researched not guessed
+
+- **Reproduced (owner device):** the toggle drove Android's whitelist dialog,
+  but ColorOS keeps a SECOND per-app switch — Battery usage → "Allow background
+  activity" — untouched, and ReplyMate still died in the background.
+- **Research (2026-08-14, current sources):** `com.oplus.battery` internals
+  (`com.oplus.powermanager.fuelgaue.PowerControlActivity` etc.) are NOT
+  exported — launching them is a permission denial, so they are never
+  attempted. The documented user path (multiple Oppo guides): Settings → Apps
+  → App management → ReplyMate → Battery usage → switch ON "Allow background
+  activity" → confirm Allow. Programmatically reachable as: AOSP 12+
+  `com.android.settings.Settings$AppBatteryUsageActivity` with
+  `Settings.EXTRA_APP_PACKAGE` — tried ONLY behind `resolveActivity` — with
+  App info (ACTION_APPLICATION_DETAILS_SETTINGS, whose "Battery usage" row is
+  one tap from the same switch on ColorOS) as the always-resolvable fallback.
+- **Fix:** `AssistantPrereq.isOplus()` (Oppo/OnePlus/realme) →
+  `oemBackgroundIntent` prefers that chain; the approval dialog names the exact
+  taps and its button reads "Oppo battery usage page"; how-to text for
+  BATTERY / BACKGROUND_RESTRICTED is ColorOS-aware. `onResume` re-probes every
+  readable lever — and the dialog says honestly that NO app can read the
+  ColorOS switch's state, so Ready never claims it.
+- **Device proof (owner):** BG7 §D.
+
+### Item 1 (extended spec) — speed trace: where the time actually goes
+
+| Stage | Cost | Bound |
+|---|---|---|
+| capture → ingest | milliseconds (single INGEST lane, local writes) | listener thread only |
+| settle | 5 s batch window + 1.5 s extra | deliberate — burst coalescing |
+| live research | cache hit: 0 ms; encyclopedia: one HTTP | tightHttpClient timeouts |
+| provider call | dominant: network + model (+ native search) | 15 s connect / 45 s read / ≤3 attempts |
+| draft save + alert | milliseconds | local |
+
+- **One slow job must not delay unrelated conversations — architecture proof:**
+  INGEST (capture) and GEN (generation) are separate executor lanes; GEN is a
+  3-thread pool; per-contact striped locks serialize only the SAME contact. One
+  crawling generation occupies at most one GEN lane; capture and two other
+  conversations proceed. Stale-job aborts run BEFORE and AFTER the paid call
+  (supersede gates), so a slow job never bills a stale draft either.
+- **"Sometimes missing" is explained, not mysterious:** each silent path writes
+  a named Diagnostics event — ColorOS kill (fixed above), POST_NOTIFICATIONS
+  denied (draft saves, catch-up re-alerts), aged-out catch-up window (by
+  design, once explained), noise/status filters, groups off by default,
+  private / AI-off contacts, media-only messages. No unexplained hole.
+
 ## Item 2 — Memory + understanding + groups: restart persistence closed
 
 - **Audit result:** understanding (ReplyPlanner intents COMFORT/NEWS/
@@ -113,6 +158,34 @@ Research applied (current docs, checked 2026-08-14):
   `MemoryRestartTest` (2) above.
 - **Device proof (owner):** COMPOSE rows §D.
 
+### Item 3 (extended spec) — auto follow-up, per-contact, OFF by default
+
+- **New control:** Edit Profile → "Auto follow-up draft" (style key
+  `autofollow`, distinct from the `follow_up` VOICE dial). Absent = OFF.
+- **Trigger:** every approval path — in-app copy / edited-copy, shade copy,
+  inline-edit, quick-reply send — calls `AssistantRunner.maybeFollowUp`.
+- **"Knows when not to" — pure, pinned (`FollowUpPolicy`):** OFF by default;
+  private / AI-disabled contacts never; THEIR newer message than the one just
+  answered (the approved draft's `inReplyToId` is the ground truth, because a
+  quick-reply send never lands in our store); a GENERATED draft already
+  waiting; bump-on-a-bump; once-per-reply anchor persisted in kv.
+- **PREPARE** runs the same `FOLLOW_UP` pipeline, quoting the APPROVED reply
+  text itself (`PromptBundle.followUpAnchorOverride` — never a stale stored
+  outgoing). Result: a GENERATED draft; its alert is labeled "Follow-up idea",
+  never "Draft reply for". **Never auto-sends.**
+- **Test proof:** `AutoFollowUpTest` (8) — every skip case + the prepare path
+  + re-arm on a new reply + provider untouched on every skip.
+
+### Item 3 (extended spec) — every dial reaches generation, not a sampled pair
+
+- **Audit result:** Edit Profile exposes all 9 dials per contact
+  (tone/length/emoji/formality/humor/confidence/slang/flirting/follow-ups)
+  with inherit + levels; Global Voice the same globally. The wiring was
+  already uniform; the PROOF gap was that only tone/emoji were wire-pinned.
+- **Closed:** `AllDialsWireProofTest` (2 tests covering all 9 dials) — global
+  level change changes the exact provider request; OFF strips that dimension
+  only (sentinel survives); a contact override beats global with zero leakage.
+
 ## §D — Device verification rows (owner — mark PASS/FAIL)
 
 Background:
@@ -129,6 +202,11 @@ Background:
        scheduled rebind restores capture without toggling anything.
 - BG6  On a slow network (throttled): an incoming DM eventually produces its
        draft alert; the toggle row never claims Ready while levers are missing.
+- BG7  COLOROS (owner's Oppo): toggle flow → "Oppo battery usage page" opens
+       the app's Battery usage page (or App info with the Battery usage row);
+       "Allow background activity" ON → Allow; return → row re-checks and only
+       the readable levers can light Ready. Reboot afterwards and confirm
+       capture+alerts still work.
 
 Memory:
 - M1  Long chat: an old detail replaced months later → ask about it → the
@@ -160,6 +238,16 @@ Conversational generation:
       answered" and shows `compose:opener`.
 - C4  CLARIFY on an ambiguous message → one question, not an answer; audit
       shows the same Search/reasoning trail a reply would.
+- C5  AUTO FOLLOW-UP default: fresh contact → approve a reply → NO follow-up
+      draft appears (control is off).
+- C6  Enable "Auto follow-up draft" for one contact → approve a reply (copy
+      and quick-send both) → within seconds a "Follow-up idea" alert/draft
+      quoting YOUR just-sent message; approve it → no second one follows.
+      Their new message in between ⇒ no follow-up; contact off/EOD ⇒ nothing.
+- C7  Edit Profile page: flip every dial for one contact → the next draft
+      visibly reflects each (tone, length, emoji, formality, humor,
+      confidence, slang, flirting, follow-ups); OFF a dimension → no trace of
+      it in the Prompt Audit voice line.
 
 Search + reasoning:
 - S1  Ask a live-fact question (reply or intentional) → audit shows executed
@@ -185,6 +273,18 @@ Search + reasoning:
   `b15f2f37fce19b564683fe6b85725a9d3192df93181ef2f36286b5e21c6a85ed`
   (B1:5F:2F:37…6A:85:ED — the historical ReplyMate identity; update-in-place
   over ≤1.5.8 preserved).
+- **Extended-spec verification — second build:** JVM **876/876** (866 + 10 new:
+  AutoFollowUpTest 8, AllDialsWireProofTest 2×9-dial coverage). Local engine
+  build GREEN (`VERSION_CODE=909` devcheck, local debug cert `446310cc…`,
+  artifact discarded). CI proof build: **GREEN** — run **31880076600** on
+  commit `aa68ad3` (release.yml dispatch); in-run gates
+  **KEYSTORE-VERDICT: MATCH**, **APK-CERT-PROOF: MATCH**. Artifact
+  **9245786877** `ReplyMate-1.6.2-followup-proof-vc909` → APK
+  `ReplyMate-1.6.2-followup-proof.apk`, **624,970 bytes**, vc **909** /
+  `1.6.2-followup-proof`. Independently re-verified OFF-CI: sha256
+  **`142bda9253c3c59719b897ae0b7e0dbdfb4d979dc9687394df6b16c8ec76fafe`**,
+  cert SHA-256 `b15f2f37fce19b564683fe6b85725a9d3192df93181ef2f36286b5e21c6a85ed`
+  (historical identity; update-in-place preserved).
 - **Owner device verdicts — OPEN.** Prior phases' device rows remain open
   and are unchanged by this phase; no next feature phase until the previous
   build AND this one pass on-device. Releases stay untouched.
