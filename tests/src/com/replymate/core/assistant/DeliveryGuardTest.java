@@ -88,4 +88,45 @@ public final class DeliveryGuardTest {
         assertEquals(DeliveryGuard.Verdict.REFUSE_DIFFERENT_CONVERSATION, d.verdict);
         assertFalse(d.allowed());
     }
+
+    /* ---------------- P-intelligence-17R: the delivery regression repro ---------------- */
+
+    @Test public void aKnownOneOnOneChatWithTitleOnlyIdentityMUSTAllow() {
+        // THE 17R REGRESSION (owner, on-device): a legit 1:1 chat whose identity
+        // lives ONLY in the title — the parser stamps the message row with its
+        // title-fallback convTitle ("Amara"), the captured target carries the title.
+        // Approval must ALLOW (verified), never "DIFFERENT conversation".
+        DeliveryGuard.Decision d = DeliveryGuard.check(true,
+            "com.whatsapp", "", "", "Amara",
+            "com.whatsapp", "", "Amara");
+        assertEquals(DeliveryGuard.Verdict.ALLOW, d.verdict);
+        assertTrue(d.allowed());
+        assertTrue(d.verified());
+    }
+
+    @Test public void shortcutIdDriftAcrossRepostsMustNotRefuseALegitChat() {
+        // Ingest-documented drift: the row was stamped from the FIRST post (no
+        // shortcut id yet), the target was captured from the re-post (id present).
+        // One-sided id must arbitrate on the shared title, never refuse.
+        DeliveryGuard.Decision d = DeliveryGuard.check(true,
+            "com.whatsapp", "2348012345678@s.whatsapp.net", "", "Amara",
+            "com.whatsapp", "", "Amara");
+        assertEquals(DeliveryGuard.Verdict.ALLOW, d.verdict);
+        assertTrue(d.verified());
+        // and the reverse one-sided shape
+        DeliveryGuard.Decision d2 = DeliveryGuard.check(true,
+            "com.whatsapp", "", "", "Amara",
+            "com.whatsapp", "2348012345678@s.whatsapp.net", "Amara");
+        assertEquals(DeliveryGuard.Verdict.ALLOW, d2.verdict);
+    }
+
+    @Test public void differentConversationIdsRefuseEvenWhenTitlesCollide() {
+        // Two same-name conversations on one app: ids BOTH present and DIFFERENT
+        // must be decisive — the title tier can never resurrect the match.
+        DeliveryGuard.Decision d = DeliveryGuard.check(true,
+            "com.whatsapp", "111@s.whatsapp.net", "", "Family",
+            "com.whatsapp", "222@s.whatsapp.net", "Family");
+        assertEquals(DeliveryGuard.Verdict.REFUSE_DIFFERENT_CONVERSATION, d.verdict);
+        assertFalse(d.allowed());
+    }
 }

@@ -73,6 +73,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.listener.FailClosedIngestTest \
     com.replymate.core.assistant.DeliveryGuardTest \
     com.replymate.core.assistant.TargetRulesTest \
+    com.replymate.core.assistant.SendPathTest \
     com.replymate.core.usecase.NonReplyableStopTest \
     com.replymate.core.usecase.ChatRankerTest \
     com.replymate.core.usecase.LearningToPromptTest \

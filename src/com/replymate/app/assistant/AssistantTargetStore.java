@@ -213,16 +213,42 @@ public final class AssistantTargetStore {
         LIVE_PI.clear();
     }
 
-    /** P-background-8: find a LIVE notification from the same app that the stored
-     *  identity fields say is THE SAME conversation (posted under a new key after
-     *  the original was dismissed). Strict official-fields match only
-     *  (conversationId > conversationTitle > title) — never a fuzzy guess.
-     *  Returns the most recent match, or null (honest: no live same-chat alert). */
-    public static android.service.notification.StatusBarNotification findConversationMatch(
+    /** Count LIVE notifications (capped at 2) that the stored identity fields PROVE
+     *  are the same conversation (strict
+     *  {@link com.replymate.core.listener.ConversationMatch}). P-intelligence-17R:
+     *  1 ⇒ rebind is safe; 0 ⇒ none live; 2 ⇒ AMBIGUOUS (e.g. two same-name chats
+     *  on one app) — never guess. Fed to SendPath.plan by the approve path. */
+    public static int conversationMatchCount(
+            Target t, android.service.notification.StatusBarNotification[] actives) {
+        if (t == null || actives == null || !t.identifiable()
+                || t.packageName == null || t.packageName.isEmpty()) return 0;
+        int count = 0;
+        for (android.service.notification.StatusBarNotification sbn : actives) {
+            if (count >= 2) break;
+            if (sbn == null || !t.packageName.equals(sbn.getPackageName())) continue;
+            RawNotif live;
+            try {
+                live = com.replymate.app.listener.NotifExtractor.toRaw(sbn);
+            } catch (RuntimeException e) {
+                continue;
+            }
+            if (live == null) continue;
+            if (com.replymate.core.listener.ConversationMatch.same(
+                    t.packageName, t.conversationId, t.convTitle, t.title,
+                    live.packageName, live.conversationId, live.convTitle, live.title)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Internal unique-match scan: THE live notification matching the stored
+     *  identity, or null unless EXACTLY one matches (ambiguity can never rebind). */
+    private static android.service.notification.StatusBarNotification match(
             Target t, android.service.notification.StatusBarNotification[] actives) {
         if (t == null || actives == null || !t.identifiable()
                 || t.packageName == null || t.packageName.isEmpty()) return null;
-        android.service.notification.StatusBarNotification best = null;
+        android.service.notification.StatusBarNotification found = null;
         for (android.service.notification.StatusBarNotification sbn : actives) {
             if (sbn == null || !t.packageName.equals(sbn.getPackageName())) continue;
             RawNotif live;
@@ -235,9 +261,21 @@ public final class AssistantTargetStore {
             if (!com.replymate.core.listener.ConversationMatch.same(
                     t.packageName, t.conversationId, t.convTitle, t.title,
                     live.packageName, live.conversationId, live.convTitle, live.title)) continue;
-            if (best == null || sbn.getPostTime() >= best.getPostTime()) best = sbn;
+            if (found != null) return null;         // second match ⇒ ambiguous
+            found = sbn;
         }
-        return best;
+        return found;
+    }
+
+    /** P-background-8: THE live re-post of the same conversation (posted under a
+     *  new key after the original was dismissed) — returned ONLY when exactly one
+     *  live notification matches. P-intelligence-17R: two or more matches are
+     *  AMBIGUOUS (two same-name chats on one app) — rebind is refused (null) and
+     *  the caller falls to the conversation-bound cached token instead of guessing.
+     *  Strict official-fields identity only — never a fuzzy guess. */
+    public static android.service.notification.StatusBarNotification findConversationMatch(
+            Target t, android.service.notification.StatusBarNotification[] actives) {
+        return match(t, actives);
     }
 
     /** Compact observed-geometry line, e.g.
@@ -277,6 +315,11 @@ public final class AssistantTargetStore {
         // cross-notification borrow (a Discord announcement adopting another
         // channel's Reply action). Rule pure + pinned in TargetRules.mayAdoptLive.
         Target stored = load(kv, contactId);
+        // P-intelligence-17R: adoption also requires the identity match to be
+        // UNIQUE — two live notifications matching the stored identity (two
+        // same-name chats on the app) make adoption a guess, and guessing is how
+        // a reply lands in the wrong conversation. Refuse both, honestly.
+        if (conversationMatchCount(stored, actives) != 1) return false;
         for (android.service.notification.StatusBarNotification sbn : actives) {
             if (sbn == null || !packageName.equals(sbn.getPackageName())) continue;
             RawNotif raw;

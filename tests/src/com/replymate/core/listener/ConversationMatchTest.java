@@ -63,4 +63,37 @@ public class ConversationMatchTest {
         assertTrue(ConversationMatch.identifiable("", "c", ""));
         assertTrue(ConversationMatch.identifiable("", "", "t"));
     }
+
+    /* ---------------- P-intelligence-17R: decisive tiers ---------------- */
+
+    @Test public void differentNativeIdsNeverMatchEvenWhenTitlesCollide() {
+        // two same-name chats on one app: ids BOTH present and DIFFERENT decide —
+        // the title tier can never resurrect the match (cross-send hole closed).
+        assertFalse(ConversationMatch.same(
+            WA, "111@s.whatsapp.net", "", "Family",
+            WA, "222@s.whatsapp.net", "", "Family"));
+        assertFalse(ConversationMatch.same(
+            WA, "111", "Family", "Family",
+            WA, "222", "Family", "Family"));
+    }
+
+    @Test public void differentConversationTitlesNeverMatchEvenWhenPlainTitlesCollide() {
+        // both channels surfaced under the same plain title ("News") — the
+        // conversationTitle tier decides: different ⇒ not the same conversation.
+        assertFalse(ConversationMatch.same(
+            WA, "", "#general", "News",
+            WA, "", "#announcements", "News"));
+    }
+
+    @Test public void oneSidedNativeIdArbitratesOnTheSharedTitle() {
+        // re-post drift (documented at ingest): the first post may lack the
+        // shortcut id the re-post carries — one-sided identity falls through to
+        // the shared title instead of refusing a legit chat.
+        assertTrue(ConversationMatch.same(
+            WA, "234@s.whatsapp.net", "", "Ada",
+            WA, "", "", "Ada"));
+        assertTrue(ConversationMatch.same(
+            WA, "", "", "Ada",
+            WA, "234@s.whatsapp.net", "", "Ada"));
+    }
 }

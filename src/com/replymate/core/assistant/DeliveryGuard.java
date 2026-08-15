@@ -61,9 +61,18 @@ public final class DeliveryGuard {
         boolean messageIdentified =
             ConversationMatch.identifiable(convIdM, convTitleM, "");
         if (messageIdentified) {
+            // P-intelligence-17R: the MESSAGE side is stamped by the PARSERS, whose
+            // convention is convTitle := firstNonBlank(EXTRA_CONVERSATION_TITLE,
+            // EXTRA_TITLE) — a 1:1 chat's row carries the partner NAME in convTitle.
+            // The captured TARGET keeps the raw fields separate (convTitle raw,
+            // title = EXTRA_TITLE). Hardcoding the message-side title to "" made
+            // every title-only identified chat refuse ("not meant for that chat" —
+            // the on-device 1.6.6 regression). Feed the stamped title into the
+            // match's title tier so a legit known chat verifies; the tiers stay
+            // decisive (different native ids still refuse even when titles collide).
             boolean same = ConversationMatch.same(
                 pkgT, convIdT, convTitleT, titleT,
-                pkgM, convIdM, convTitleM, "");
+                pkgM, convIdM, convTitleM, convTitleM);
             if (!same) {
                 return new Decision(Verdict.REFUSE_DIFFERENT_CONVERSATION,
                     "the captured reply action belongs to a DIFFERENT conversation"

@@ -297,43 +297,60 @@ public final class AssistantReceiver extends BroadcastReceiver {
                 "nothing sent; copy the text yourself instead", "");
         } else {
             StatusBarNotification sbn = listener == null ? null : listener.findActive(t.sbnKey);
-            if (sbn != null) {
+            // P-intelligence-17R: the resolution ORDER is pure + pinned (SendPath).
+            //  live original → UNIQUE same-conversation re-post (a changed key/id
+            //  never blocks delivery) → conversation-bound cached token (also the
+            //  answer to ambiguity: ≥2 identity matches is never a guess) →
+            //  honest fail. The DeliveryGuard verdict above already vetoed any
+            //  cross-conversation/cross-app fire.
+            StatusBarNotification[] actives = listener == null
+                ? null : listener.safeActiveNotifications();
+            com.replymate.core.assistant.SendPath.Plan plan =
+                com.replymate.core.assistant.SendPath.plan(
+                    sbn != null, AssistantTargetStore.conversationMatchCount(t, actives),
+                    AssistantTargetStore.readCachedPi(t) != null);
+            if (plan == com.replymate.core.assistant.SendPath.Plan.LIVE_ORIGINAL) {
                 why = tryRemoteSend(ctx, c, contactId, who, tag, sbn, t, text);
-            } else {
-                // The original sbn key is gone (dismissed/churned). TWO more honest
-                // attempts before any fallback (P-background-8 ordering):
-                String liveMissReason = listener == null
-                    ? "ReplyMate's link to the notification shade was recycled"
-                    : "the original " + app + " notification was dismissed";
-
-                // (2) SAME conversation, re-posted under a NEW key → fresh send target.
-                StatusBarNotification reposted = listener == null
-                    ? null : AssistantTargetStore.findConversationMatch(
-                        t, listener.safeActiveNotifications());
-                if (reposted != null) {
-                    String whyReposted = tryRemoteSend(ctx, c, contactId, who, tag,
-                        reposted, t, text);
-                    if (whyReposted == null) {
-                        how = HOW_CONVERSATION;
-                        // Adopt the fresher geometry + cache its PI for next time.
-                        adoptLiveTarget(c, contactId, reposted);
-                        sbnKey = reposted.getKey();
-                    } else {
-                        // the re-post didn't pan out — the cached target is next
+            } else if (plan == com.replymate.core.assistant.SendPath.Plan.REBIND_REPOST) {
+                StatusBarNotification reposted =
+                    AssistantTargetStore.findConversationMatch(t, actives);
+                String whyReposted = reposted == null
+                    ? "the unique same-conversation re-post vanished mid-approval"
+                    : tryRemoteSend(ctx, c, contactId, who, tag, reposted, t, text);
+                if (whyReposted == null) {
+                    how = HOW_CONVERSATION;
+                    // Adopt the fresher geometry + cache its PI for next time.
+                    adoptLiveTarget(c, contactId, reposted);
+                    sbnKey = reposted.getKey();
+                } else {
+                    String liveMissReason = listener == null
+                        ? "ReplyMate's link to the notification shade was recycled"
+                        : "the original " + app + " notification was dismissed";
+                    if (reposted != null) {
                         AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
                             AssistantEvent.Stage.APPROVE_RESOLVE,
-                            "a re-posted same-conversation notification was found but unusable: "
+                            "the unique re-posted same-conversation notification was unusable: "
                                 + whyReposted,
                             "moving on to the cached reply target", "");
                     }
-                }
-                if (how != HOW_CONVERSATION) {
-                    // (3) CACHED reply PendingIntent — fired with the official results
-                    //     wire; success is ledgered as UNWATCHED (no fake certainty).
                     why = tryCachedSend(ctx, c, contactId, who, tag, app, t, text,
                         liveMissReason);
                     if (why == null) how = HOW_CACHED;
                 }
+            } else {
+                // CACHED_TOKEN or HONEST_FAIL — tryCachedSend produces the honest
+                // reason when no token exists; it never invents one.
+                String liveMissReason = listener == null
+                    ? "ReplyMate's link to the notification shade was recycled"
+                    : (plan == com.replymate.core.assistant.SendPath.Plan.CACHED_TOKEN
+                        && AssistantTargetStore.conversationMatchCount(t, actives) >= 2)
+                        ? "more than one live " + app
+                            + " notification matches this conversation (ambiguous —"
+                            + " ReplyMate never guesses a reply target)"
+                        : "the original " + app + " notification was dismissed";
+                why = tryCachedSend(ctx, c, contactId, who, tag, app, t, text,
+                    liveMissReason);
+                if (why == null) how = HOW_CACHED;
             }
         }
 
