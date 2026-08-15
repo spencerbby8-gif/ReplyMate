@@ -72,6 +72,13 @@ public final class PromptBuilder {
             String anchorSender = null;
             switch (bundle.composeKind) {
                 case FOLLOW_UP: {
+                    // the auto-follow-up override wins: it is the exact approved
+                    // text that just went out through the source app (never stored)
+                    if (bundle.followUpAnchorOverride != null
+                            && usableText(bundle.followUpAnchorOverride)) {
+                        anchor = bundle.followUpAnchorOverride;
+                        break;
+                    }
                     com.replymate.core.model.Message lastOut = null;
                     for (int i = bundle.thread.size() - 1; i >= 0; i--) {
                         com.replymate.core.model.Message m = bundle.thread.get(i);

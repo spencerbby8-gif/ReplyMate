@@ -67,12 +67,21 @@ public final class AssistantPrereq {
             case NOTIFICATION_ACCESS:
                 return "On the screen that opens, find ReplyMate and switch its access ON.";
             case BATTERY:
-                return "In the box that appears, choose ALLOW so ReplyMate may always"
-                    + " run in the background. (If no box appears, find ReplyMate in the"
-                    + " list and pick \"Don't optimize\" / Battery \u2192 Unrestricted.)";
+                return isOplus()
+                    ? "In the box that appears, choose ALLOW. THEN open the Battery"
+                        + " usage page for ReplyMate (the \"Oppo battery usage page\""
+                        + " button does that) and switch ON \"Allow background activity\","
+                        + " confirming Allow \u2014 ColorOS keeps that switch separate from"
+                        + " Android's battery dialog, and kills background work without it."
+                    : "In the box that appears, choose ALLOW so ReplyMate may always"
+                        + " run in the background. (If no box appears, find ReplyMate in the"
+                        + " list and pick \"Don't optimize\" / Battery \u2192 Unrestricted.)";
             case BACKGROUND_RESTRICTED:
-                return "On the app-info screen that opens, tap Battery and choose"
-                    + " \"Unrestricted\" (or at least \"Optimized\" \u2014 never \"Restricted\").";
+                return isOplus()
+                    ? "On the app page that opens, tap Battery usage and switch ON"
+                        + " \"Allow background activity\" (confirm Allow)."
+                    : "On the app-info screen that opens, tap Battery and choose"
+                        + " \"Unrestricted\" (or at least \"Optimized\" \u2014 never \"Restricted\").";
             default:
                 return "";   // POST_NOTIFICATIONS is an in-app runtime request
         }
@@ -128,6 +137,32 @@ public final class AssistantPrereq {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     }
 
+    /** ColorOS family (OPPO / OnePlus / realme). These skins keep a SECOND,
+     *  separate per-app switch — "Allow background activity" on the app's
+     *  Battery usage page — that kills background work even when Android's
+     *  battery-optimization exemption is granted. Detected via Build.MANUFACTURER. */
+    public static boolean isOplus() {
+        String m = android.os.Build.MANUFACTURER;
+        if (m == null) return false;
+        String l = m.toLowerCase(java.util.Locale.US);
+        return l.contains("oppo") || l.contains("oneplus") || l.contains("realme");
+    }
+
+    /** The app's own Battery usage page (ColorOS: where "Allow background
+     *  activity" lives). P-intelligence-14, researched 2026-08-14 — NOT a guessed
+     *  intent: the AOSP 12+ per-app battery alias (kept by many skins) is tried
+     *  ONLY behind resolveActivity; the com.oplus.battery internals are NOT
+     *  exported (launching them is a permission denial), so they are never
+     *  attempted. When neither direct route resolves, callers fall back to
+     *  appDetailsIntent — on ColorOS its "Battery usage" row is one tap away. */
+    public static Intent appBatteryUsageIntent(Context ctx) {
+        return new Intent()
+            .setClassName("com.android.settings",
+                "com.android.settings.Settings$AppBatteryUsageActivity")
+            .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.getPackageName())
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    }
+
     /** Maker-specific battery/autostart screens (Tecno, Infinix, Xiaomi, Oppo,
      *  Vivo, Huawei, Samsung…). Components below are the widely-documented
      *  candidates — and HONESTY BY CONSTRUCTION: each is checked with
@@ -154,8 +189,18 @@ public final class AssistantPrereq {
         {"com.asus.mobilemanager", "com.asus.mobilemanager.entry.FunctionActivity"},
     };
 
-    /** The first maker screen that REALLY resolves on this device, else null. */
+    /** The first maker screen that REALLY resolves on this device, else null.
+     *  P-intelligence-14: on ColorOS the CORRECT destination is ReplyMate's own
+     *  Battery usage page ("Allow background activity") — the generic maker-app
+     *  lists are only for OTHER skins; the unexported com.oplus.battery
+     *  components are never attempted. */
     public static Intent oemBackgroundIntent(Context ctx) {
+        if (isOplus()) {
+            Intent usage = appBatteryUsageIntent(ctx);
+            if (canLaunch(ctx, usage)) return usage;
+            Intent details = appDetailsIntent(ctx);
+            if (canLaunch(ctx, details)) return details;
+        }
         for (String[] pair : OEM_SCREENS) {
             Intent i = new Intent()
                 .setClassName(pair[0], pair[1])

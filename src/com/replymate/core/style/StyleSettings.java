@@ -17,6 +17,19 @@ public final class StyleSettings {
     /** Hard cap so a giant paste can't blow the prompt budget. */
     public static final int CUSTOM_PROMPT_MAX = 400;
 
+    /** P-intelligence-14: per-contact AUTO FOLLOW-UP control. This is NOT the\n
+     *  "follow_up" style dial (an instruction about questions at the end of a\n
+     *  reply) — this switch decides whether ReplyMate may PREPARE one natural\n
+     *  follow-up draft after an approved reply. Values: \"1\" = on; anything else\n
+     *  or absent = OFF (the safe default — no behavior without an explicit opt-in). */
+    public static final String AUTO_FOLLOW_KEY = "autofollow";
+
+    /** True only when the owner explicitly enabled auto follow-ups for the contact. */
+    public static boolean autoFollowOn(Map<String, String> contactRows) {
+        Integer v = level(contactRows, AUTO_FOLLOW_KEY);
+        return v != null && v.intValue() == 1;
+    }
+
     private StyleSettings() { }
 
     /** Effective levels for one contact: contact override wins, else global, else default.

@@ -154,6 +154,8 @@ public final class AssistantReceiver extends BroadcastReceiver {
                 com.replymate.core.learning.LearningEngine.classifyEdit(oldText, edited),
                 Long.valueOf(draftId));
         }
+        // P-intelligence-14: an approved (edited) reply may arm ONE auto follow-up.
+        AssistantRunner.maybeFollowUp(c, contactId, draftId);
         AssistantDiag.record(c, contactId, who, tag, "",
             AssistantEvent.Stage.NOTIFY,
             edited.equals(oldText.trim())
@@ -283,6 +285,8 @@ public final class AssistantReceiver extends BroadcastReceiver {
             if (draftId > 0) c.drafts().updateStatus(draftId, DraftStatus.SENT);
             AssistantLearning.onQuickSent(c.learningService(), contact,
                 draftId > 0 ? Long.valueOf(draftId) : null);
+            // P-intelligence-14: a quick-sent reply may arm ONE auto follow-up.
+            AssistantRunner.maybeFollowUp(c, contactId, draftId);
             String handoff = how == HOW_CACHED
                 ? "fired through " + app + "'s cached quick-reply target (unwatched)"
                 : how == HOW_CONVERSATION
@@ -462,6 +466,8 @@ public final class AssistantReceiver extends BroadcastReceiver {
             cm.setPrimaryClip(ClipData.newPlainText("ReplyMate reply", text));
         }
         if (draftId > 0) c.drafts().updateStatus(draftId, DraftStatus.COPIED);
+        // P-intelligence-14: a copied (approved) reply may arm ONE auto follow-up.
+        AssistantRunner.maybeFollowUp(c, contactId, draftId);
         String app = empty(appLabel) ? "the app" : appLabel;
         String who = empty(name) ? "#" + contactId : name;
         String line = (why == null)

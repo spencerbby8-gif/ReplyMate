@@ -405,10 +405,18 @@ public final class SettingsActivity extends Activity {
                 ? com.replymate.app.assistant.AssistantPrereq.Need.POST_NOTIFICATIONS
                 : firstScreen);
         if (!how.isEmpty()) msg.append('\n').append(how).append('\n');
+        final boolean oplus = com.replymate.app.assistant.AssistantPrereq.isOplus();
         if (oemAvailable) {
-            msg.append("\nThis maker adds a SECOND background switch in its own battery"
-                + " manager — \"Maker battery settings\" opens it; turn it on there too"
-                + " if background delivery still stops.");
+            msg.append(oplus
+                ? "\nThis phone (ColorOS) keeps a SECOND background switch \u2014 \"Allow"
+                    + " background activity\" \u2014 on ReplyMate's Battery usage page."
+                    + " The button below opens exactly that page: switch it ON and"
+                    + " confirm Allow. (No app can read that switch's state, so"
+                    + " ReplyMate never claims it \u2014 the row re-checks the readable"
+                    + " levers every time this screen opens.)"
+                : "\nThis maker adds a SECOND background switch in its own battery"
+                    + " manager — \"Maker battery settings\" opens it; turn it on there too"
+                    + " if background delivery still stops.");
         }
         msg.append("\nReplyMate stays read-only and local-first —"
             + " nothing is ever sent without your Approve.");
@@ -446,7 +454,7 @@ public final class SettingsActivity extends Activity {
                 })
             .setNegativeButton("Later", null);
         if (oemAvailable) {
-            b.setNeutralButton("Maker battery settings",
+            b.setNeutralButton(oplus ? "Oppo battery usage page" : "Maker battery settings",
                 new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
                         com.replymate.app.assistant.AssistantPrereq.launch(

@@ -468,12 +468,84 @@ public final class DraftService {
             return generateForContact(contactId, abort);
         }
         synchronized (lockFor(contactId)) {
-            return composeForContactLocked(contactId, kind, abort);
+            return composeForContactLocked(contactId, kind, abort, null);
         }
     }
 
+    /** P-intelligence-14 (owner mandate): AUTO FOLLOW-UP after an approved reply.
+     *  Called by every approval path (share-sheet copy/edit, quick-reply send,
+     *  notification copy). The per-contact control defaults OFF; every "not now"
+     *  case is a named skip from {@link FollowUpPolicy} — returned as an honest
+     *  Result.err so callers can silently ignore it while the Prompt Audit /
+     *  Diagnostics trail stays truthful. PREPARE runs the exact same
+     *  {@link ComposeKind#FOLLOW_UP} pipeline and lands as a GENERATED draft —
+     *  it NEVER sends by itself.
+     *  @param approved the draft the owner just approved (may be null when the
+     *                  caller only has an id — the anchor then falls back to the
+     *                  owner's last outgoing) */
+    public Result<DraftOutcome> maybePrepareFollowUp(long contactId, Draft approved) {
+        Contact c = contacts.get(contactId);
+        if (c == null) return Result.err("follow-up skipped: contact not found");
+        boolean on = styleService != null
+            && com.replymate.core.style.StyleSettings.autoFollowOn(
+                styleService.contactRows(contactId));
+
+        List<Message> thread = messages.lastMessages(contactId, 30);
+        Message newestUsable = null;
+        Long lastOutgoingId = null;
+        for (int i = thread.size() - 1; i >= 0; i--) {
+            Message m = thread.get(i);
+            if (m == null || !PromptBuilder.usableText(m.body)) continue;
+            if (newestUsable == null) newestUsable = m;
+            if (m.direction == Direction.OUTGOING && lastOutgoingId == null) {
+                lastOutgoingId = Long.valueOf(m.id);
+            }
+        }
+        boolean waiting = false;
+        for (Draft d : drafts.byContact(contactId, 5)) {
+            if (d != null && d.status == DraftStatus.GENERATED) { waiting = true; break; }
+        }
+        Long answeredId = approved == null ? null : approved.inReplyToId;
+        boolean approvedIsIntentional = approved != null
+            && approved.promptSnapshotJson != null
+            && approved.promptSnapshotJson.contains("\"kind\":\"compose:");
+        String anchorKey = "followup.auto.anchor." + contactId;
+        long doneAnchor = 0L;
+        if (liveKv != null) {
+            try {
+                doneAnchor = Long.parseLong(liveKv.get(anchorKey, "0"));
+            } catch (NumberFormatException nfe) {
+                doneAnchor = 0L;
+            }
+        }
+
+        FollowUpPolicy.Verdict v = FollowUpPolicy.decide(on, c.privateMode, c.aiEnabled,
+            newestUsable, lastOutgoingId, answeredId, approvedIsIntentional, waiting,
+            doneAnchor);
+        if (!v.prepare) return Result.err("follow-up skipped: " + v.skipped);
+
+        // The follow-up bumps what the owner ACTUALLY just sent. A quick-reply
+        // send (or copy-paste) never lands in our store, so the approved draft's
+        // final text is passed as the anchor override — the bump quotes IT, and
+        // the thread-tail "their message is fresh" rejection is bypassed (the
+        // policy already proved that incoming is the one just answered).
+        String approvedText = approved == null || approved.replyText == null
+            ? null : approved.replyText.trim();
+        Result<DraftOutcome> r;
+        synchronized (lockFor(contactId)) {
+            r = composeForContactLocked(contactId,
+                com.replymate.core.prompt.ComposeKind.FOLLOW_UP, null, approvedText);
+        }
+        if (r != null && r.ok && liveKv != null) {
+            liveKv.put(anchorKey, String.valueOf(
+                FollowUpPolicy.anchorOf(answeredId, lastOutgoingId)));
+        }
+        return r;
+    }
+
     private Result<DraftOutcome> composeForContactLocked(long contactId,
-            com.replymate.core.prompt.ComposeKind kind, AbortCheck abort) {
+            com.replymate.core.prompt.ComposeKind kind, AbortCheck abort,
+            String followUpAnchorOverride) {
         Contact c = contacts.get(contactId);
         if (c == null) return Result.err("Contact not found.");
         if (c.privateMode) return Result.err("This contact is private — AI generation is disabled.");
@@ -501,13 +573,17 @@ public final class DraftService {
         }
         switch (kind) {
             case FOLLOW_UP:
-                if (lastOutgoing == null) {
+                if (lastOutgoing == null && followUpAnchorOverride == null) {
                     return Result.err("Follow-up needs a message FROM YOU that "
                         + c.displayName + " hasn't answered yet — nothing to bump.");
                 }
-                if (lastIncoming != null && lastIncoming.body != null) {
+                if (followUpAnchorOverride == null
+                        && lastIncoming != null && lastIncoming.body != null) {
                     // an incoming message NEWER than our last outgoing means it is
-                    // THEIR turn, not a bump — say so honestly.
+                    // THEIR turn, not a bump — say so honestly. (The override form —
+                    // an approved reply that never landed in our store — was already
+                    // vetted by FollowUpPolicy: the fresh incoming IS what that
+                    // reply answered.)
                     boolean incomingIsNewer = false;
                     for (int i = thread.size() - 1; i >= 0; i--) {
                         Message m = thread.get(i);
@@ -615,6 +691,7 @@ public final class DraftService {
             profiles.extraFiltered(),
             mem == null ? null : mem.lines);
         bundle.composeKind = kind;
+        bundle.followUpAnchorOverride = followUpAnchorOverride;
 
         com.replymate.core.live.LiveContext.Snapshot live = liveFor(thread);
         bundle.liveLine = live.promptLine;
@@ -626,7 +703,11 @@ public final class DraftService {
         java.util.List<String> hearing = new java.util.ArrayList<String>();
         switch (kind) {
             case FOLLOW_UP:
-                if (lastOutgoing != null) hearing.add(lastOutgoing);
+                if (followUpAnchorOverride != null) {
+                    hearing.add(followUpAnchorOverride.trim());
+                } else if (lastOutgoing != null) {
+                    hearing.add(lastOutgoing);
+                }
                 break;
             case CLARIFY:
                 if (lastIncoming != null) hearing.add(lastIncoming.body.trim());

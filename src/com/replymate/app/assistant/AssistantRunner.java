@@ -133,6 +133,81 @@ public final class AssistantRunner {
         });
     }
 
+    /** P-intelligence-14: AUTO FOLLOW-UP trigger. Every approval path (copy /
+     *  edited-copy / quick-reply send, in-app or from the shade) calls this. The
+     *  per-contact switch and every "not now" case are JVM-pinned in
+     *  {@code FollowUpPolicy} inside {@code DraftService.maybePrepareFollowUp};
+     *  here we only wire GENERATION-lane execution, the honestly-labeled alert
+     *  ("Follow-up idea", never "reply for") and the diag trail. The result is a
+     *  GENERATED draft: approval stays with the owner — it NEVER sends itself. */
+    public static void maybeFollowUp(final AppContainer c, final long contactId,
+                                     final long approvedDraftId) {
+        if (c == null || !enabled(c)) return;
+        Tasks.gen(new Runnable() {
+            @Override public void run() {
+                String tag = AssistantPlanner.notifTag(contactId);
+                try {
+                    Draft approved = null;
+                    for (Draft d : c.drafts().byContact(contactId, 10)) {
+                        if (d != null && d.id == approvedDraftId) { approved = d; break; }
+                    }
+                    Result<DraftOutcome> r =
+                        c.draftService().maybePrepareFollowUp(contactId, approved);
+                    if (r == null || !r.ok || r.value == null || r.value.drafts.isEmpty()) {
+                        String why = r == null ? "no result" : r.error;
+                        // quiet policy skips are normal (control off, their turn, a
+                        // draft already waiting…) — only REAL failures get a diag line
+                        if (why != null && !why.startsWith("follow-up skipped:")) {
+                            com.replymate.core.model.Contact ct0 = c.contacts().get(contactId);
+                            AssistantDiag.record(c, contactId,
+                                ct0 == null ? "#" + contactId : ct0.displayName, tag, "",
+                                AssistantEvent.Stage.GENERATE, safe(why, 90),
+                                "follow-up draft not prepared", fixFor(why));
+                        }
+                        return;
+                    }
+                    Draft d = r.value.drafts.get(0);
+                    com.replymate.core.model.Contact ct = c.contacts().get(contactId);
+                    String who = ct == null || ct.displayName == null
+                        ? "#" + contactId : ct.displayName;
+                    AssistantDiag.record(c, contactId, who, tag, "",
+                        AssistantEvent.Stage.GENERATE,
+                        "auto follow-up is on for this contact",
+                        "follow-up draft #" + d.id + " prepared — waiting for approval"
+                            + " (never auto-sends)", "");
+                    if (!ListenerStatus.canPostNotifications(c.app())) return;
+                    List<Message> recent = c.messages().lastMessages(contactId, 30);
+                    Message lastIncoming = null;
+                    for (Message m : recent) {
+                        if (m != null && m.direction == Direction.INCOMING) lastIncoming = m;
+                    }
+                    AssistantTargetStore.Target t = AssistantTargetStore.load(c.kv(), contactId);
+                    AssistantPlanner.Capability cap = t.usable()
+                        ? AssistantPlanner.Capability.DIRECT
+                        : AssistantPlanner.Capability.NONE;
+                    AssistantNotifier.ensureChannels(c.app());
+                    // ONE pop per cycle, same discipline as reply drafts: the
+                    // approval cleared the flag, so this follow-up pops once.
+                    String alertedKey = AssistantPlanner.alertedKvKey(contactId);
+                    boolean fresh = !"1".equals(c.kv().get(alertedKey, "0"));
+                    AssistantNotifier.postFollowUp(c.app(), contactId, who,
+                        lastIncoming == null
+                            ? "" : WatchedApps.labelFor(lastIncoming.channel),
+                        d.replyText, d.id, cap, fresh,
+                        lastIncoming == null ? null : lastIncoming.body,
+                        lastIncoming == null ? 0L : lastIncoming.sentAt,
+                        d.createdAt > 0 ? d.createdAt : System.currentTimeMillis());
+                    if (fresh) c.kv().put(alertedKey, "1");
+                } catch (RuntimeException e) {
+                    AssistantDiag.record(c, contactId, "#" + contactId, tag, "",
+                        AssistantEvent.Stage.GENERATE,
+                        e.getClass().getSimpleName() + ": " + safe(e.getMessage(), 70),
+                        "follow-up preparation aborted safely", "");
+                }
+            }
+        });
+    }
+
     /** Core flow — background thread only. Never throws. */
     static void generateAndNotify(AppContainer c, long contactId, String name,
                                   boolean force, long token) {

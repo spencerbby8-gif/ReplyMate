@@ -645,6 +645,9 @@ public final class ConversationActivity extends Activity {
             c.learningService().record(contact,
                 StyleSignal.Kind.APPROVED, "copied-as-is", draft.id);
         }
+        // P-intelligence-14: this approved reply may arm ONE auto follow-up draft
+        // (per-contact switch + policy inside; the follow-up itself is approve-first).
+        com.replymate.app.assistant.AssistantRunner.maybeFollowUp(c, contact.id, draft.id);
         ((ClipboardManager) getSystemService("clipboard"))
             .setPrimaryClip(ClipData.newPlainText("replymate draft", text));
         Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show();

@@ -89,6 +89,26 @@ public final class AssistantNotifier {
                             String draftText, long draftId, AssistantPlanner.Capability cap,
                             boolean freshAlert,
                             String incomingText, long incomingTs, long generatedAt) {
+        post(ctx, contactId, name, appLabel, draftText, draftId, cap, freshAlert,
+            incomingText, incomingTs, generatedAt, "Draft reply for ", "Replying to ");
+    }
+
+    /** P-intelligence-14: an AUTO FOLLOW-UP draft alert must never masquerade as a
+     *  reply — its title and context label name exactly what it is. */
+    public static void postFollowUp(Context ctx, long contactId, String name,
+            String appLabel, String draftText, long draftId,
+            AssistantPlanner.Capability cap, boolean freshAlert,
+            String incomingText, long incomingTs, long generatedAt) {
+        post(ctx, contactId, name, appLabel, draftText, draftId, cap, freshAlert,
+            incomingText, incomingTs, generatedAt,
+            "Follow-up idea for ", "Their latest message (you answered it) — from ");
+    }
+
+    private static void post(Context ctx, long contactId, String name, String appLabel,
+                            String draftText, long draftId, AssistantPlanner.Capability cap,
+                            boolean freshAlert,
+                            String incomingText, long incomingTs, long generatedAt,
+                            String titleLabel, String contextLabel) {
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
 
@@ -110,7 +130,7 @@ public final class AssistantNotifier {
         }
         if (incomingText != null && !incomingText.trim().isEmpty()) {
             body.append("\n\n· · · · · · · · · · · · · · ·\n")  // hard divider
-                .append("Replying to ").append(name);           // ② its source
+                .append(contextLabel).append(name);             // ② its source
             if (incomingTs > 0) {
                 body.append(" · ").append(com.replymate.core.util.TimeFmt.dayTime(incomingTs));
             }
@@ -122,7 +142,7 @@ public final class AssistantNotifier {
             ? new Notification.Builder(ctx, CHANNEL_ID)
             : new Notification.Builder(ctx);
         brand(ctx, b)
-            .setContentTitle("Draft reply for " + name
+            .setContentTitle(titleLabel + name
                 + (appLabel == null || appLabel.isEmpty() ? "" : " · " + appLabel))
             .setContentText(draftText)
             .setStyle(new Notification.BigTextStyle()

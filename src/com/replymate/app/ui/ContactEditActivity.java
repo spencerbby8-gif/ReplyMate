@@ -278,6 +278,36 @@ public final class ContactEditActivity extends Activity {
         root.addView(this.customPrompt);
         root.addView(Ui.sub(this, "Saved with the contact. Max 400 characters."));
 
+        // P-intelligence-14: per-contact AUTO FOLLOW-UP (distinct from the
+        // "Follow-ups" voice dial, which shapes reply wording). OFF by default;
+        // the prepared follow-up is an approve-first draft like every other.
+        Ui.ToggleRow autoFollow = Ui.toggleRow(this, "Auto follow-up draft",
+            "after you approve a reply and they go quiet, ReplyMate prepares ONE"
+                + " natural follow-up for this contact — through the same memory,"
+                + " voice, learning and Search as any draft. It knows when not to"
+                + " bump (their fresh message, a draft already waiting, one per"
+                + " reply) and it NEVER sends by itself.");
+        autoFollow.sw.setChecked(StyleSettings.autoFollowOn(this.contactRows));
+        autoFollow.sw.setOnCheckedChangeListener(
+            new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
+                    if (on) {
+                        setOverride(StyleSettings.AUTO_FOLLOW_KEY, 1);
+                        android.widget.Toast.makeText(ContactEditActivity.this,
+                            "Auto follow-up on — every draft still waits for your approval",
+                            android.widget.Toast.LENGTH_LONG).show();
+                    } else {
+                        ContactEditActivity.this.contactRows.remove(StyleSettings.AUTO_FOLLOW_KEY);
+                        ContactEditActivity.this.c.styleSettings().remove(
+                            ContactEditActivity.this.contactId, StyleSettings.AUTO_FOLLOW_KEY);
+                        android.widget.Toast.makeText(ContactEditActivity.this,
+                            "Auto follow-up off", android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+        root.addView(autoFollow.row);
+        root.addView(Ui.divider(this));
+
         buildPinnedFacts(root);
         buildLearning(root);
     }

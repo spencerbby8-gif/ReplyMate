@@ -46,6 +46,11 @@ public final class PromptBundle {
      *  replace the task turn with the kind's own composition (TaskComposer)
      *  and skip the reply-scoped burst/planner work. */
     public ComposeKind composeKind = ComposeKind.REPLY;
+    /** P-intelligence-14 auto-follow-up: the approved reply's final text, when it
+     *  never landed in our store (quick-reply send / copy-paste into the source
+     *  app). Overrides the thread-derived FOLLOW_UP anchor so the bump quotes the
+     *  message the owner ACTUALLY just sent — never an older unrelated outgoing. */
+    public String followUpAnchorOverride = null;
 
     /** P-background-12: how many reply candidates the provider is ASKED to
      *  produce. Default is ONE — a background/alert generation must persist
