@@ -56,6 +56,7 @@ public final class AppContainer {
     private final Clock clock;
     private final ContactService contactService;
     private final ContactStore contactStore;
+    private final com.replymate.core.usecase.ConversationStateService conversationStates;
     private final DbHelper dbHelper;
     private final DraftService draftService;
     private final DraftStore draftStore;
@@ -181,6 +182,12 @@ public final class AppContainer {
         };
         this.gateway = providerGateway;
         this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap, styleService, learningService, memoryService);
+        // P-intelligence-16b: the ConversationState engine (group engagement gate,
+        // participants, topics, reply targets) — wired into generation + runner.
+        com.replymate.core.usecase.ConversationStateService convoStates =
+            new com.replymate.core.usecase.ConversationStateService(sqlKvStore, systemClock);
+        this.conversationStates = convoStates;
+        this.draftService.setConversationStateService(convoStates);
         // P-intelligence-4: the live-context toggle (Settings → generation context)
         // reads from the same kv; default stays ON when unset.
         this.draftService.setLiveKv(sqlKvStore);
@@ -363,6 +370,11 @@ public final class AppContainer {
 
     public DraftService draftService() {
         return this.draftService;
+    }
+
+    /** P-intelligence-16b: group ConversationState engine (never null). */
+    public com.replymate.core.usecase.ConversationStateService conversationStates() {
+        return this.conversationStates;
     }
 
     /** P-memory-audit: long-term memory continuity (facts/summaries/learned style). */

@@ -43,6 +43,7 @@ public final class MessageDao {
         v.put("media_mime", m.mediaMime == null ? "" : m.mediaMime);
         v.put("media_uri", m.mediaUri == null ? "" : m.mediaUri);
         v.put("sender_name", m.senderName == null ? "" : m.senderName);
+        v.put("sender_key", m.senderKey == null ? "" : m.senderKey);   // schema v8
         return v;
     }
 
@@ -167,6 +168,7 @@ public final class MessageDao {
         o.mediaMime = safe(c, "media_mime");
         o.mediaUri = safe(c, "media_uri");
         o.senderName = safe(c, "sender_name");   // schema v6 — same defensive read
+        o.senderKey = safe(c, "sender_key");     // schema v8 — same defensive read
         return o;
     }
 

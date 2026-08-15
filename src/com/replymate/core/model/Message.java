@@ -18,6 +18,7 @@ public class Message {
     public String mediaMime = "";        // e.g. "image/jpeg" when the app exposed it
     public String mediaUri = "";         // content:// reference (local-only, never sent)
     public String senderName = "";       // actual sender (schema v6, group attribution);
+    public String senderKey = "";        // platform's stable sender id (schema v8, Person key);
                                          // "" = unknown/outgoing/manual/legacy
 
     public Message() { }

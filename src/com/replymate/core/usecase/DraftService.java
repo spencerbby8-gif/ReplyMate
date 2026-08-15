@@ -61,6 +61,18 @@ public final class DraftService {
      *  fallback transparently degrades to the anti-hallucination honesty line. */
     public void setRetrieval(com.replymate.core.ports.RetrievalPort r) { this.retrieval = r; }
 
+    /** P-intelligence-16b: the ConversationState engine. Wired by AppContainer;
+     *  when set, GROUP conversations are engagement-gated before any research or
+     *  paid call (1:1 behavior untouched; null ⇒ legacy pre-gate behavior). */
+    private com.replymate.core.usecase.ConversationStateService convoStates;
+    public void setConversationStateService(
+            com.replymate.core.usecase.ConversationStateService s) { this.convoStates = s; }
+
+    /** Runner-decodeable error prefix for an engagement-gated refusal:
+     *  {@code ENGAGEMENT_SKIP_PREFIX + VERDICT + ":" + reason} — no draft, no
+     *  provider call. WAIT defers one re-check; NO_REPLY stays silent. */
+    public static final String ENGAGEMENT_SKIP_PREFIX = "engagement-skip:";
+
     /** P-background-8: per-call staleness probe (the shared instance stays
      *  stateless — two conversations can generate concurrently). The background
      *  runner passes its JobCoalescer token; manual flows pass nothing. */
@@ -187,6 +199,25 @@ public final class DraftService {
                     : " The notification also carried no usable media reference.")
                 + " I won't invent a reply without their actual words. Open " + app
                 + " to check it, or type their message into this chat and generate again.");
+        }
+
+        // P-intelligence-16b: GROUP ENGAGEMENT GATE — a group draft is never
+        // generated merely because a notification arrived. ConversationState
+        // (participants/burst/topic/addressing) is evaluated BEFORE the voice/
+        // memory research below and long before the paid provider call; a WAIT
+        // or NO_REPLY verdict exits with the Runner-decodeable skip error —
+        // zero drafts, zero provider calls, full diag trail.
+        com.replymate.core.usecase.ConversationStateService.Evaluation convEval = null;
+        if (c.isGroup && convoStates != null) {
+            String ownerName = profiles.load() == null ? "" : profiles.load().name;
+            String incomingHash = com.replymate.core.assistant.AssistantPlanner.hashOf(
+                lastIncoming.body + "|" + lastIncoming.sentAt + "|" + lastIncoming.id);
+            convEval = convoStates.evaluate(c, thread, ownerName, incomingHash);
+            if (!convEval.engagement.shouldGenerate()) {
+                return Result.err(ENGAGEMENT_SKIP_PREFIX
+                    + convEval.engagement.verdict.name() + ":"
+                    + convEval.engagement.reason);
+            }
         }
 
         String styleRules = "";
@@ -332,6 +363,17 @@ public final class DraftService {
             profiles.extraFiltered(),
             mem == null ? null : mem.lines);
         bundle.understanding = understanding;
+        // P-intelligence-16b: ride the (successful) group engagement evaluation —
+        // topic/participants/target situation lines and the exact reply target.
+        if (convEval != null) {
+            bundle.groupExtraLines = com.replymate.core.prompt.GroupPrompt.lines(
+                convEval.state, convEval.engagement);
+            if (convEval.engagement.target != null
+                    && convEval.engagement.target.hasIdentity()) {
+                bundle.replyTarget = convEval.engagement.target;
+            }
+            convoStates.markLast(contactId, convEval.engagement);
+        }
         bundle.planText = planText;
         bundle.answeredWatermark = answeredWatermark;
 

@@ -45,6 +45,13 @@ public final class PromptBuilder {
             bundle.contact.displayName, bundle.contact.isGroup,
             bundle.profile == null ? "" : bundle.profile.displayName());
         if (!groupLine.isEmpty()) situationLines.add(groupLine);
+        // P-intelligence-16b: ConversationState lines (topic / same-name members /
+        // targeted reply) — groups only, every line fact-backed by the state.
+        if (bundle.groupExtraLines != null) {
+            for (String gl : bundle.groupExtraLines) {
+                if (gl != null && !gl.trim().isEmpty()) situationLines.add(gl.trim());
+            }
+        }
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
             bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines,
             situationLines);
@@ -109,19 +116,40 @@ public final class PromptBuilder {
                 bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
                 bundle.contact.displayName, anchor, anchorSender, appLabel);
         } else {
+        // P-intelligence-16b: when the engagement evaluation pinned the EXACT
+        // message being answered (group mention / open room question), quote and
+        // attribute THAT one — never an accidental older "latest". 1:1 carries no
+        // target ⇒ legacy bytes (latest line answers, as always).
+        String taskText = latest == null ? null : latest.body;
+        String taskSender = latest == null ? null : latest.senderName;
+        if (bundle.replyTarget != null && bundle.replyTarget.hasIdentity()) {
+            taskText = bundle.replyTarget.snippet;
+            taskSender = bundle.replyTarget.senderLabel;
+        }
+        java.util.List<String> annotations = ud == null
+            ? null
+            : com.replymate.core.understanding.ConversationContextBuilder
+                .burstAnnotations(ud);
+        if (bundle.replyTarget != null && bundle.replyTarget.hasIdentity()
+                && burst.size() >= 2) {
+            if (annotations == null) annotations = new java.util.ArrayList<String>();
+            int idx = burst.indexOf(bundle.replyTarget.snippet);
+            annotations.add(idx >= 0
+                ? "Line #" + (idx + 1) + " — from " + bundle.replyTarget.senderLabel
+                    + " — is the message addressed to you; your answer leads with it."
+                : "The message addressed to you is " + bundle.replyTarget.senderLabel
+                    + "'s: \"" + bundle.replyTarget.snippet + "\" — lead with that answer.");
+        }
         task = burst.size() >= 2
             ? TaskComposer.burstTask(
                 bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
                 bundle.contact.displayName, burst, appLabel,
-                ud == null
-                    ? null
-                    : com.replymate.core.understanding.ConversationContextBuilder
-                        .burstAnnotations(ud))
+                annotations)
             : TaskComposer.defaultTask(
                 bundle.profile == null ? "the owner of this phone" : bundle.profile.displayName(),
                 bundle.contact.displayName,
-                latest == null ? null : latest.body, appLabel, kind,
-                latest == null ? null : latest.senderName);
+                taskText, appLabel, kind,
+                taskSender);
         }
         // P-intelligence-5: the deterministic plan grounds the read; it rides the
         // END of the task turn, after the quoted message, before nothing — the

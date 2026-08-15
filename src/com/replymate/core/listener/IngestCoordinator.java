@@ -198,6 +198,10 @@ public final class IngestCoordinator {
             // prompts/audit attribute words to the right person.
             m.senderName = dir == Direction.INCOMING && e.senderName != null
                 ? e.senderName.trim() : "";
+            // P-intelligence-16b (schema v8): keep the platform's STABLE sender id
+            // too — display names collide/rename, Person keys do not.
+            m.senderKey = dir == Direction.INCOMING && e.senderKey != null
+                ? e.senderKey.trim() : "";
             messages.insertIgnore(m);
             rep.stored++;
 

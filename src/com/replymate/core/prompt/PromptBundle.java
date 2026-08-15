@@ -52,6 +52,14 @@ public final class PromptBundle {
      *  message the owner ACTUALLY just sent — never an older unrelated outgoing. */
     public String followUpAnchorOverride = null;
 
+    /* P-intelligence-16b (optional): ConversationState situation lines — topic /
+     *  same-name-member disambiguation / reply target, fact-backed groups-only
+     *  lines; null/empty ⇒ zero new prompt bytes (1:1 unchanged). */
+    public java.util.List<String> groupExtraLines;
+    /* P-intelligence-16b (optional): the exact message this draft answers
+     *  (engagement-evidence based). 1:1 stays null ⇒ legacy newest-message task. */
+    public com.replymate.core.convo.ReplyTarget replyTarget;
+
     /** P-background-12: how many reply candidates the provider is ASKED to
      *  produce. Default is ONE — a background/alert generation must persist
      *  exactly one current draft per message, never a row per provider variant

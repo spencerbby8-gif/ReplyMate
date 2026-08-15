@@ -208,6 +208,58 @@ public final class AssistantRunner {
         });
     }
 
+    /** P-intelligence-16b: a group engagement gate said WAIT or NO_REPLY. Record
+     *  the verdict honestly; WAIT defers ONE re-check of the same content (never
+     *  a loop — a second WAIT on identical content is marked handled); NO_REPLY
+     *  is marked handled so the catch-up sweep stays quiet for the same burst. */
+    private static void handleEngagementSkip(final AppContainer c, final long contactId,
+                                             final String who, final String incomingHash,
+                                             final String verdictReason) {
+        String tag = AssistantPlanner.notifTag(contactId);
+        com.replymate.core.usecase.ConversationStateService svc = c.conversationStates();
+        if (verdictReason.startsWith("WAIT")) {
+            if (svc != null && !incomingHash.equals(svc.waitedFor(contactId))) {
+                svc.markWaited(contactId, incomingHash);
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.SCHEDULE,
+                    "group conversation still mid-flow (" + verdictReason + ")",
+                    "one deferred re-check in 90s — nothing generated, no provider call",
+                    "");
+                TIMER.postDelayed(new Runnable() {
+                    @Override public void run() {
+                        Tasks.gen(new Runnable() {
+                            @Override public void run() {
+                                long tok = JOBS.begin(contactId);
+                                try {
+                                    generateAndNotify(c, contactId, who, false, tok);
+                                } finally {
+                                    JOBS.finish(contactId, tok);
+                                }
+                            }
+                        });
+                    }
+                }, 90_000L);
+            } else {
+                c.kv().put(AssistantPlanner.hashKvKey(contactId), incomingHash);
+                if (svc != null) svc.markSkip(contactId, incomingHash, verdictReason);
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.SCHEDULE,
+                    "still unresolved after the wait (" + verdictReason + ")",
+                    "stayed silent and marked handled — a new message re-evaluates", "");
+            }
+            return;
+        }
+        c.kv().put(AssistantPlanner.hashKvKey(contactId), incomingHash);
+        if (svc != null) {
+            if (svc.skippedFor(contactId, incomingHash) != null) return;  // sweep-quiet
+            svc.markSkip(contactId, incomingHash, verdictReason);
+        }
+        AssistantDiag.record(c, contactId, who, tag, "",
+            AssistantEvent.Stage.NOTIFY,
+            "group burst needed no reply (" + verdictReason + ")",
+            "stayed silent by design — no draft, no provider call", "");
+    }
+
     /** Core flow — background thread only. Never throws. */
     static void generateAndNotify(AppContainer c, long contactId, String name,
                                   boolean force, long token) {
@@ -277,6 +329,15 @@ public final class AssistantRunner {
                     "a newer message arrived while this generation was in flight",
                     "stale result discarded before any draft or alert"
                         + " (the interrupted call was paid once; the newer job answers)", "");
+                return;
+            }
+            // P-intelligence-16b: the group engagement gate refused — WAIT or
+            // NO_REPLY. Not an error: the honest verdict is recorded, WAIT gets
+            // exactly one deferred re-check, NO_REPLY stays silently handled.
+            if (r != null && r.error != null
+                    && r.error.startsWith(DraftService.ENGAGEMENT_SKIP_PREFIX)) {
+                handleEngagementSkip(c, contactId, who, incomingHash,
+                    r.error.substring(DraftService.ENGAGEMENT_SKIP_PREFIX.length()));
                 return;
             }
             if (r == null || !r.ok || r.value == null || r.value.drafts.isEmpty()) {
@@ -355,9 +416,26 @@ public final class AssistantRunner {
         // P-background-11: the alert names exactly WHAT is being answered — the
         // fire-time latest incoming message (never a stale scheduled one) + its
         // time, and the draft's own generation time.
-        AssistantNotifier.post(c.app(), contactId, who, appLabel, d.replyText, d.id, cap,
-            fresh, lastIncoming.body, lastIncoming.sentAt,
-            d.createdAt > 0 ? d.createdAt : System.currentTimeMillis());
+        // P-intelligence-16b: group drafts carry the engagement verdict's salience —
+        // a directed reply names its target; an optional chime-in never masquerades
+        // as an answer. 1:1 keeps the default labels byte-identically.
+        String titleLabel = "Draft reply for ";
+        String contextLabel = "Replying to ";
+        if (c.conversationStates() != null) {
+            String[] parts = c.conversationStates().lastFor(contactId).split("\\|", -1);
+            if (parts.length >= 3 && "REPLY_REQUIRED".equals(parts[0])
+                    && !parts[2].isEmpty()) {
+                titleLabel = "Reply to " + parts[2] + " in ";
+                contextLabel = parts[2] + " said to you — ";
+            } else if (parts.length >= 1 && "REPLY_OPTIONAL".equals(parts[0])) {
+                titleLabel = "You could chime in — ";
+                contextLabel = "In the group — ";
+            }
+        }
+        AssistantNotifier.postWithLabels(c.app(), contactId, who, appLabel, d.replyText,
+            d.id, cap, fresh, lastIncoming.body, lastIncoming.sentAt,
+            d.createdAt > 0 ? d.createdAt : System.currentTimeMillis(),
+            titleLabel, contextLabel);
         if (fresh) c.kv().put(alertedKey, "1");
     }
 

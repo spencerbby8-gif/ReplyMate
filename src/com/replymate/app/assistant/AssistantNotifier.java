@@ -104,6 +104,18 @@ public final class AssistantNotifier {
             "Follow-up idea for ", "Their latest message (you answered it) — from ");
     }
 
+    /** P-intelligence-16b: caller-chosen title/context labels — group alerts carry
+     *  the engagement verdict's salience ("Reply to Amara in …", "You could chime
+     *  in — …") so an optional draft never masquerades as a directed reply. */
+    public static void postWithLabels(Context ctx, long contactId, String name,
+            String appLabel, String draftText, long draftId,
+            AssistantPlanner.Capability cap, boolean freshAlert,
+            String incomingText, long incomingTs, long generatedAt,
+            String titleLabel, String contextLabel) {
+        post(ctx, contactId, name, appLabel, draftText, draftId, cap, freshAlert,
+            incomingText, incomingTs, generatedAt, titleLabel, contextLabel);
+    }
+
     private static void post(Context ctx, long contactId, String name, String appLabel,
                             String draftText, long draftId, AssistantPlanner.Capability cap,
                             boolean freshAlert,
