@@ -122,8 +122,13 @@ defense-in-depth restored to the 0001 §5 contract). Residue check: `auth.users=
 | JVM gate @ HEAD `011de97` + docs | **891/891 ALL SUITES PASSED** (run twice this phase) |
 | Engine devcheck | vc911 / `1.6.4-devcheck16` — sha256 `b0e62afe…a8664f`, 624,970 B, local debug cert `446310cc…d2` MATCH; verified then deleted |
 | vc910 proof cert (apksigner) | **B1:5F:2F:37…6A:85:ED MATCH** (`b15f2f37…6a85ed`), vc910 / 1.6.3-groups-proof, sha256 `1f82a6d9…4613` == CI artifact 9246933080 |
-| CI proof | run id: pending → filled below; artifact; KEYSTORE-VERDICT; APK-CERT-PROOF |
-| Off-CI independent verify | sha256 + apksigner + badging of CI artifact |
+| CI proof | **run 31887144498 GREEN** (success @ 13:26:00Z); artifact **9247568498** `ReplyMate-1.6.4-integrity-proof-vc911`; logs: KEYSTORE-VERDICT MATCH ×2, APK-CERT-PROOF MATCH ×2 |
+| Off-CI independent verify | artifact 624,970 B; sha256 `595f99ac858a352083b5284a283b1c965ff0aba16c1a6c3da99f55cb105d3e08`; cert **B1:5F:2F:37…6A:85:ED MATCH**; badging vc911 / 1.6.4-integrity-proof / minSdk 24 / target 35 |
+
+CI vs device separation: CI run 31887144498 proves source `f5b8d7b`+docs → tested (891/891 in
+workflow), packaged, historically signed APK. It does **not** certify on-device behavior —
+Part A rows FIN-1…9 stay owner-marked. `ReplyMate-1.6.4-integrity-proof.apk` is in the repo
+root beside the earlier proofs for the owner's Oppo install.
 
 Device-proof vs CI-proof separation: CI proves packaging/signing/tests; **device rows in Part A
 remain the owner's** — never self-certified.
