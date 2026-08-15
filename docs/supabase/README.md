@@ -15,6 +15,18 @@ locked down with RLS so a future, separately-approved Auth+sync phase can build 
 |---|---|---|---|
 | 0001 | `docs/supabase/migrations/0001_foundation.sql` | 2026-08-06 18:05 UTC | version 1 |
 | verify | `docs/supabase/migrations/verify_0001.sql` | re-runnable structural + functional check | — |
+| 0002 | `docs/supabase/migrations/0002_widen_channel_checks.sql` | 2026-08-06 20:42 UTC | version 2 |
+| 0003 | `docs/supabase/migrations/0003_revoke_anon_surface.sql` | P-16 audit apply (see checklist P-intelligence-16-1.6.4) | version 3 |
+| 0004 | `docs/supabase/migrations/0004_avatars_bucket.sql` | P-16 audit apply (see checklist P-intelligence-16-1.6.4) | version 4 |
+| verify | `docs/supabase/migrations/verify_0003_0004.sql` | re-runnable structural + functional check | — |
+
+Ledger note: the project tracks applied migrations in `public.rm_schema_migrations`
+(verified live by the P-16 audit). The official CLI history table
+`supabase_migrations.schema_migrations` is intentionally absent — migrations were applied
+via psql over the pooler, never `supabase db push`, and the repo files use `000N_*.sql`
+names rather than CLI timestamps. Accepted debt (P-16 finding F3): adopt CLI-shaped names
++ `supabase migration repair` only if a future owner-approved tooling phase wants
+`supabase migration list` parity.
 
 How applied: `psql` over the Supavisor **session pooler** (us-east-1). The owner's Direct
 Connection URI host is IPv6-only and this sandbox has no IPv6 route; the pooler
