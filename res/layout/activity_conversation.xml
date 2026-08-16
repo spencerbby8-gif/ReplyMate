@@ -140,6 +140,19 @@
             android:orientation="horizontal"
             android:gravity="bottom">
 
+            <!-- P-intelligence-18 §3: "+ Them" — record a MISSED INCOMING message
+                 by hand (the chat app was open, no notification ever existed).
+                 Stored as INCOMING with MANUALLY_ADDED provenance; never claims
+                 the platform delivered it. -->
+            <Button
+                android:id="@+id/btn_them"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginRight="8dp"
+                android:text="+ Them"
+                android:contentDescription="Add a missed message from them"
+                android:textSize="13sp" />
+
             <EditText
                 android:id="@+id/msg_input"
                 android:layout_width="0dp"

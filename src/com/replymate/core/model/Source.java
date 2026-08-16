@@ -4,7 +4,11 @@ package com.replymate.core.model;
 public enum Source {
     LISTENER("listener"),
     MANUAL("manual"),
-    IMPORT("import");
+    IMPORT("import"),
+    /** P-intelligence-18 §3: the user typed a MISSED INCOMING message in by hand
+     *  ("+ Them"). Never notification-captured — carries no notifKey, no item
+     *  class, no fabricated platform metadata. */
+    MANUALLY_ADDED("manually_added");
 
     public final String wire;
     Source(String wire) { this.wire = wire; }

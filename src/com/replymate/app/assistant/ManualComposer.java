@@ -51,7 +51,26 @@ public final class ManualComposer {
         m.body = text;
         m.sentAt = c.clock().now();
         m.source = Source.MANUAL;
+        // P-intelligence-18 §3: the owner-typed row carries the conversation's
+        // KNOWN identity (copied, never fabricated) so context/memory/thread
+        // treat it exactly like a real sent message of THIS conversation.
+        String[] ident =
+            com.replymate.core.usecase.ManualEntryService
+                .latestConversationIdentity(c.messages(), contactId);
+        m.convId = ident[0];
+        m.convTitle = ident[1];
         c.messages().insert(m);
+        // P-intelligence-18 §3: learning parity — a manual send typed into
+        // ReplyMate teaches a live draft exactly like one typed in the chat app
+        // (same ManualSendLearner, same APPROVED/EDITED signal, same per-draft
+        // dedupe marker — the listener path can never double-learn it).
+        try {
+            com.replymate.core.learning.ManualSendLearner.evaluate(
+                c.contacts().get(contactId), c.messages(), c.drafts(),
+                c.learningService(), c.kv(), c.clock());
+        } catch (RuntimeException ignored) {
+            // a learner hiccup must never hurt the send flow
+        }
 
         Channel origin = null;
         for (ContactChannel ch : c.contacts().channelsByContact(contactId)) {

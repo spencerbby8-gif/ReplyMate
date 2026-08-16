@@ -82,6 +82,16 @@ public final class ItemClassifierTest {
         assertEquals(ItemClass.MEDIA_ONLY, ItemClassifier.classify(media, new String[0]).cls);
     }
 
+    @Test public void missingReplyMetadataNeverMakesAnAnnouncement() {
+        // P-18 §2: absence of reply capability / mention / reference metadata is
+        // NOT announcement evidence — an ordinary group post stays what it is.
+        NotifEvent e = ev("anyone up for lunch on Sunday?", "Musa", "Family group", true);
+        // no hasFreeFormReply, no owner mention, no conversation id
+        ItemClassifier.Result r = ItemClassifier.classify(e, new String[]{"spencer"});
+        assertEquals(ItemClass.GROUP_MESSAGE, r.cls);
+        assertFalse(r.cls.isNonReplyable());
+    }
+
     @Test public void nothingIdentifiedFailsClosedAsUnknown() {
         ItemClassifier.Result r = ItemClassifier.classify(
             ev("tap to view your messages", null, null, false), new String[0]);

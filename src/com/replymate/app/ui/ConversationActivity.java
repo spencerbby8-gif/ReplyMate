@@ -113,11 +113,15 @@ public final class ConversationActivity extends Activity {
                 startActivity(i);
             }
         });
-        // P-ux-fix: ONE manual action (outgoing only) + AI Generate. The confusing
-        // ＋them / ＋me pair is gone; incoming messages arrive via the notification
-        // listener on their own.
+        // P-ux-fix: ONE manual send action (outgoing) + AI Generate. P-18 §3 adds
+        // back "+ Them" — narrowly scoped to MISSED incoming messages (chat app was
+        // open, no notification ever posted): stored as INCOMING with visible
+        // "added by you (not captured)" provenance, never as platform data.
         findViewById(R.id.btn_manual).setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { manualSend(); }
+        });
+        findViewById(R.id.btn_them).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showAddFromThem(); }
         });
         btnGen.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { generate(); }
@@ -298,8 +302,13 @@ public final class ConversationActivity extends Activity {
         blp.setMargins(out ? side : 0, 0, out ? 0 : side, 0);
         wrap.addView(body, blp);
 
-        String who = out ? "You" : contact.displayName;
-        if (m.channel != null && m.channel != Channel.MANUAL) {
+        String who = out ? "You" : (m.senderName != null && !m.senderName.trim().isEmpty()
+            ? m.senderName.trim() : contact.displayName);
+        // P-intelligence-18 §3: a MANUALLY_ADDED row never borrows the app's name —
+        // its meta says plainly YOU recorded it; nothing claims notification capture.
+        if (m.source == com.replymate.core.model.Source.MANUALLY_ADDED) {
+            who += " · added by you (not captured)";
+        } else if (m.channel != null && m.channel != Channel.MANUAL) {
             who += " · " + WatchedApps.labelFor(m.channel);
         }
         TextView meta = Ui.sub(this, who + " · " + TimeFmt.clock(m.sentAt));
@@ -319,6 +328,64 @@ public final class ConversationActivity extends Activity {
                 }
             }
         });
+    }
+
+    /* ------------------------------------------------------- + Them (P-18 §3) */
+
+    /** "+ Them": record an incoming message the platform never showed us (the
+     *  chat app was open, no notification existed). The WHAT-TO-DO lives in
+     *  ManualEntryService (pure, pinned); here only the honest rendering:
+     *  group conversations REQUIRE the member's name — attribution is the point —
+     *  and the success line says plainly the row was added by hand. */
+    private void showAddFromThem() {
+        final LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = Ui.dp(this, 16);
+        box.setPadding(pad, Ui.dp(this, 8), pad, 0);
+
+        final EditText who = new EditText(this);
+        if (contact.isGroup) {
+            who.setHint("Who in " + contact.displayName + " said it? (required)");
+            box.addView(who);
+        }
+        final EditText body = new EditText(this);
+        body.setHint(contact.isGroup
+            ? "Their exact message…" : "What " + contact.displayName + " said…");
+        body.setMinLines(1);
+        body.setMaxLines(5);
+        box.addView(body);
+
+        TextView hint = Ui.sub(this,
+            "Use this only for a message notifications missed. ReplyMate never"
+                + " claims the app delivered it — the thread marks it"
+                + " “added by you (not captured)”.");
+        hint.setPadding(0, Ui.dp(this, 8), 0, 0);
+        box.addView(hint);
+
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Add a message from "
+                + (contact.isGroup ? "a member" : contact.displayName))
+            .setView(box)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("+ Them", new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface d, int which) {
+                    com.replymate.core.usecase.ManualEntryService.Result r =
+                        com.replymate.core.usecase.ManualEntryService.addIncomingFromThem(
+                            c.contacts(), c.messages(), c.clock(), contact.id,
+                            body.getText().toString(),
+                            contact.isGroup ? who.getText().toString() : "");
+                    if (r.outcome == com.replymate.core.usecase.ManualEntryService
+                            .Outcome.STORED) {
+                        refreshThread();
+                        showStatus("Added as their message (by you, not captured).",
+                            Ui.ACCENT);
+                    } else {
+                        Toast.makeText(ConversationActivity.this, r.reason,
+                            Toast.LENGTH_LONG).show();
+                    }
+                }
+            })
+            .show();
     }
 
     /* ---------------------------------------------------------------- generate */
