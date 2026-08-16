@@ -108,6 +108,27 @@ public final class OneDraftPerMessageTest {
             .contains("\"candidateCount\":1"));
     }
 
+    @Test public void sequentialRegeneratesLeaveExactlyOneCurrentDraft() {
+        // P-19 §2: Regenerate answers the SAME message again — every regeneration
+        // must REPLACE the untouched draft (never stack stale duplicates), and the
+        // surviving draft is the newest take.
+        ScriptedProvider p1 = new ScriptedProvider(0, "first take");
+        Result<DraftOutcome> r1 = service(new Fakes.GatewayFake(p1)).generateForContact(1);
+        assertTrue(String.valueOf(r1.ok ? "" : r1.error), r1.ok);
+        assertEquals(1, drafts.byContact(1, 10).size());
+        long firstId = drafts.byContact(1, 10).get(0).id;
+
+        ScriptedProvider p2 = new ScriptedProvider(0, "second take");
+        Result<DraftOutcome> r2 = service(new Fakes.GatewayFake(p2)).generateForContact(1);
+        assertTrue(String.valueOf(r2.ok ? "" : r2.error), r2.ok);
+        assertEquals("one regeneration ⇒ ONE current draft", 1, drafts.byContact(1, 10).size());
+        assertEquals("the newest take survives", "second take",
+            drafts.byContact(1, 10).get(0).replyText);
+        assertTrue("the replaced draft is gone", drafts.byContact(1, 10).get(0).id != firstId);
+        assertEquals("both generations answered the same message",
+            drafts.byContact(1, 10).get(0).inReplyToId, r1.value.drafts.get(0).inReplyToId);
+    }
+
     @Test public void distinctVariantsBeyondTheFirstAreNotPersistedAsDrafts() {
         ScriptedProvider p = new ScriptedProvider(0, "take one", "take two", "take three");
         Result<DraftOutcome> r = service(new Fakes.GatewayFake(p)).generateForContact(1);

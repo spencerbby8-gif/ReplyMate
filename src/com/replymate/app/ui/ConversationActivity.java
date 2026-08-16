@@ -415,6 +415,20 @@ public final class ConversationActivity extends Activity {
                     showStatus("Ready — " + r.value.drafts.size() + " suggestions in "
                         + (r.value.latencyMs / 1000.0d) + "s", Ui.GREEN);
                     refreshDrafts();
+                    // P-intelligence-19 §2: an in-app (re)generate must update the
+                    // EXISTING shade alert in place — same draft identity, same
+                    // tag, never a stale card, never a stacked duplicate.
+                    if (!r.value.drafts.isEmpty()) {
+                        Message lastInc = null;
+                        for (Message m : c.messages().lastMessages(contactId, 30)) {
+                            if (m.direction == Direction.INCOMING) lastInc = m;
+                        }
+                        if (lastInc != null) {
+                            com.replymate.app.assistant.AssistantRunner.refreshAlert(
+                                c, contactId, contact.displayName, lastInc,
+                                r.value.drafts.get(0));
+                        }
+                    }
                     scrollToBottom();
                 } else {
                     LastProviderError.save(c, r.error);

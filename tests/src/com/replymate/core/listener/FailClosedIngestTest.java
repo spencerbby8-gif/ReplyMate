@@ -119,6 +119,27 @@ public final class FailClosedIngestTest {
         assertTrue(kv.get(IngestCoordinator.KV_RING, "").contains("[real_1to1]"));
     }
 
+    @Test public void replyCapableServerChannelMessagePingsNormally() {
+        // P-19: groups enabled; a Discord #general message WITH a real Reply
+        // action is a normal conversation — stored, pings, honestly stamped
+        // direct_reply (the announcement demote must NOT touch it).
+        kv.put(GroupPolicy.KV_GLOBAL, "1");
+        NotifEvent e = ev(Channel.DISCORD, "#general", "#general", "Me",
+            "match moved to sunday?", 1000, true);
+        e.conversationId = "4477445566";
+        e.hasFreeFormReply = true;
+
+        IngestReport rep = engine.handle(list(e), null);
+
+        assertEquals(1, rep.stored);
+        assertEquals("a replyable server message pings like any conversation",
+            1, rep.pings.size());
+        Message m = messages.lastMessages(contacts.all().get(0).id, 1).get(0);
+        assertEquals("direct_reply", m.itemClass);
+        assertEquals("4477445566", m.convId);
+        assertTrue(kv.get(IngestCoordinator.KV_RING, "").contains("[direct_reply]"));
+    }
+
     @Test public void groupDefaultOffStillDropsBeforeTheClassifierMatters() {
         // Regression guard: the P-17 classifier never weakened the group opt-in.
         IngestReport rep = engine.handle(list(

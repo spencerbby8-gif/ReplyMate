@@ -133,6 +133,18 @@ public final class AssistantRunner {
         });
     }
 
+    /** P-intelligence-19 §2: IN-APP regeneration must update the shade alert too —
+     *  the SAME stable tag+id, the fresh draft as primary content, no fresh pop
+     *  (force), never a duplicate card. Re-posts through the exact notifyDraft
+     *  path so capability buttons recompute from the live target and guard rails
+     *  stay identical. No-op when there is nothing to point the alert at. */
+    public static void refreshAlert(AppContainer c, long contactId, String name,
+                                    Message lastIncoming, Draft d) {
+        if (c == null || d == null || lastIncoming == null) return;
+        notifyDraft(c, contactId,
+            name == null ? "#" + contactId : name, lastIncoming, d, true);
+    }
+
     /** P-intelligence-14: AUTO FOLLOW-UP trigger. Every approval path (copy /
      *  edited-copy / quick-reply send, in-app or from the shade) calls this. The
      *  per-contact switch and every "not now" case are JVM-pinned in

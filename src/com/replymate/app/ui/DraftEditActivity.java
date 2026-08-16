@@ -53,6 +53,29 @@ public final class DraftEditActivity extends Activity {
         original = src.getStringExtra(AssistantReceiver.EXTRA_TEXT);
         if (original == null) original = "";
         if (c == null || contactId < 0) { finish(); return; }
+        // P-intelligence-19 §2: NEVER an empty (or stale) composer. The STORE is
+        // the source of truth, not the intent extra: preload the CURRENT text of
+        // the exact draft being edited; if that draft was already replaced by a
+        // regeneration (purge), retarget to the contact's newest generated draft.
+        if (draftId > 0) {
+            for (com.replymate.core.model.Draft d : c.drafts().byContact(contactId, 25)) {
+                if (d != null && d.id == draftId && d.replyText != null
+                        && !d.replyText.trim().isEmpty()) {
+                    original = d.replyText;
+                    break;
+                }
+            }
+        }
+        if (original.isEmpty()) {
+            for (com.replymate.core.model.Draft d : c.drafts().byContact(contactId, 25)) {
+                if (d != null && d.status == com.replymate.core.model.DraftStatus.GENERATED
+                        && d.replyText != null && !d.replyText.trim().isEmpty()) {
+                    original = d.replyText;
+                    draftId = d.id;   // edit the CURRENT reply, not a replaced one
+                    break;
+                }
+            }
+        }
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         LinearLayout root = new LinearLayout(this);

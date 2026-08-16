@@ -63,8 +63,17 @@ public final class ItemClassifier {
         }
 
         // ---- self-announcing channel (positive evidence only) ----
+        // P-intelligence-19 (Discord #general, on-device): a REAL free-form Reply
+        // action on the item's own notification is positive REPLYABILITY evidence
+        // and outranks the self-announce shape. Discord's own data model agrees:
+        // replies are channel-bound messages (type 19 + message_reference); an
+        // announcement channel is a CHANNEL property Android never exposes — so a
+        // bare "sender name == channel title" shape (which single-shot server
+        // notifications produce) without capability evidence is NOT enough.
+        // True announcements keep arriving with NO reply action and stay blocked.
         if (e.group && hasSender && nonEmpty(e.conversationTitle)
-                && norm(e.senderName).equals(norm(e.conversationTitle))) {
+                && norm(e.senderName).equals(norm(e.conversationTitle))
+                && !e.hasFreeFormReply) {
             return new Result(ItemClass.ANNOUNCEMENT,
                 "the item speaks AS the channel/conversation itself (announcement shape)");
         }

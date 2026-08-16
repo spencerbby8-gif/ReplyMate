@@ -92,6 +92,39 @@ public final class ItemClassifierTest {
         assertFalse(r.cls.isNonReplyable());
     }
 
+    @Test public void discordServerChannelWithAReplyActionIsConversational() {
+        // P-19 ON-DEVICE BUG (repro): a normal Discord #general arrives
+        // group-shaped with the sender echoing the channel title (single-shot
+        // server notifications) — BUT its own notification exposes a REAL
+        // free-form Reply action. Capability is replyability evidence: never an
+        // announcement. (Pre-fix this classified ANNOUNCEMENT and blocked.)
+        NotifEvent e = ev("match moved to sunday?", "#general", "#general", true);
+        e.conversationId = "4477445566";
+        e.hasFreeFormReply = true;
+        ItemClassifier.Result r = ItemClassifier.classify(e, new String[0]);
+        assertEquals(ItemClass.DIRECT_REPLY, r.cls);
+        assertFalse(r.cls.isNonReplyable());
+    }
+
+    @Test public void aTrueAnnouncementStillHasNoReplyAction() {
+        // The control: identical self-announce shape, NO Reply action ⇒ still an
+        // announcement, still non-replyable — the safety net is untouched.
+        NotifEvent e = ev("new rules are live, read them", "#announcements",
+            "#announcements", true);
+        e.conversationId = "999000111";
+        ItemClassifier.Result r = ItemClassifier.classify(e, new String[0]);
+        assertEquals(ItemClass.ANNOUNCEMENT, r.cls);
+        assertTrue(r.cls.isNonReplyable());
+    }
+
+    @Test public void aNamedSpeakerInAServerChannelWasNeverClassedAnnouncement() {
+        // the MessagingStyle-history shape: per-message Person names ≠ channel title
+        NotifEvent e = ev("who has the tickets?", "chidi_x", "#general", true);
+        e.conversationId = "4477445566";
+        e.hasFreeFormReply = true;
+        assertEquals(ItemClass.DIRECT_REPLY, ItemClassifier.classify(e, new String[0]).cls);
+    }
+
     @Test public void nothingIdentifiedFailsClosedAsUnknown() {
         ItemClassifier.Result r = ItemClassifier.classify(
             ev("tap to view your messages", null, null, false), new String[0]);
