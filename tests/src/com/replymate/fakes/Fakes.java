@@ -187,6 +187,20 @@ public final class Fakes {
             }
             return hits;
         }
+        /** P-19R honest re-classification: mutate the stored row in place. */
+        @Override public synchronized void updateClassification(long messageId,
+                            String itemClassWire, String convId, String convTitle) {
+            for (List<Message> list : byContact.values()) {
+                for (Message m : list) {
+                    if (m.id == messageId) {
+                        m.itemClass = itemClassWire == null ? "" : itemClassWire;
+                        if (convId != null) m.convId = convId;
+                        if (convTitle != null) m.convTitle = convTitle;
+                        return;
+                    }
+                }
+            }
+        }
         @Override public synchronized int countByContact(long contactId) {
             List<Message> all = byContact.get(contactId);
             return all == null ? 0 : all.size();

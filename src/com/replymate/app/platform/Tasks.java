@@ -4,6 +4,9 @@ import android.os.Handler;
 import android.os.Looper;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadFactory;
 
 /** Tiny background-runner with SEPARATE lanes (threading model per BLUEPRINT §1.3,
@@ -32,13 +35,19 @@ public final class Tasks {
     private static final ExecutorService INGEST = Executors.newSingleThreadExecutor(
         named("rm-ingest"));
 
-    // P-background-12: 3 lanes, not 2 — two simultaneously-slow conversations
-    // (research crawl + provider retries can both park for tens of seconds) must
-    // never queue-block every OTHER conversation's draft. Per-contact generation
-    // is serialized inside DraftService, so widening the pool cannot double-run
-    // one conversation; it only lets different conversations proceed in parallel.
-    private static final ExecutorService GEN = Executors.newFixedThreadPool(3,
-        named("rm-gen"));
+    // P-background-12 (elastic P-intelligence-19R): core 3, elastic to 6 —
+    // two-to-three simultaneously-slow conversations (a research crawl +
+    // provider retries can each park for tens of seconds) must never
+    // queue-block every OTHER conversation's draft. Per-contact generation is
+    // serialized inside DraftService and the JobCoalescer aborts stale jobs
+    // BEFORE the paid call, so extra lanes can never double-run a conversation
+    // or double-bill a burst — they only let different conversations proceed
+    // in parallel. Idle extra lanes retire after 60s. Queue-wait beyond
+    // SLOW_QUEUE_MS is now MEASURED per cycle (AssistantRunner.recordLatency),
+    // so saturation is proven in diagnostics instead of guessed.
+    private static final ExecutorService GEN = new ThreadPoolExecutor(
+        3, 6, 60L, TimeUnit.SECONDS,
+        new LinkedBlockingQueue<Runnable>(), named("rm-gen"));
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 

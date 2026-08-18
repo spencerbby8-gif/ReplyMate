@@ -36,4 +36,9 @@ public final class SqlMessageStore implements MessageStore {
     @Override public void reassignContact(long fromContactId, long toContactId) {
         dao.reassignContact(fromContactId, toContactId);
     }
+
+    @Override public void updateClassification(long messageId, String itemClassWire,
+                                               String convId, String convTitle) {
+        dao.updateClassification(messageId, itemClassWire, convId, convTitle);
+    }
 }

@@ -85,6 +85,33 @@ public class ConversationMatchTest {
             WA, "", "#announcements", "News"));
     }
 
+    @Test public void discordCrossChannelBorrowIsStructurallyImpossible() {
+        // P-intelligence-19R §1: Discord fires one notification PER CHANNEL, often
+        // inside the same server (same package, sibling #channels). Approving the
+        // #general draft must NEVER adopt #random's notification — with native ids,
+        // with titles only, and when the server reuses the same plain title.
+        final String DISCORD = "com.discord";
+        assertFalse(ConversationMatch.same(
+            DISCORD, "4477445566", "#general", "",
+            DISCORD, "8811223344", "#random", ""));
+        assertFalse(ConversationMatch.same(
+            DISCORD, "", "#general", "",
+            DISCORD, "", "#random", ""));
+        assertFalse(ConversationMatch.same(
+            DISCORD, "", "#general", "My Server",
+            DISCORD, "", "#random", "My Server"));
+        // …and its OWN channel re-post (with or without the native id) DOES match:
+        assertTrue(ConversationMatch.same(
+            DISCORD, "4477445566", "#general", "",
+            DISCORD, "4477445566", "#general", ""));
+        assertTrue(ConversationMatch.same(
+            DISCORD, "", "#general", "",
+            DISCORD, "", "#general", ""));
+        assertTrue(ConversationMatch.same(
+            DISCORD, "4477445566", "#general", "",
+            DISCORD, "", "#general", ""));
+    }
+
     @Test public void oneSidedNativeIdArbitratesOnTheSharedTitle() {
         // re-post drift (documented at ingest): the first post may lack the
         // shortcut id the re-post carries — one-sided identity falls through to

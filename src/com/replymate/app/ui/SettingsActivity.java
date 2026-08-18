@@ -31,6 +31,11 @@ public final class SettingsActivity extends Activity {
     /** Guards the switch's listener while we programmatically revert it (P-intel-14). */
     private boolean suppressAssistantToggle;
 
+    /** P-intelligence-19R: the owner asked to enable while approvals were missing
+     *  and left for a system screen — onResume re-evaluates the LIVE state and
+     *  finishes the enable only when nothing can still block execution. */
+    private static final String KV_PENDING_ENABLE = "assistant.pending_enable";
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
@@ -137,20 +142,27 @@ public final class SettingsActivity extends Activity {
                         refreshRows();
                         return;
                     }
-                    // P-intelligence-14: the switch may only READ ON when Android can
-                    // genuinely run us in the background — never a claimed \"on\" while
-                    // the listener/battery/notification levers are missing. Blocked
-                    // ON: persist OFF, revert the switch, and walk the approval flow.
-                    java.util.EnumSet<com.replymate.app.assistant.AssistantPrereq.Need> missing =
-                        com.replymate.app.assistant.AssistantPrereq.missing(SettingsActivity.this);
-                    if (missing.isEmpty()) {
+                    // P-intelligence-14 (re-substantiated P-intelligence-19R): the switch
+                    // may only READ ON when Android can genuinely run us in the
+                    // background — never a claimed "on" while ANY lever can still
+                    // block execution (listener, alerts, allowlist, Android 9+
+                    // restricted bucket, the standby RESTRICTED bucket, and the
+                    // unverifiable ColorOS "Allow background activity" switch until
+                    // the owner confirms it). Blocked ON: persist OFF + a pending
+                    // flag, revert the switch, and walk the approval flow; onResume
+                    // finishes the enable once the last lever is granted.
+                    com.replymate.core.assistant.BackgroundReadiness.Verdict ready =
+                        com.replymate.app.assistant.AssistantPrereq.readiness(
+                            SettingsActivity.this, c.kv());
+                    if (ready.mayClaimReady()) {
                         c.kv().put(
                             com.replymate.app.assistant.AssistantRunner.KV_ENABLED, "1");
-                        Toast.makeText(SettingsActivity.this,
-                            "Background replies on — Ready ✓", Toast.LENGTH_SHORT).show();
+                        c.kv().put(KV_PENDING_ENABLE, "0");
+                        toastReady(ready);
                     } else {
                         c.kv().put(
                             com.replymate.app.assistant.AssistantRunner.KV_ENABLED, "0");
+                        c.kv().put(KV_PENDING_ENABLE, "1");
                         suppressAssistantToggle = true;
                         assistantRow.sw.setChecked(false);
                         suppressAssistantToggle = false;
@@ -164,7 +176,7 @@ public final class SettingsActivity extends Activity {
                 // blocked-state re-entry: tap the row itself to re-run the flow
                 if (com.replymate.app.assistant.AssistantRunner.enabled(c)
                         && !com.replymate.app.assistant.AssistantPrereq
-                            .missing(SettingsActivity.this).isEmpty()) {
+                            .missing(SettingsActivity.this, c.kv()).isEmpty()) {
                     runAssistantApprovalFlow();
                 }
             }
@@ -351,7 +363,60 @@ public final class SettingsActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        // P-intelligence-19R: RECHECK the live state after returning from a system
+        // screen the approval flow opened. If the owner just granted the last
+        // missing lever, finish the pending enable here — and only here: "Ready"
+        // is claimed from a FRESH verdict, never from a pre-screen snapshot.
+        if (c != null && "1".equals(c.kv().get(KV_PENDING_ENABLE, "0"))) {
+            com.replymate.core.assistant.BackgroundReadiness.Verdict v =
+                com.replymate.app.assistant.AssistantPrereq.readiness(this, c.kv());
+            if (v.mayClaimReady()) {
+                c.kv().put(com.replymate.app.assistant.AssistantRunner.KV_ENABLED, "1");
+                c.kv().put(KV_PENDING_ENABLE, "0");
+                toastReady(v);
+                // enabling flips the listener-era catch-up on too: anything queued
+                // while the levers were missing gets re-driven now
+                com.replymate.app.assistant.AssistantRunner.retryUnanswered(c);
+            }
+        }
         refreshRows();
+    }
+
+    /** Comma list of the verdict's blockers as owner-visible chips. */
+    private static String chipsOf(com.replymate.core.assistant.BackgroundReadiness.Verdict v) {
+        StringBuilder sb = new StringBuilder();
+        for (com.replymate.core.assistant.BackgroundReadiness.Lever l : v.missing) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(com.replymate.app.assistant.AssistantPrereq.chip(mapLever(l)));
+        }
+        return sb.toString();
+    }
+
+    private static com.replymate.app.assistant.AssistantPrereq.Need mapLever(
+            com.replymate.core.assistant.BackgroundReadiness.Lever l) {
+        switch (l) {
+            case NOTIFICATION_ACCESS:
+                return com.replymate.app.assistant.AssistantPrereq.Need.NOTIFICATION_ACCESS;
+            case POST_NOTIFICATIONS:
+                return com.replymate.app.assistant.AssistantPrereq.Need.POST_NOTIFICATIONS;
+            case BACKGROUND_RESTRICTED:
+                return com.replymate.app.assistant.AssistantPrereq.Need.BACKGROUND_RESTRICTED;
+            case STANDBY_RESTRICTED:
+                return com.replymate.app.assistant.AssistantPrereq.Need.STANDBY_RESTRICTED;
+            case OPLUS_BACKGROUND:
+                return com.replymate.app.assistant.AssistantPrereq.Need.OPLUS_BACKGROUND;
+            default:
+                return com.replymate.app.assistant.AssistantPrereq.Need.BATTERY;
+        }
+    }
+
+    /** Ready toast — warnings are ALWAYS named, never hidden behind a check mark. */
+    private void toastReady(com.replymate.core.assistant.BackgroundReadiness.Verdict v) {
+        String warn = v.warnings.contains(
+            com.replymate.core.assistant.BackgroundReadiness.Lever.POWER_SAVE_MODE)
+            ? " (power save mode is ON — drafts may pause until it ends)" : "";
+        Toast.makeText(this, "Background replies on — Ready \u2713" + warn,
+            Toast.LENGTH_LONG).show();
     }
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions,
@@ -381,7 +446,7 @@ public final class SettingsActivity extends Activity {
      *  subtitle carries the real capability. */
     private void runAssistantApprovalFlow() {
         java.util.EnumSet<com.replymate.app.assistant.AssistantPrereq.Need> missing =
-            com.replymate.app.assistant.AssistantPrereq.missing(this);
+            com.replymate.app.assistant.AssistantPrereq.missing(this, c.kv());
         if (missing.isEmpty()) return;
         if (missing.contains(com.replymate.app.assistant.AssistantPrereq.Need.POST_NOTIFICATIONS)
                 && android.os.Build.VERSION.SDK_INT >= 33) {
@@ -432,7 +497,13 @@ public final class SettingsActivity extends Activity {
                     : fixNeed == com.replymate.app.assistant.AssistantPrereq.Need
                             .BACKGROUND_RESTRICTED
                         ? "Open app battery settings"
-                        : ("Open " + label + " settings"),
+                        : fixNeed == com.replymate.app.assistant.AssistantPrereq.Need
+                                .OPLUS_BACKGROUND
+                            ? "Open Oppo battery usage page"
+                            : fixNeed == com.replymate.app.assistant.AssistantPrereq.Need
+                                    .STANDBY_RESTRICTED
+                                ? "Open ReplyMate app info"
+                                : ("Open " + label + " settings"),
                 new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
                         if (fixNeed == com.replymate.app.assistant.AssistantPrereq.Need.BATTERY) {
@@ -445,10 +516,18 @@ public final class SettingsActivity extends Activity {
                                     : "Opened: " + opened,
                                 Toast.LENGTH_LONG).show();
                         } else {
-                            com.replymate.app.assistant.AssistantPrereq.launch(
-                                SettingsActivity.this,
+                            // P-19R: guarded launch — an unresolvable page falls
+                            // back to app-info instead of dying silently
+                            android.content.Intent target =
                                 com.replymate.app.assistant.AssistantPrereq
-                                    .screenIntent(SettingsActivity.this, fixNeed));
+                                    .screenIntent(SettingsActivity.this, fixNeed);
+                            if (!com.replymate.app.assistant.AssistantPrereq.launch(
+                                    SettingsActivity.this, target)) {
+                                com.replymate.app.assistant.AssistantPrereq.launch(
+                                    SettingsActivity.this,
+                                    com.replymate.app.assistant.AssistantPrereq
+                                        .appDetailsIntent(SettingsActivity.this));
+                            }
                         }
                     }
                 })
@@ -461,6 +540,39 @@ public final class SettingsActivity extends Activity {
                             SettingsActivity.this,
                             com.replymate.app.assistant.AssistantPrereq
                                 .oemBackgroundIntent(SettingsActivity.this));
+                    }
+                });
+        } else if (missing.contains(
+                com.replymate.app.assistant.AssistantPrereq.Need.OPLUS_BACKGROUND)) {
+            // P-intelligence-19R: Android cannot READ ColorOS's "Allow background
+            // activity" switch (no public API — verified against the platform
+            // docs), so the flow closes with the owner's explicit confirmation.
+            // The confirmation never fakes a probe: it is recorded AS "the owner
+            // told us", and setting it when the BATTERY allowlist is later lost
+            // re-arms the whole flow.
+            b.setNeutralButton("I've enabled it \u2713",
+                new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        com.replymate.app.assistant.AssistantPrereq
+                            .setOplusConfirmed(c.kv(), true);
+                        com.replymate.core.assistant.BackgroundReadiness.Verdict now =
+                            com.replymate.app.assistant.AssistantPrereq
+                                .readiness(SettingsActivity.this, c.kv());
+                        if (now.mayClaimReady()
+                                && "1".equals(c.kv().get(KV_PENDING_ENABLE, "0"))) {
+                            c.kv().put(
+                                com.replymate.app.assistant.AssistantRunner.KV_ENABLED, "1");
+                            c.kv().put(KV_PENDING_ENABLE, "0");
+                            toastReady(now);
+                            com.replymate.app.assistant.AssistantRunner
+                                .retryUnanswered(c);
+                        } else {
+                            Toast.makeText(SettingsActivity.this,
+                                "Noted — still missing: " + chipsOf(now),
+                                Toast.LENGTH_LONG).show();
+                            runAssistantApprovalFlow();
+                        }
+                        refreshRows();
                     }
                 });
         }
@@ -538,18 +650,23 @@ public final class SettingsActivity extends Activity {
                 Ui.setRowSub(assistantRow.row,
                     "off — new pings only alert, nothing is drafted");
             } else {
-                java.util.EnumSet<com.replymate.app.assistant.AssistantPrereq.Need> missing =
-                    com.replymate.app.assistant.AssistantPrereq.missing(this);
-                if (missing.isEmpty()) {
+                // P-intelligence-19R: the subtitle is a FRESH readiness verdict,
+                // never a persisted claim — allowlist-only previously lied here.
+                com.replymate.core.assistant.BackgroundReadiness.Verdict v =
+                    com.replymate.app.assistant.AssistantPrereq.readiness(this, c.kv());
+                if (v.mayClaimReady()) {
                     Ui.setRowSub(assistantRow.row,
-                        "Ready ✓ — access ✓ notifications ✓ battery ✓ · you approve every send");
+                        "Ready ✓ — access ✓ notifications ✓ battery ✓ · you approve every send"
+                            + (v.warnings.contains(com.replymate.core.assistant
+                                    .BackgroundReadiness.Lever.POWER_SAVE_MODE)
+                                ? " · power save ON — drafts may pause until it ends" : ""));
                 } else {
                     // only reachable from an older build's persisted ON or a REVOKED
                     // grant — label it degraded, never a clean \"on\".
                     StringBuilder chips = new StringBuilder();
-                    for (com.replymate.app.assistant.AssistantPrereq.Need n : missing) {
+                    for (com.replymate.core.assistant.BackgroundReadiness.Lever l : v.missing) {
                         if (chips.length() > 0) chips.append(" · ");
-                        chips.append(com.replymate.app.assistant.AssistantPrereq.chip(n));
+                        chips.append(com.replymate.app.assistant.AssistantPrereq.chip(mapLever(l)));
                     }
                     Ui.setRowSub(assistantRow.row,
                         "limited — blocked by: " + chips + " (tap to fix)");
@@ -583,6 +700,24 @@ public final class SettingsActivity extends Activity {
         sb.append("  own notifications: ").append(ListenerStatus.canPostNotifications(this)).append('\n');
         sb.append("  battery optimization ignored: ").append(ListenerStatus.batteryWhitelisted(this))
           .append("  (false + delivery trouble = set Battery → Unrestricted)").append('\n');
+        sb.append("  Android 9+ background restricted: ")
+          .append(ListenerStatus.backgroundRestricted(this)).append('\n');
+        sb.append("  app standby bucket: ").append(ListenerStatus.standbyBucketName(this))
+          .append(ListenerStatus.standbyRestricted(this)
+              ? "  ← RESTRICTED: network/jobs heavily limited until it lifts" : "")
+          .append('\n');
+        sb.append("  power save mode on: ").append(ListenerStatus.powerSaveOn(this))
+          .append(" · low-power-standby exempt: ")
+          .append(ListenerStatus.lowPowerStandbyExempt(this)).append('\n');
+        sb.append("  last background pipeline: ")
+          .append(c.kv().get(com.replymate.app.assistant.AssistantRunner.KV_LATENCY_LAST,
+              "no completed generation yet")).append('\n');
+        sb.append("  ColorOS background switch (unreadable by Android): ")
+          .append(com.replymate.app.assistant.AssistantPrereq.isOplus()
+              ? (com.replymate.app.assistant.AssistantPrereq.oplusConfirmed(c.kv())
+                    ? "owner-confirmed ON ✓ (Android can't read it directly)"
+                    : "NOT CONFIRMED — Battery usage page → \"Allow background activity\"")
+              : "n/a (not an Oppo/OnePlus/realme device)").append('\n');
         sb.append("  connected at: ").append(tsLine("listener.connected_at")).append('\n');
         sb.append("  disconnected at: ").append(tsLine("listener.disconnected_at")).append('\n');
         sb.append("  watch whatsapp: ").append(c.kv().get("watch.whatsapp", "1"))

@@ -194,4 +194,17 @@ public final class MessageDao {
         helper.getWritableDatabase().update("message", v, "contact_id=?",
             new String[] {String.valueOf(fromContactId)});
     }
+
+    /** P-intelligence-19R: correct a blocked class stamp in place (the row the
+     *  SAME notification's update post re-proved replyable). All three values are
+     *  final — adopt-on-blank semantics were resolved by the caller. */
+    public void updateClassification(long messageId, String itemClassWire,
+                                     String convId, String convTitle) {
+        android.content.ContentValues v = new android.content.ContentValues();
+        v.put("item_class", itemClassWire == null ? "" : itemClassWire);
+        v.put("conv_id", convId == null ? "" : convId);
+        v.put("conv_title", convTitle == null ? "" : convTitle);
+        helper.getWritableDatabase().update("message", v, "id=?",
+            new String[] {String.valueOf(messageId)});
+    }
 }

@@ -104,5 +104,12 @@
             android:name=".assistant.AssistantReceiver"
             android:exported="false" />
 
+        <!-- P-intelligence-19R: Doze/process-death safety net — one explicit
+             setAndAllowWhileIdle fallback under the in-memory generation timer.
+             Internal action, non-exported, package-scoped. -->
+        <receiver
+            android:name=".platform.WakeSweep$Receiver"
+            android:exported="false" />
+
     </application>
 </manifest>

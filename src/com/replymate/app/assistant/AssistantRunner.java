@@ -63,6 +63,21 @@ public final class AssistantRunner {
      *  ping), keeping "collect for a short window after the last message" true. */
     private static final long SETTLE_EXTRA_MS = 1500;
 
+    /** P-intelligence-19R §2: latency instrumentation + Doze safety net.
+     *  KV_LAT_PREFIX+contactId = enqueueTs|messageTs|delayMs, read once at fire
+     *  time; KV_LATENCY_LAST = the last completed pipeline timing (content-hash
+     *  dedupe makes "one per conversation" the norm).
+     *  SWEEP_SLACK_MS: how far AFTER the in-memory due time the alarm fallback
+     *  sits — long enough to never pre-empt the normal path, short enough that a
+     *  Doze-swallowed timer still recovers inside the same minute. */
+    private static final String KV_LAT_PREFIX = "assistant.lat.";
+    public static final String KV_LATENCY_LAST = "assistant.latency.last";
+    private static final long SWEEP_SLACK_MS = 30000L;
+    /** Slow-pipeline evidence thresholds (diag tripped only beyond them — the ring
+     *  stays failure-focused, noise stays out). */
+    private static final long SLOW_QUEUE_MS = 20000L;
+    private static final long SLOW_TOTAL_MS = 90000L;
+
     /** Delay timer ONLY — work never runs on this thread. */
     private static final Handler TIMER = new Handler(Looper.getMainLooper());
     private static final Map<Long, Runnable> PENDING = new HashMap<Long, Runnable>();
@@ -111,8 +126,18 @@ public final class AssistantRunner {
         synchronized (PENDING) {
             PENDING.put(contactId, fire);
         }
+        long now = System.currentTimeMillis();
         long due = BatchWindow.dueAt(ping.latestTs);
-        long delay = BatchWindow.delayFrom(System.currentTimeMillis(), due) + SETTLE_EXTRA_MS;
+        long delay = BatchWindow.delayFrom(now, due) + SETTLE_EXTRA_MS;
+        // P-intelligence-19R: measure capture → scheduling → provider → draft →
+        // alert on THIS cycle (read once at fire time, then cleared).
+        c.kv().put(KV_LAT_PREFIX + contactId, now + "|" + ping.latestTs + "|" + delay);
+        // P-intelligence-19R: Doze/process-death fallback — if the in-memory timer
+        // never fires (process death already covered by the rebind sweep; Doze
+        // suspension was NOT), one idle-tolerant alarm re-drives the idempotent
+        // catch-up sweep. When the timer did its job the sweep no-ops on the
+        // content-hash/draft gates — nothing double-generates, ever.
+        com.replymate.app.platform.WakeSweep.arm(c.app(), now + delay + SWEEP_SLACK_MS);
         TIMER.postDelayed(fire, delay);
     }
 
@@ -275,6 +300,7 @@ public final class AssistantRunner {
     /** Core flow — background thread only. Never throws. */
     static void generateAndNotify(AppContainer c, long contactId, String name,
                                   boolean force, long token) {
+        final long firedAt = System.currentTimeMillis();
         String who = name == null || name.trim().isEmpty() ? "#" + contactId : name;
         String tag = AssistantPlanner.notifTag(contactId);
         try {
@@ -373,6 +399,7 @@ public final class AssistantRunner {
             }
             c.kv().put(AssistantPlanner.hashKvKey(contactId), incomingHash);
             notifyDraft(c, contactId, who, lastIncoming, d, force);
+            recordLatency(c, contactId, who, tag, firedAt);
         } catch (RuntimeException e) {
             AssistantDiag.record(c, contactId, who, tag, "",
                 AssistantEvent.Stage.GENERATE,
@@ -589,6 +616,54 @@ public final class AssistantRunner {
                 }
                 schedule(c, new IngestReport.PingRequest(
                     ct.id, ct.displayName, m.body, m.sentAt));
+        }
+    }
+
+    /** P-intelligence-19R §2: the measured end of the latency trail. One slot in
+     *  kv always holds the LAST completed pipeline timing (visible via Settings →
+     *  Diagnostics); genuinely SLOW cycles also leave an honest diag line — queue
+     *  starvation (a crawling provider parking GEN lanes) and total-latency
+     *  outliers are named with their numbers, never guessed at. */
+    private static void recordLatency(AppContainer c, long contactId, String who,
+                                      String tag, long firedAt) {
+        try {
+            String stamp = c.kv().get(KV_LAT_PREFIX + contactId, "");
+            c.kv().put(KV_LAT_PREFIX + contactId, "");
+            if (stamp.isEmpty()) return;   // catch-up/manual paths run unmeasured
+            String[] parts = stamp.split("\\|", -1);
+            if (parts.length != 3) return;
+            long enq, msgTs, delay;
+            try {
+                enq = Long.parseLong(parts[0]);
+                msgTs = Long.parseLong(parts[1]);
+                delay = Long.parseLong(parts[2]);
+            } catch (NumberFormatException nfe) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            long queueMs = Math.max(0L, firedAt - (enq + delay));   // GEN-lane wait
+            long genMs = Math.max(0L, now - firedAt);               // state+research+provider+draft+notify
+            long totalMs = msgTs > 0 ? Math.max(0L, now - msgTs) : 0L;
+            String line = "queue " + (queueMs / 1000L) + "s · generate "
+                + (genMs / 1000L) + "s · message→alert " + (totalMs / 1000L) + "s";
+            c.kv().put(KV_LATENCY_LAST,
+                line + " · " + who + " · " + com.replymate.core.util.TimeFmt.dayTime(now));
+            if (queueMs > SLOW_QUEUE_MS) {
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.SCHEDULE,
+                    "queued behind other generations for " + (queueMs / 1000L)
+                        + "s before starting (GEN lane saturation)",
+                    "draft still completed (" + line + ")",
+                    "slow provider or network elsewhere — one conversation's crawl must never hold every other conversation");
+            } else if (totalMs > SLOW_TOTAL_MS) {
+                AssistantDiag.record(c, contactId, who, tag, "",
+                    AssistantEvent.Stage.GENERATE,
+                    "slow pipeline: " + line,
+                    "draft completed — timing recorded for the trace",
+                    "");
+            }
+        } catch (RuntimeException ignored) {
+            // timing must never break the pipeline it measures
         }
     }
 

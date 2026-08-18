@@ -60,6 +60,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.assistant.JobCoalescerTest \
     com.replymate.core.assistant.AssistantEventTest \
     com.replymate.core.assistant.AssistantLearningTest \
+    com.replymate.core.assistant.BackgroundReadinessTest \
     com.replymate.core.listener.ConversationMatchTest \
     com.replymate.core.convo.ParticipantRegistryTest \
     com.replymate.core.convo.TopicTrackerTest \
@@ -71,6 +72,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.data.db.SchemaV9Test \
     com.replymate.core.listener.ItemClassifierTest \
     com.replymate.core.listener.FailClosedIngestTest \
+    com.replymate.core.listener.IngestReopenTest \
     com.replymate.core.assistant.DeliveryGuardTest \
     com.replymate.core.assistant.TargetRulesTest \
     com.replymate.core.assistant.SendPathTest \

@@ -173,8 +173,10 @@ public final class IngestCoordinator {
             String notifKey = TextIds.computeNotifKey(
                 e.channel.wire, remoteKey, e.senderName, keyBody, ts);
 
-            if (messages.getByNotifKey(e.channel, notifKey) != null) {
+            Message exact = messages.getByNotifKey(e.channel, notifKey);
+            if (exact != null) {
                 rep.duplicates++;
+                maybeReopenBlockedClass(exact, e, ic, v, dir, contact, aggByContact);
                 continue;
             }
 
@@ -189,10 +191,14 @@ public final class IngestCoordinator {
             // messages), same contact+channel+direction+exact body within the
             // window. Two identical "ok"s a minute apart collapse to one row —
             // accepted, documented trade; a repeat outside the window survives.
-            if (NoiseGate.isReadableText(kind, body)
-                    && messages.findRecentSame(contact.id, e.channel, dir, body, ts, NEAR_DUP_WINDOW_MS) != null) {
-                rep.duplicates++;
-                continue;
+            if (NoiseGate.isReadableText(kind, body)) {
+                Message near = messages.findRecentSame(
+                    contact.id, e.channel, dir, body, ts, NEAR_DUP_WINDOW_MS);
+                if (near != null) {
+                    rep.duplicates++;
+                    maybeReopenBlockedClass(near, e, ic, v, dir, contact, aggByContact);
+                    continue;
+                }
             }
 
             Message m = new Message();
@@ -289,6 +295,77 @@ public final class IngestCoordinator {
             current = 0;
         }
         kv.put(key, String.valueOf(current + delta));
+    }
+
+    /** P-intelligence-19R (Discord #general, on-device): maybe RE-OPEN a row that
+     *  was blocked by an INCOMPLETE first capture. Messengers post the alert first
+     *  and attach the Reply action a beat later (documented on WhatsApp since
+     *  P-background-6; Discord's single-shot server notifications re-post the same
+     *  way, and that update lands here as an exact-key or near-dup hit). When the
+     *  stored row was stamped a NON-REPLYABLE semantic class from that early
+     *  evidence and the SAME notification now carries a real free-form Reply
+     *  capability, the verdict is corrected IN PLACE (stamp + newly-published
+     *  conversation identity adopted) and the message finally pings — the normal
+     *  coalescer/hash dedupe still govern the actual generation job.
+     *
+     *  DIRECTION IS ONE-WAY BY CONSTRUCTION: a conversational row is never
+     *  re-stamped blocked by a later, less complete capture; a row whose every
+     *  post still lacks reply capability (a true announcement) never re-opens.
+     *  Capability itself is demanded — never an inferred class alone. */
+    private void maybeReopenBlockedClass(Message prev, NotifEvent e,
+                                         ItemClassifier.Result ic,
+                                         ListenerFilter.Verdict v, Direction dir,
+                                         Contact contact,
+                                         Map<Long, PingAgg> aggByContact) {
+        if (prev == null || e == null || ic == null || dir != Direction.INCOMING) return;
+        ItemClass prevCls = classOfWire(prev.itemClass);
+        if (prevCls == null || !prevCls.isNonReplyable()) return;
+        if (ic.cls == ItemClass.UNKNOWN || ic.cls.isNonReplyable()) return;
+        if (!e.hasFreeFormReply) return;
+
+        String newConvId = blank(prev.convId) ? safe(e.conversationId) : prev.convId;
+        String newConvTitle = blank(prev.convTitle) ? safe(e.conversationTitle)
+            : prev.convTitle;
+        messages.updateClassification(prev.id, ic.cls.wire, newConvId, newConvTitle);
+        prev.itemClass = ic.cls.wire;                 // keep this batch's view honest
+        prev.convId = newConvId;
+        prev.convTitle = newConvTitle;
+
+        String chan = e.channel == null ? "?" : e.channel.wire;
+        String who = contact != null && contact.displayName != null
+            ? contact.displayName : "?";
+        kv.put(KV_RING, DiagnosticsRing.append(kv.get(KV_RING, ""), clock.now(),
+            chan + " · " + who + ": " + abbreviate(prev.body, 40)
+                + " — re-opened: " + prevCls.wire + " → " + ic.cls.wire
+                + " (the app's own Reply action appeared on the same notification)"));
+        log.i("Ingest", "re-opened " + prevCls.wire + " → " + ic.cls.wire
+            + " for " + who + " (late reply capability)");
+
+        if (v != ListenerFilter.Verdict.STORE_AND_PING || e.historic) return;
+        PingAgg agg = aggByContact.get(contact.id);
+        if (agg == null) {
+            agg = new PingAgg();
+            agg.name = contact.displayName;
+            aggByContact.put(contact.id, agg);
+        }
+        agg.snippet = prev.body;
+        agg.ts = e.timestampMs > 0 ? e.timestampMs : clock.now();
+    }
+
+    private static ItemClass classOfWire(String wire) {
+        if (wire == null || wire.isEmpty()) return null;
+        for (ItemClass c : ItemClass.values()) {
+            if (c.wire.equals(wire)) return c;
+        }
+        return null;
+    }
+
+    private static boolean blank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
+    private static String safe(String s) {
+        return s == null ? "" : s.trim();
     }
 
     private static String abbreviate(String s, int max) {

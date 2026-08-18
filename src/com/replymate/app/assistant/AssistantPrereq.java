@@ -27,17 +27,79 @@ public final class AssistantPrereq {
     public enum Need { NOTIFICATION_ACCESS, POST_NOTIFICATIONS, BATTERY,
         /** Android 9+ "Restricted" app-battery bucket — a separate lever from
          *  battery-optimization whitelisting; kills background work outright. */
-        BACKGROUND_RESTRICTED }
+        BACKGROUND_RESTRICTED,
+        /** App standby bucket RESTRICTED (API 31+): network + jobs hit "the most
+         *  restrictions". No intent flips it — honest guidance only. */
+        STANDBY_RESTRICTED,
+        /** ColorOS "Allow background activity" on the app's Battery usage page.
+         *  Android has NO API to read it (verified 2026-08-18), so it is modeled
+         *  as an owner-confirmed fact — "Ready" waits for that confirmation. */
+        OPLUS_BACKGROUND }
+
+    /** kv flag: the owner stood on the ColorOS Battery usage page and confirmed
+     *  "Allow background activity" is ON. Cleared when the battery allowlist is
+     *  lost (state changed ⇒ confirm again). */
+    public static final String KV_OPLUS_CONFIRMED = "assistant.oplus_bg_confirmed";
 
     private AssistantPrereq() { }
 
-    /** The approvals Background generation still lacks on this device. */
-    public static EnumSet<Need> missing(Context ctx) {
+    /** Owner's one-time confirmation of the unreadable ColorOS background switch. */
+    public static boolean oplusConfirmed(com.replymate.core.ports.KvStore kv) {
+        return kv != null && "1".equals(kv.get(KV_OPLUS_CONFIRMED, "0"));
+    }
+
+    public static void setOplusConfirmed(com.replymate.core.ports.KvStore kv, boolean on) {
+        if (kv != null) kv.put(KV_OPLUS_CONFIRMED, on ? "1" : "0");
+    }
+
+    /** Probe every platform fact ONCE (P-intelligence-19R) into the pure
+     *  readiness model — the ONLY place "may we claim Ready?" is decided. */
+    public static com.replymate.core.assistant.BackgroundReadiness.Input readyInput(
+            Context ctx, com.replymate.core.ports.KvStore kv) {
+        com.replymate.core.assistant.BackgroundReadiness.Input in =
+            new com.replymate.core.assistant.BackgroundReadiness.Input();
+        in.notificationAccess = ListenerStatus.isServiceEnabled(ctx);
+        in.postNotifications = ListenerStatus.canPostNotifications(ctx);
+        in.batteryAllowlisted = ListenerStatus.batteryWhitelisted(ctx);
+        in.backgroundRestricted = ListenerStatus.backgroundRestricted(ctx);
+        in.standbyRestricted = ListenerStatus.standbyRestricted(ctx);
+        in.oplusDevice = isOplus();
+        in.oplusConfirmed = oplusConfirmed(kv);
+        // state changed since the confirmation? the battery allowlist being lost
+        // means the owner must redo the whole flow — the confirmation goes with it
+        if (in.oplusConfirmed && !in.batteryAllowlisted) {
+            setOplusConfirmed(kv, false);
+            in.oplusConfirmed = false;
+        }
+        in.powerSaveMode = ListenerStatus.powerSaveOn(ctx);
+        return in;
+    }
+
+    /** The full readiness verdict (blockers in fix order + transient warnings). */
+    public static com.replymate.core.assistant.BackgroundReadiness.Verdict readiness(
+            Context ctx, com.replymate.core.ports.KvStore kv) {
+        return com.replymate.core.assistant.BackgroundReadiness.evaluate(
+            readyInput(ctx, kv));
+    }
+
+    /** The approvals Background generation still lacks on this device (fix order).
+     *  Backed by {@link #readiness} since P-intelligence-19R — every verifiable
+     *  blocker gates, and on ColorOS the unreadable background switch gates until
+     *  the owner confirms it. */
+    public static EnumSet<Need> missing(Context ctx, com.replymate.core.ports.KvStore kv) {
         EnumSet<Need> out = EnumSet.noneOf(Need.class);
-        if (!ListenerStatus.isServiceEnabled(ctx)) out.add(Need.NOTIFICATION_ACCESS);
-        if (!ListenerStatus.canPostNotifications(ctx)) out.add(Need.POST_NOTIFICATIONS);
-        if (!ListenerStatus.batteryWhitelisted(ctx)) out.add(Need.BATTERY);
-        if (ListenerStatus.backgroundRestricted(ctx)) out.add(Need.BACKGROUND_RESTRICTED);
+        for (com.replymate.core.assistant.BackgroundReadiness.Lever l
+                : readiness(ctx, kv).missing) {
+            switch (l) {
+                case NOTIFICATION_ACCESS: out.add(Need.NOTIFICATION_ACCESS); break;
+                case POST_NOTIFICATIONS: out.add(Need.POST_NOTIFICATIONS); break;
+                case BATTERY_ALLOWLIST: out.add(Need.BATTERY); break;
+                case BACKGROUND_RESTRICTED: out.add(Need.BACKGROUND_RESTRICTED); break;
+                case STANDBY_RESTRICTED: out.add(Need.STANDBY_RESTRICTED); break;
+                case OPLUS_BACKGROUND: out.add(Need.OPLUS_BACKGROUND); break;
+                default: break;
+            }
+        }
         return out;
     }
 
@@ -55,6 +117,18 @@ public final class AssistantPrereq {
                     + " from running in the background at all. Switch it to"
                     + " \"Unrestricted\" or \"Optimized\" (this is a second, separate switch"
                     + " from battery optimization).";
+            case STANDBY_RESTRICTED:
+                return "Android put ReplyMate in the RESTRICTED standby bucket — the"
+                    + " tightest power tier, with network and scheduled work heavily"
+                    + " limited. There is no switch an app can open for this one:"
+                    + " it lifts as the app is used and its battery stays"
+                    + " \"Unrestricted\" (the other levers above).";
+            case OPLUS_BACKGROUND:
+                return "This Oppo/ColorOS keeps its OWN background switch — \"Allow"
+                    + " background activity\" on ReplyMate's Battery usage page — ON TOP"
+                    + " of Android's battery approval. Android gives apps no way to"
+                    + " READ that switch, so ReplyMate asks you to turn it on once and"
+                    + " confirm; until then background drafts can still be frozen.";
             default:
                 return "Battery: Unrestricted — stops Android freezing ReplyMate, so"
                     + " background generation keeps running instead of dying silently.";
@@ -82,6 +156,15 @@ public final class AssistantPrereq {
                         + " \"Allow background activity\" (confirm Allow)."
                     : "On the app-info screen that opens, tap Battery and choose"
                         + " \"Unrestricted\" (or at least \"Optimized\" \u2014 never \"Restricted\").";
+            case STANDBY_RESTRICTED:
+                return "No direct switch exists \u2014 Android lifts this bucket as you"
+                    + " use ReplyMate with the other battery levers set to"
+                    + " \"Unrestricted\". The app page opens so you can verify those.";
+            case OPLUS_BACKGROUND:
+                return "On the Battery usage page that opens, switch ON"
+                    + " \"Allow background activity\" (tap Allow if it asks), then come"
+                    + " back and tap \"I've enabled it\" here \u2014 ReplyMate cannot check"
+                    + " this ColorOS switch itself.";
             default:
                 return "";   // POST_NOTIFICATIONS is an in-app runtime request
         }
@@ -93,6 +176,8 @@ public final class AssistantPrereq {
             case NOTIFICATION_ACCESS: return "notification access";
             case POST_NOTIFICATIONS: return "show-notifications";
             case BACKGROUND_RESTRICTED: return "app battery restricted";
+            case STANDBY_RESTRICTED: return "standby bucket restricted";
+            case OPLUS_BACKGROUND: return "Oppo background activity";
             default: return "battery";
         }
     }
@@ -117,6 +202,15 @@ public final class AssistantPrereq {
                 // only the app's own battery page can flip the Restricted bucket —
                 // there is no grant-dialog intent for it
                 return appDetailsIntent(ctx);
+            case STANDBY_RESTRICTED:
+                // NO intent flips a standby bucket (Android lifts it from usage)
+                // — the app page is where the OTHER levers get verified
+                return appDetailsIntent(ctx);
+            case OPLUS_BACKGROUND:
+                // ColorOS "Allow background activity" lives on the app's Battery
+                // usage page; the caller guards with canLaunch (P-14 research:
+                // the com.oplus.battery internals are not exported)
+                return appBatteryUsageIntent(ctx);
             default:
                 return null;
         }
@@ -198,6 +292,17 @@ public final class AssistantPrereq {
         if (isOplus()) {
             Intent usage = appBatteryUsageIntent(ctx);
             if (canLaunch(ctx, usage)) return usage;
+            // P-intelligence-19R: route THROUGH the alias too — AOSP declares
+            // Settings$AppBatteryUsageActivity as exported + answering
+            // IGNORE_BATTERY_OPTIMIZATION_SETTINGS (main branch, verified
+            // 2026-08-18), and ColorOS keeps the shell while renaming internals.
+            // An implicit intent with our package as data resolves to that
+            // page wherever the explicit stub was renamed; PackageManager is
+            // the truth either way (unresolvable candidates never surface).
+            Intent implicit = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                .setData(Uri.parse("package:" + ctx.getPackageName()))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (canLaunch(ctx, implicit)) return implicit;
             Intent details = appDetailsIntent(ctx);
             if (canLaunch(ctx, details)) return details;
         }

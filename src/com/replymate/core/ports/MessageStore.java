@@ -41,6 +41,13 @@ public interface MessageStore {
      *  as a pick-list only and are NEVER used to assemble AI prompt context (isolation). */
     List<Message> searchByBody(String query, int limit);
 
+    /** P-intelligence-19R: correct a blocked stamp in place when the SAME
+     *  notification's later post proves better evidence (late Reply action).
+     *  Owner of the values: the caller (adopt-on-blank semantics resolved there).
+     *  Default no-op keeps other/legacy implementations source-compatible. */
+    default void updateClassification(long messageId, String itemClassWire,
+                                      String convId, String convTitle) { }
+
     int countByContact(long contactId);
     void deleteByContact(long contactId);
     /** Fork-heal (P-ux-fix): move ALL rows from a duplicate contact into the kept one. */
