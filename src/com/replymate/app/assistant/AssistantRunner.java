@@ -492,7 +492,9 @@ public final class AssistantRunner {
         // P-background-9: the sweep scans every contact's latest state and may
         // schedule generations — it belongs on the GENERATION lane so capture
         // keeps flowing underneath it.
-        Tasks.gen(new Runnable() {
+        // P-intelligence-20 §1: on the CATCH-UP lane — recovery work is always
+        // dequeued after live pings/regenerations, never FIFO-parks them.
+        Tasks.genCatchup(new Runnable() {
             @Override public void run() {
                 for (com.replymate.core.model.Contact ct : c.contacts().all()) {
                     try {

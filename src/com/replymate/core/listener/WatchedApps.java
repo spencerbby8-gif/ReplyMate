@@ -58,7 +58,11 @@ public final class WatchedApps {
         add(out, "com.Slack", "Slack", Channel.SLACK,
             new TitleTextParser(Channel.SLACK, false), Tier.PARTIAL);
         add(out, "com.discord", "Discord", Channel.DISCORD,
-            new TitleTextParser(Channel.DISCORD, false), Tier.PARTIAL);
+            // P-intelligence-20: Discord posts CONVERSATION notifications with
+            // MessagingStyle history for server channels — read the per-sender
+            // truth when it exists; title/text fallback stays for posts without
+            // it (announcement honesty is the classifier's, unchanged).
+            new TitleTextParser(Channel.DISCORD, false, true), Tier.PARTIAL);
         add(out, "com.instagram.android", "Instagram", Channel.INSTAGRAM,
             new TitleTextParser(Channel.INSTAGRAM, true), Tier.LIMITED);
         add(out, "com.x.android", "X", Channel.X,

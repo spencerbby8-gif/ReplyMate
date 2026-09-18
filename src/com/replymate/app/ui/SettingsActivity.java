@@ -720,6 +720,12 @@ public final class SettingsActivity extends Activity {
               : "n/a (not an Oppo/OnePlus/realme device)").append('\n');
         sb.append("  connected at: ").append(tsLine("listener.connected_at")).append('\n');
         sb.append("  disconnected at: ").append(tsLine("listener.disconnected_at")).append('\n');
+        // P-intelligence-20: access-granted ≠ bound. On ColorOS the listener can
+        // be enabled in Settings yet not actually bound after a kill — the one
+        // state the secure string cannot show. This is the live truth.
+        sb.append("  listener bound right now: ")
+          .append(com.replymate.app.listener.RmNotificationListener.active() != null)
+          .append("  (enabled but not bound = toggle its access OFF/ON in system settings)").append('\n');
         sb.append("  watch whatsapp: ").append(c.kv().get("watch.whatsapp", "1"))
           .append(" · telegram: ").append(c.kv().get("watch.telegram", "1")).append('\n');
         sb.append("  messages stored (listener): ")

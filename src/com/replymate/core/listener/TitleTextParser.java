@@ -12,10 +12,23 @@ public class TitleTextParser implements NotifParser {
 
     private final Channel channel;
     private final boolean requireMessageCategory;
+    /** P-intelligence-20 §2: when the app ALSO publishes MessagingStyle history
+     *  (Discord's conversation notifications do for server channels), the
+     *  per-sender entries are the TRUTH about who said what — prefer them over
+     *  the framework's title/text shadow, which attributes everything to the
+     *  conversation and drops every line but the newest. The title/text path
+     *  stays exactly as-is for apps/posts that carry no history. */
+    private final boolean preferHistory;
 
     public TitleTextParser(Channel channel, boolean requireMessageCategory) {
+        this(channel, requireMessageCategory, false);
+    }
+
+    public TitleTextParser(Channel channel, boolean requireMessageCategory,
+                           boolean preferHistory) {
         this.channel = channel;
         this.requireMessageCategory = requireMessageCategory;
+        this.preferHistory = preferHistory;
     }
 
     @Override public Result parse(RawNotif raw) {
@@ -43,6 +56,17 @@ public class TitleTextParser implements NotifParser {
             // never a chat message — gated to self-titled, evidence-free items only.
             if (StatusFilter.isSelfStatus(raw, WatchedApps.labelFor(channel))) {
                 return Result.ignore("app self-status (backup/sync/progress)");
+            }
+
+            // P-intelligence-20 §2 (Discord conversation notifications): when the
+            // SAME notification publishes MessagingStyle entries, they are richer
+            // than the title/text shadow in EVERY way that matters — per-sender
+            // names, per-message times, the whole visible burst. Read them first;
+            // the shadow would attribute everything to the conversation and drop
+            // every line but the newest. Hygiene mirrors MessagingStyleParser:
+            // sender-less inserts are system chrome when peers DO carry identity.
+            if (preferHistory && !raw.messages.isEmpty()) {
+                return historyEvents(raw, group, callOutcome);
             }
 
             String text = MessagingStyleParser.trim(raw.text);
@@ -97,11 +121,68 @@ public class TitleTextParser implements NotifParser {
         }
     }
 
+    /** MessagingStyle history path (P-intelligence-20 §2). Same mechanics as
+     *  MessagingStyleParser's entry loop — HISTORIC context first, live entries
+     *  after, sender-less system inserts dropped only when at least one peer
+     *  names itself — expressed over THIS parser's base()/calibration so reply
+     *  capability, conversation identity and '#' group detection stay shared. */
+    private Result historyEvents(RawNotif raw, boolean group, boolean callOutcome) {
+        boolean anyNamedSender = false;
+        for (RawNotif.Entry probe : raw.messages) {
+            if (SystemLines.hasSenderIdentity(
+                    probe.senderName, probe.senderKey, probe.senderUri)) {
+                anyNamedSender = true;
+                break;
+            }
+        }
+        List<NotifEvent> out = new ArrayList<NotifEvent>();
+        for (RawNotif.Entry m : raw.historic) {
+            if (anyNamedSender && !SystemLines.hasSenderIdentity(
+                    m.senderName, m.senderKey, m.senderUri)) {
+                continue;
+            }
+            NotifEvent e = entryEvent(raw, group, m, callOutcome);
+            e.historic = true;
+            out.add(e);
+        }
+        for (RawNotif.Entry m : raw.messages) {
+            if (anyNamedSender && !SystemLines.hasSenderIdentity(
+                    m.senderName, m.senderKey, m.senderUri)) {
+                continue;
+            }
+            out.add(entryEvent(raw, group, m, callOutcome));
+        }
+        if (out.isEmpty()) {
+            return Result.ignore("no named message content");
+        }
+        return Result.events(out);
+    }
+
+    private NotifEvent entryEvent(RawNotif raw, boolean group, RawNotif.Entry m,
+                                  boolean callOutcome) {
+        NotifEvent e = base(raw, group);
+        e.text = m.text;
+        e.timestampMs = m.timestampMs > 0 ? m.timestampMs : raw.postTimeMs;
+        e.senderName = m.senderName;
+        e.senderKey = m.senderKey;
+        e.senderUri = m.senderUri;
+        e.hasAttachment = m.hasAttachment;
+        e.mediaMime = m.mimeType;
+        e.mediaUri = m.dataUri;
+        MessagingStyleParser.classify(e, m.mimeType, m.hasAttachment, m.text,
+            callOutcome);
+        return e;
+    }
+
     private NotifEvent base(RawNotif raw, boolean group) {
         NotifEvent e = new NotifEvent();
         e.channel = channel;
         e.packageName = raw.packageName;
         e.conversationTitle = MessagingStyleParser.firstNonBlank(raw.convTitle, raw.title);
+        // P-intelligence-20: Discord publishes native conversation ids (channel
+        // shortcut ids) — the DeliveryGuard/match tiers' strongest evidence.
+        // Mirror MessagingStyleParser: dumb copy, never synthesized.
+        e.conversationId = raw.conversationId;
         e.ownerName = raw.ownerName;
         e.group = group;
         // P-intelligence-17: this item's own reply capability.

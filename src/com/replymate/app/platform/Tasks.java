@@ -4,9 +4,10 @@ import android.os.Handler;
 import android.os.Looper;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ThreadFactory;
 
 /** Tiny background-runner with SEPARATE lanes (threading model per BLUEPRINT §1.3,
@@ -45,9 +46,33 @@ public final class Tasks {
     // in parallel. Idle extra lanes retire after 60s. Queue-wait beyond
     // SLOW_QUEUE_MS is now MEASURED per cycle (AssistantRunner.recordLatency),
     // so saturation is proven in diagnostics instead of guessed.
+    //
+    // P-intelligence-20 §1: PRIORITY lanes inside the same elastic pool. A bulk
+    // catch-up (listener-rebind / connectivity / Doze-fallback alarm sweep)
+    // enqueues one job PER stale conversation — a FIFO queue would park a
+    // LIVE ping's draft (or the owner's explicit Regenerate tap) behind dozens
+    // of recovery jobs. Live work is dequeued first; catch-up jobs keep FIFO
+    // order among themselves (stable sequence inside each class).
+    private static final AtomicLong GEN_SEQ = new AtomicLong();
+
+    private static final class Prio implements Runnable, Comparable<Prio> {
+        final int pri; final long seq; final Runnable r;
+        Prio(int pri, Runnable r) { this.pri = pri; this.seq = GEN_SEQ.getAndIncrement(); this.r = r; }
+        @Override public int compareTo(Prio o) {
+            if (pri != o.pri) return pri - o.pri;
+            return seq < o.seq ? -1 : (seq == o.seq ? 0 : 1);
+        }
+        @Override public void run() { r.run(); }
+    }
+
+    // P-intelligence-20 honesty fix: ThreadPoolExecutor only grows past
+    // corePoolSize when the work queue REFUSES an offer — an unbounded queue
+    // never does, so "core 3, max 6" ran as 3 forever. These are 6 REAL lanes:
+    // daemon threads park idle at zero cost, the priority queue decides which
+    // waiting job starts next when a lane frees.
     private static final ExecutorService GEN = new ThreadPoolExecutor(
-        3, 6, 60L, TimeUnit.SECONDS,
-        new LinkedBlockingQueue<Runnable>(), named("rm-gen"));
+        6, 6, 0L, TimeUnit.MILLISECONDS,
+        new PriorityBlockingQueue<Runnable>(), named("rm-gen"));
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
@@ -85,8 +110,14 @@ public final class Tasks {
     /** Listener capture lane — ordered, never blocked by generation/network. */
     public static void ingest(Runnable r) { INGEST.execute(r); }
 
-    /** Background generation lane — research/reasoning/provider calls. */
-    public static void gen(Runnable r) { GEN.execute(r); }
+    /** Background generation lane — research/reasoning/provider calls. LIVE
+     *  priority: new-message drafts and the owner's own taps. */
+    public static void gen(Runnable r) { GEN.execute(new Prio(0, r)); }
+
+    /** Catch-up/recovery generation lane — bulk sweeps (listener rebind,
+     *  connectivity return, Doze-fallback alarm). Always dequeued AFTER live
+     *  work so recovery can never park the hot conversation. */
+    public static void genCatchup(Runnable r) { GEN.execute(new Prio(1, r)); }
 
     public static void main(Runnable r) { MAIN.post(r); }
 }
