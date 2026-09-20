@@ -733,6 +733,27 @@ public final class SettingsActivity extends Activity {
         sb.append("Per-app listener stats:\n");
         sb.append(perAppStats()).append('\n');
         sb.append("  last event: ").append(tsLine(IngestCoordinator.KV_LAST_EVENT)).append('\n');
+        // P-listener-foundation: rebind-request evidence (bounded mechanism) +
+        // the capture-boundary trace so a device report shows exactly where a
+        // notification disappeared (callback→lane → extract → route → ingest →
+        // schedule), with zero bodies/names/keys.
+        sb.append("  last rebind requested: ")
+          .append(tsLine(com.replymate.core.listener.RebindPolicy.KV_LAST_ATTEMPT))
+          .append('\n');
+        sb.append("Listener boundary trace (newest first):\n");
+        java.util.List<String> traceLines =
+            com.replymate.core.listener.ListenerTrace.lines(c.kv());
+        if (traceLines.isEmpty()) {
+            sb.append("  (none yet)\n");
+        } else {
+            for (String tl : traceLines) {
+                int tab = tl.indexOf('\t');
+                long ts = tab > 0 ? parseLong(tl.substring(0, tab)) : 0;
+                String text = tab > 0 ? tl.substring(tab + 1) : tl;
+                sb.append("  ").append(ts > 0 ? TimeFmt.dayTime(ts) : "?")
+                  .append(" — ").append(text).append('\n');
+            }
+        }
         sb.append("Cloud (foundation):\n");
         sb.append("  endpoint: ").append(com.replymate.core.supabase.SupabaseConfig.PROJECT_URL).append('\n');
         sb.append("  tables provisioned: ")

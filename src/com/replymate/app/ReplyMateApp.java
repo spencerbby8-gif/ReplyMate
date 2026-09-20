@@ -1,11 +1,9 @@
 package com.replymate.app;
 
 import android.app.Application;
-import android.content.ComponentName;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.os.Build;
-import android.service.notification.NotificationListenerService;
 import com.replymate.app.di.AppContainer;
 
 /** Application entry point. Builds the AppContainer once per process. */
@@ -37,20 +35,14 @@ public final class ReplyMateApp extends Application {
 
     /** P-background-9: the official rebind nudge (API 24+). OEM builds are known
      *  to leave a granted NotificationListenerService unbound after process
-     *  churn (MIUI/Transsion/etc.) until the toggle is flipped manually; every
-     *  process start asks the system to rebind us. No-op when already bound or
-     *  when access was never granted. Guarded: a broken OEM framework must never
-     *  take the app down with it. */
+     *  churn (MIUI/Transsion/ColorOS/etc.) until the toggle is flipped manually;
+     *  every process start asks the system to rebind us. No-op when already
+     *  bound or when access was never granted.
+     *  P-listener-foundation §4: routed through the SINGLE bounded mechanism
+     *  (ListenerRebind → RebindPolicy's shared 30s stamp) so process-start
+     *  self-heal and disconnect recovery can never compete or storm. */
     private void nudgeListenerRebind() {
-        try {
-            if (Build.VERSION.SDK_INT >= 24) {
-                NotificationListenerService.requestRebind(
-                    new ComponentName(this,
-                        com.replymate.app.listener.RmNotificationListener.class));
-            }
-        } catch (Throwable ignored) {
-            // requestRebind is best-effort self-heal — never fatal
-        }
+        com.replymate.app.listener.ListenerRebind.request(container, this, "process-start");
     }
 
     /** P-background-9: generations that failed while the network was down
