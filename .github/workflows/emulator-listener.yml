@@ -43,8 +43,10 @@ jobs:
   listener-scenarios:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # harness-only ephemeral signing key location (runner context is only
+    # available at job scope — workflow-level env broke evaluation, fixed here)
     env:
-      REPLYMATE_SECRETS: ${{ runner.temp }}/harness-keys   # fresh; production secrets unused
+      REPLYMATE_SECRETS: ${{ runner.temp }}/harness-keys
     steps:
       - name: Checkout
         uses: actions/checkout@v4
