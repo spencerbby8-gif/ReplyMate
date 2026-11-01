@@ -39,6 +39,16 @@ artifact bundle.
    be misread as a ReplyMate listener failure.
 4. **`dumpsys deviceidle force-idle` refuses while the battery is "charging"**
    — S7 unplugs the (emulated) battery first and resets it afterwards.
+5. **Never trust a silent `settings put`.** Run 41341288412 (after facts 1–4
+   were fixed; every PingPoster shape LANDED) still showed NMS
+   `All notification listeners (0) enabled` for the ENTIRE session and an
+   empty `Has user set:` at S0 — the unverified enable write did not persist,
+   and the later verified write persisted (`value={…RmNotificationListener}`)
+   yet NMS kept the component out of the enabled/live sets. The harness now
+   echoes every grant/revoke WITH the resulting `settings get`, escalates to
+   `cmd notification allow_listener` when the setting didn't stick, and saves
+   a bounded unfiltered logcat per scenario (+ a full final dump) so the NMS
+   enable/reject reason is captureable instead of guesswork.
 
 ## Local run (optional)
 

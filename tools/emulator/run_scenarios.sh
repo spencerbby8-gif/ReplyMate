@@ -27,6 +27,34 @@ line() { echo "$1" >> "$SUM"; }
 adb_pid() { adb shell pidof "$RMPKG" 2>/dev/null | tr -d '\r'; }
 say_kv() { say "    kv: $1"; }
 
+# --- listener-access grant/revoke with VERIFICATION -------------------------
+# Run 41341288412 proved silent enable is worthless: the S0 `settings put`
+# never persisted (stderr was swallowed), and even after a persisted set the
+# NMS enabled-list stayed (0). Every mutation below is echoed WITH the
+# resulting secure-setting value, and an escalation ladder tries the
+# sanctioned shell path too.
+nls_get() { adb shell settings get secure enabled_notification_listeners 2>&1 | tr -d '\r'; }
+
+grant_nls() {
+  local put_out
+  put_out=$(adb shell settings put secure enabled_notification_listeners "$NLS_COMPONENT" 2>&1 | tr -d '\r')
+  say "    enable[1] settings put (out=${put_out:-ok}) → get: '$(nls_get)'"
+  if ! nls_get | grep -q "$RMPKG"; then
+    local cmd_out
+    cmd_out=$(adb shell cmd notification allow_listener "$NLS_COMPONENT" 2>&1 | tr -d '\r' | head -2)
+    say "    enable[2] cmd notification allow_listener (out=${cmd_out:-ok}) → get: '$(nls_get)'"
+  fi
+  nls_get | grep -q "$RMPKG" \
+    && say "    enabled_notification_listeners PERSISTED ✓" \
+    || say "    enabled_notification_listeners STILL NOT SET ✗"
+}
+
+revoke_nls() {
+  local put_out
+  put_out=$(adb shell settings put secure enabled_notification_listeners "" 2>&1 | tr -d '\r')
+  say "    revoke via settings put \"\" (out=${put_out:-ok}) → get: '$(nls_get)'"
+}
+
 # The app DB runs in WAL mode (PRAGMA journal_mode=wal — verified in run
 # 41336986254: run-as cat of replymate.db alone returned a stale main file
 # with 0 kv rows while the app had already written listener.* keys). A live-db
@@ -101,6 +129,10 @@ capture() {  # $1=scenario-tag
   bound_state "$tag"
   adb shell "dumpsys notification --noredact listeners" > "$EV/dumpsys-listeners-$tag.txt" 2>/dev/null || true
   adb logcat -d -s PP RM-NLS RM-App 2>/dev/null > "$EV/logcat-$tag.txt"
+  # bounded UNFILTERED logcat — the NMS enable/bind/reject reasons live on
+  # system tags (NotificationManager/NotificationService), invisible in the
+  # filtered slice; run 41341288412 could not explain "enabled (0)" without it
+  adb logcat -b all -d -t 3000 2>/dev/null > "$EV/logcat-full-$tag.txt" || true
   grep -E "PP |RM-NLS" "$EV/logcat-$tag.txt" | tail -8 | sed 's/^/    logcat: /' | tee -a "$SUM"
   say "    trace snapshot: $EV/kv-$tag.txt"
   line ""
@@ -134,10 +166,10 @@ say ""
 
 # ---------------- baseline ----------------
 say "## S0 baseline (launch + access + first bind)"
-adb shell settings put secure enabled_notification_listeners "$NLS_COMPONENT" >/dev/null
-adb shell pm grant "$RMPKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
-adb shell pm grant "$WAPKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
-adb shell pm grant "$DCPKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
+adb shell pm grant "$RMPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
+adb shell pm grant "$WAPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
+adb shell pm grant "$DCPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
+grant_nls
 adb shell monkey -p "$RMPKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 i=0; while [ $i -lt 20 ] && [ -z "$(adb_pid)" ]; do sleep 1; i=$((i+1)); done
 say "  pid0=$(adb_pid || echo none)"
@@ -193,13 +225,12 @@ capture s5-relaunch
 # ---------------- S6 listener toggle (disconnect while alive) ----------------
 say "## S6 LISTENER TOGGLE (access OFF/ON — exercises onListenerDisconnected + requestRebind recovery)"
 adb logcat -c
-adb shell cmd notification disallow_listener "$NLS_COMPONENT" 2>/dev/null \
-  || adb shell settings put secure enabled_notification_listeners "" # fallback
+revoke_nls
 sleep 4
 post "$WAPKG" wa-11 $((NID+=1))
 wait_trace "ingest · $WAPKG" 10 && say "  S6a: UNEXPECTED capture while disallowed ✗" || say "  S6a: no capture while disallowed ✓ (expected)"
 capture s6-disallowed
-adb shell settings put secure enabled_notification_listeners "$NLS_COMPONENT"
+grant_nls
 say "  access re-enabled; watching for bound=true via requestRebind within 40s…"
 wait_trace "bound=true" 40 && say "  S6b: LF-L1 reconnect sequence OBSERVED ✓" || say "  S6b: no bound=true within 40s after re-enable ✗"
 post "$WAPKG" wa-11 $((NID+=1))
@@ -233,6 +264,11 @@ post "$WAPKG" wa-selfstatus $((NID+=1)); capture s8-wa-selfstatus
 say "  Discord variant (watch.discord defaults OFF — route honesty evidence):"
 post "$DCPKG" dc-channel $((NID+=1)); capture s8-dc-channel
 post "$DCPKG" dc-nohistory $((NID+=1)); capture s8-dc-nohistory
+
+# end-of-run full state (unfiltered): NMS dump + complete logcat for the
+# bind/enable forensics that per-scenario tails cannot reach
+adb shell "dumpsys notification --noredact" > "$EV/dumpsys-notification-final.txt" 2>/dev/null || true
+adb logcat -b all -d > "$EV/logcat-final-full.txt" 2>/dev/null || true
 
 say ""
 say "## DONE — evidence bundle in $EV"
