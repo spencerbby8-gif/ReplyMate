@@ -136,9 +136,15 @@ public final class MainActivity extends Activity {
         if (withReply) {
             RemoteInput ri = new RemoteInput.Builder("key_pp_reply")
                 .setLabel("Reply").build();
+            // API 31+ enforcement (NotificationManagerService.
+            // checkDisqualifyingFeatures): "PendingIntents attached to actions
+            // with remote inputs must be mutable" — the system fills the reply
+            // text into this Intent at runtime. IMMUTABLE here posts NOTHING
+            // (IllegalArgumentException from NMS); proven by harness run
+            // 41336986254 on API 34.
             PendingIntent pi = PendingIntent.getActivity(this, nid0(nidSeed()),
                 new Intent(this, MainActivity.class),
-                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
             b.addAction(new Notification.Action.Builder(null, "Reply", pi)
                 .addRemoteInput(ri).build());
         }

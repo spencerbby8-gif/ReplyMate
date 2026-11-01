@@ -27,9 +27,24 @@ line() { echo "$1" >> "$SUM"; }
 adb_pid() { adb shell pidof "$RMPKG" 2>/dev/null | tr -d '\r'; }
 say_kv() { say "    kv: $1"; }
 
+# The app DB runs in WAL mode (PRAGMA journal_mode=wal — verified in run
+# 41336986254: run-as cat of replymate.db alone returned a stale main file
+# with 0 kv rows while the app had already written listener.* keys). A live-db
+# copy WITHOUT the -wal file silently misses every not-yet-checkpointed write,
+# which made S0..S8 trace verdicts read garbage. Snapshot db + -wal together
+# (SQLite replays the wal on open); best-effort on-device checkpoint first.
+kv_snapshot() {  # $1=local db path (writes $1, $1-wal maybe, $1-shm ignored)
+  local db="$1"
+  adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db 'PRAGMA wal_checkpoint(FULL);'" >/dev/null 2>&1 || true
+  adb shell "run-as $RMPKG cat databases/replymate.db" > "$db" 2>/dev/null || true
+  rm -f "$db-wal"
+  adb shell "run-as $RMPKG cat databases/replymate.db-wal" > "$db-wal" 2>/dev/null || true
+  [ -s "$db-wal" ] || rm -f "$db-wal"
+}
+
 kv_pull() {  # $1=tag ; pulls app_kv and extracts listener/assistant keys
   local tag="$1" db="$EV/kv-$tag.db" out="$EV/kv-$tag.txt"
-  adb shell "run-as $RMPKG cat databases/replymate.db" > "$db" 2>/dev/null || true
+  kv_snapshot "$db"
   python3 - "$db" "$out" << 'PY'
 import sqlite3, sys, json
 db, out = sys.argv[1], sys.argv[2]
@@ -64,10 +79,19 @@ bound_state() {  # app-side truth via kv + system-side via dumpsys
     | grep -i -m2 "RmNotificationListener" | tee -a "$SUM" >/dev/null || true
 }
 
-post() {  # $1=pkg $2=shape $3=nid
+post() {  # $1=pkg $2=shape $3=nid ; verify the post LANDED at NMS (run
+          # 41336986254 learnt: a failed enqueue looks identical to a
+          # listener drop downstream — always gate scenario verdicts on this)
   adb logcat -c
   adb shell am start -W -n "$1/com.pingposter.MainActivity" --es shape "$2" --ei nid "$3" >/dev/null 2>&1
   sleep 6
+  local st
+  st=$(adb logcat -d -s PP 2>/dev/null | tr -d '\r' | grep "shape=$2" | tail -1)
+  case "$st" in
+    *"posted shape="*)      say "  post $2: LANDED at NotificationManager ✓" ;;
+    *"post failed shape="*) say "  post $2: REJECTED by NMS ✗ ($(echo "$st" | sed 's/.*post failed shape/post failed shape/' | cut -c1-150))" ;;
+    *)                      say "  post $2: PP log unseen (instrumentation gap)" ;;
+  esac
 }
 
 capture() {  # $1=scenario-tag
@@ -75,16 +99,17 @@ capture() {  # $1=scenario-tag
   say "### evidence: $tag  (pid=$(adb_pid || echo none))"
   kv_pull "$tag"; cp "$EV/kv-$tag.txt" "$EV/" 2>/dev/null || true
   bound_state "$tag"
+  adb shell "dumpsys notification --noredact listeners" > "$EV/dumpsys-listeners-$tag.txt" 2>/dev/null || true
   adb logcat -d -s PP RM-NLS RM-App 2>/dev/null > "$EV/logcat-$tag.txt"
   grep -E "PP |RM-NLS" "$EV/logcat-$tag.txt" | tail -8 | sed 's/^/    logcat: /' | tee -a "$SUM"
   say "    trace snapshot: $EV/kv-$tag.txt"
   line ""
 }
 
-wait_trace() {  # $1=regex $2=timeout-s ; live kv poll
+wait_trace() {  # $1=regex $2=timeout-s ; live kv poll (WAL-aware)
   local pat="$1" max="$2" i=0
   while [ $i -lt "$max" ]; do
-    adb shell "run-as $RMPKG cat databases/replymate.db" 2>/dev/null > /tmp/.harness-kv.db || true
+    kv_snapshot /tmp/.harness-kv.db
     if python3 -c "
 import sqlite3,json,sys
 try:
@@ -114,8 +139,11 @@ adb shell pm grant "$RMPKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&
 adb shell pm grant "$WAPKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
 adb shell pm grant "$DCPKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
 adb shell monkey -p "$RMPKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-sleep 5
+i=0; while [ $i -lt 20 ] && [ -z "$(adb_pid)" ]; do sleep 1; i=$((i+1)); done
 say "  pid0=$(adb_pid || echo none)"
+wait_trace "bound=true (onListenerConnected)" 30 \
+  && say "  S0: first bind observed (bound=true) ✓" \
+  || say "  S0: no bound=true within 30s of enable+launch ✗"
 capture s0-baseline
 
 # ---------------- S1 foreground ----------------
@@ -180,10 +208,16 @@ capture s6-reenabled
 
 # ---------------- S7 doze / standby ----------------
 say "## S7 DOZE + STANDBY RESTRICTED (temporary device states)"
+# force-idle refuses on a charging device ("not enabled"; run 41336986254 hit
+# exactly this) — unplug first, restore at the end.
+adb shell dumpsys battery unplug >/dev/null 2>&1
+adb shell input keyevent KEYCODE_SLEEP; sleep 3
 adb shell dumpsys deviceidle force-idle; sleep 3
 post "$WAPKG" wa-11 $((NID+=1))
 wait_trace "ingest · $WAPKG" 25 && say "  S7a: capture under forced Doze ✓" || say "  S7a: no capture under forced Doze ✗"
-adb shell dumpsys deviceidle unforce >/dev/null 2>&1; sleep 3
+adb shell dumpsys deviceidle unforce >/dev/null 2>&1
+adb shell dumpsys battery reset >/dev/null 2>&1
+adb shell input keyevent KEYCODE_WAKEUP; sleep 3
 adb shell am set-standby-bucket "$RMPKG" restricted 2>/dev/null; sleep 3
 post "$WAPKG" wa-11 $((NID+=1))
 wait_trace "ingest · $WAPKG" 25 && say "  S7b: capture in RESTRICTED standby ✓" || say "  S7b: no capture in RESTRICTED standby ✗"

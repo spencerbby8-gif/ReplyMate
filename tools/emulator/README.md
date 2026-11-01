@@ -21,6 +21,25 @@ artifact bundle.
 
 **Trace vocabulary (1.7.2 build):** see `docs/checklists/P-listener-foundation-1.7.2.md` §4.
 
+## Hard-won harness facts (from CI run 41336986254 — do not regress)
+
+1. **Remote-input actions need a MUTABLE PendingIntent.** Android 14's NMS
+   (`checkDisqualifyingFeatures`) rejects the whole post with
+   `IllegalArgumentException: … PendingIntents attached to actions with remote
+   inputs must be mutable`. PingPoster's reply action therefore uses
+   `FLAG_MUTABLE`. Before that fix, every MessagingStyle+Reply shape posted
+   NOTHING and every downstream "no capture" verdict was garbage.
+2. **replymate.db is WAL-mode.** Pulling `databases/replymate.db` alone via
+   `run-as` returns a stale main file; not-yet-checkpointed kv writes (the
+   entire `listener.trace` ring) live in `replymate.db-wal`. `kv_snapshot()`
+   copies db + `-wal` together (SQLite replays the wal on open) and
+   best-effort checkpoints on-device first.
+3. **Every post is gated on landing.** `post()` reads PingPoster's own logcat
+   line and marks `LANDED / REJECTED`, so a harness-side post failure can never
+   be misread as a ReplyMate listener failure.
+4. **`dumpsys deviceidle force-idle` refuses while the battery is "charging"**
+   — S7 unplugs the (emulated) battery first and resets it afterwards.
+
 ## Local run (optional)
 
 ```
