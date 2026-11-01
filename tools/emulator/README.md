@@ -49,6 +49,16 @@ artifact bundle.
    `cmd notification allow_listener` when the setting didn't stick, and saves
    a bounded unfiltered logcat per scenario (+ a full final dump) so the NMS
    enable/reject reason is captureable instead of guesswork.
+6. **`settings put secure <key> ""` fails with "Bad arguments"** over adb
+   shell (empty arg swallowed) — revoke uses `settings delete`. Granted in the
+   SAME run: even with the setting verified persisted from S0 on, ReplyMate
+   NEVER entered NMS's enabled/live sets and no `bound=true` ever fired — that
+   is now the primary forensic question, and grant/revoke therefore happens
+   inside a cleared-logcat window dumped immediately after
+   (`logcat-nms-grant-*.txt`), because per-scenario `-t 3000` tails rotated
+   past the enable moment once (run 41345057505).
+7. **Job timeout is 90 min** — 45 was insufficient once WAL snapshots + the
+   verified grant ladder joined the loop (run 41345057505 was killed mid-S6).
 
 ## Local run (optional)
 

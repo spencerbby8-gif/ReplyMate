@@ -42,7 +42,10 @@ concurrency:
 jobs:
   listener-scenarios:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 was real-world insufficient (run 41345057505 hit it mid-S6 once the
+    # WAL snapshot + verified grant ladder joined the loop); 90 leaves double
+    # headroom even with every scenario red.
+    timeout-minutes: 90
     # harness-only ephemeral signing key location. A plain runner-local path:
     # the `runner` context is NOT available at any env scope per GitHub's
     # context-availability rules (validated with actionlint) — nothing else

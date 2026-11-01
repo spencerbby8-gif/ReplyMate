@@ -35,24 +35,46 @@ say_kv() { say "    kv: $1"; }
 # sanctioned shell path too.
 nls_get() { adb shell settings get secure enabled_notification_listeners 2>&1 | tr -d '\r'; }
 
+# grant/revoke happens INSIDE a cleared-logcat window that is dumped
+# immediately after — NMS logs its enable/BIND/reject reasoning in real time
+# (the 3000-line per-scenario tails rotated past the enable window in run
+# 41345057505 and the reason was lost). One evidence file per invocation.
+NMS_WIN=0
+nms_window_open() { adb logcat -c; NMS_WIN=$((NMS_WIN+1)); }
+nms_window_close() {  # $1 = verb (grant|revoke)
+  adb logcat -b all -d 2>/dev/null > "$EV/logcat-nms-$1-$NMS_WIN.txt" || true
+}
+
 grant_nls() {
+  nms_window_open
   local put_out
   put_out=$(adb shell settings put secure enabled_notification_listeners "$NLS_COMPONENT" 2>&1 | tr -d '\r')
+  sleep 2   # let the SettingsObserver round-trip before we verify
   say "    enable[1] settings put (out=${put_out:-ok}) → get: '$(nls_get)'"
   if ! nls_get | grep -q "$RMPKG"; then
     local cmd_out
     cmd_out=$(adb shell cmd notification allow_listener "$NLS_COMPONENT" 2>&1 | tr -d '\r' | head -2)
+    sleep 2
     say "    enable[2] cmd notification allow_listener (out=${cmd_out:-ok}) → get: '$(nls_get)'"
   fi
   nls_get | grep -q "$RMPKG" \
     && say "    enabled_notification_listeners PERSISTED ✓" \
     || say "    enabled_notification_listeners STILL NOT SET ✗"
+  nms_window_close grant
 }
 
 revoke_nls() {
-  local put_out
-  put_out=$(adb shell settings put secure enabled_notification_listeners "" 2>&1 | tr -d '\r')
-  say "    revoke via settings put \"\" (out=${put_out:-ok}) → get: '$(nls_get)'"
+  nms_window_open
+  # NOTE: `settings put secure <key> ""` fails with "Bad arguments" over adb
+  # shell quoting (proven in run 41345057505) — `delete` is the reliable clear.
+  local del_out
+  del_out=$(adb shell settings delete secure enabled_notification_listeners 2>&1 | tr -d '\r')
+  sleep 2
+  say "    revoke via settings delete (out=${del_out:-ok}) → get: '$(nls_get)'"
+  nls_get | grep -q "$RMPKG" \
+    && say "    listener access STILL SET after delete ✗ (S6a invalid)" \
+    || say "    listener access revoked ✓"
+  nms_window_close revoke
 }
 
 # The app DB runs in WAL mode (PRAGMA journal_mode=wal — verified in run
@@ -61,9 +83,13 @@ revoke_nls() {
 # copy WITHOUT the -wal file silently misses every not-yet-checkpointed write,
 # which made S0..S8 trace verdicts read garbage. Snapshot db + -wal together
 # (SQLite replays the wal on open); best-effort on-device checkpoint first.
-kv_snapshot() {  # $1=local db path (writes $1, $1-wal maybe, $1-shm ignored)
+kv_snapshot() {  # $1=local db path $2=heaviness[heavy|light]
+  # light: db + -wal (poll path — checkpoints costed ~17min in run 41345057505)
+  # heavy: + best-effort on-device wal_checkpoint first (per-scenario path)
   local db="$1"
-  adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db 'PRAGMA wal_checkpoint(FULL);'" >/dev/null 2>&1 || true
+  case "${2:-heavy}" in heavy)
+    adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db 'PRAGMA wal_checkpoint(FULL);'" >/dev/null 2>&1 || true ;;
+  esac
   adb shell "run-as $RMPKG cat databases/replymate.db" > "$db" 2>/dev/null || true
   rm -f "$db-wal"
   adb shell "run-as $RMPKG cat databases/replymate.db-wal" > "$db-wal" 2>/dev/null || true
@@ -138,10 +164,10 @@ capture() {  # $1=scenario-tag
   line ""
 }
 
-wait_trace() {  # $1=regex $2=timeout-s ; live kv poll (WAL-aware)
+wait_trace() {  # $1=regex $2=timeout-s ; live kv poll (WAL-aware, light)
   local pat="$1" max="$2" i=0
   while [ $i -lt "$max" ]; do
-    kv_snapshot /tmp/.harness-kv.db
+    kv_snapshot /tmp/.harness-kv.db light
     if python3 -c "
 import sqlite3,json,sys
 try:
