@@ -43,10 +43,13 @@ jobs:
   listener-scenarios:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # harness-only ephemeral signing key location (runner context is only
-    # available at job scope — workflow-level env broke evaluation, fixed here)
+    # harness-only ephemeral signing key location. A plain runner-local path:
+    # the `runner` context is NOT available at any env scope per GitHub's
+    # context-availability rules (validated with actionlint) — nothing else
+    # on the runner uses this directory, so isolation is still total and
+    # production secrets stay unreferenced.
     env:
-      REPLYMATE_SECRETS: ${{ runner.temp }}/harness-keys
+      REPLYMATE_SECRETS: /tmp/replymate-harness-keys
     steps:
       - name: Checkout
         uses: actions/checkout@v4
