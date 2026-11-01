@@ -51,15 +51,23 @@ grant_nls() {
   put_out=$(adb shell settings put secure enabled_notification_listeners "$NLS_COMPONENT" 2>&1 | tr -d '\r')
   sleep 2   # let the SettingsObserver round-trip before we verify
   say "    enable[1] settings put (out=${put_out:-ok}) → get: '$(nls_get)'"
-  if ! nls_get | grep -q "$RMPKG"; then
-    local cmd_out
-    cmd_out=$(adb shell cmd notification allow_listener "$NLS_COMPONENT" 2>&1 | tr -d '\r' | head -2)
-    sleep 2
-    say "    enable[2] cmd notification allow_listener (out=${cmd_out:-ok}) → get: '$(nls_get)'"
-  fi
+  # ALWAYS also use the sanctioned shell API — run 41349417603 proved a
+  # persisted setting is NOT sufficient for NMS to admit the component.
+  local cmd_out
+  cmd_out=$(adb shell cmd notification allow_listener "$NLS_COMPONENT" 2>&1 | tr -d '\r' | head -2)
+  sleep 2
+  say "    enable[2] cmd notification allow_listener (out=${cmd_out:-ok}) → get: '$(nls_get)'"
   nls_get | grep -q "$RMPKG" \
     && say "    enabled_notification_listeners PERSISTED ✓" \
     || say "    enabled_notification_listeners STILL NOT SET ✗"
+  # service-resolution probe EXACTLY the way NMS looks providers up
+  { adb shell cmd package query-services --components -a android.service.notification.NotificationListenerService 2>&1 \
+    || adb shell pm query-services --components -a android.service.notification.NotificationListenerService 2>&1; } > "$EV/nls-providers-$NMS_WIN.txt"
+  # NMS-side acceptance: is the component in the ENABLED set / LIVE list?
+  adb shell "dumpsys notification --noredact listeners" 2>/dev/null \
+    | grep -A4 "enabled for current profiles" | grep "RmNotificationListener" \
+    && say "    NMS enabled-set contains ReplyMate ✓" \
+    || say "    NMS enabled-set does NOT contain ReplyMate ✗"
   nms_window_close grant
 }
 
@@ -199,6 +207,7 @@ grant_nls
 adb shell monkey -p "$RMPKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 i=0; while [ $i -lt 20 ] && [ -z "$(adb_pid)" ]; do sleep 1; i=$((i+1)); done
 say "  pid0=$(adb_pid || echo none)"
+adb shell "dumpsys package $RMPKG" > "$EV/dumpsys-package-$RMPKG.txt" 2>/dev/null || true
 wait_trace "bound=true (onListenerConnected)" 30 \
   && say "  S0: first bind observed (bound=true) ✓" \
   || say "  S0: no bound=true within 30s of enable+launch ✗"
