@@ -50,6 +50,10 @@ jobs:
     # production secrets stay unreferenced.
     env:
       REPLYMATE_SECRETS: /tmp/replymate-harness-keys
+      # ubuntu runners ship a READ-ONLY preinstalled Android SDK at $ANDROID_HOME;
+      # the engine would die trying to chmod/unzip the PINNED toolchain into it.
+      # (Same fix release.yml already uses.) Pin our own writable dir.
+      REPLYMATE_SDK: ${{ github.workspace }}/.engine-sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v4
