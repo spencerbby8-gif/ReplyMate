@@ -365,6 +365,28 @@ say "  Discord variant (watch.discord defaults OFF — route honesty evidence):"
 post "$DCPKG" dc-channel $((NID+=1)); capture s8-dc-channel
 post "$DCPKG" dc-nohistory $((NID+=1)); capture s8-dc-nohistory
 
+# ---------------- S9 discord watch-ON parser evidence (lab kv toggle) ----------------
+# S8 records honesty only: watch.discord defaults OFF so the route verdict is
+# DISABLED (registry fail-closed, stats-only, no route line). To actually
+# EXERCISE TitleTextParser(DISCORD, preferHistory) + announcement fail-closed
+# on a real OS, toggle the SAME user-facing kv key the Settings switch writes
+# ('watch.<wire>' per ParserRegistry.enabledFromKv, re-read per notification —
+# no caching), post the two discord shapes, then restore OFF and verify the
+# DISABLED wall returns. Lab-only toggle; the shipped default stays OFF.
+say "## S9 DISCORD WATCH-ON (synthetic shapes; lab kv toggle of the settings switch)"
+adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db \"INSERT OR REPLACE INTO app_kv(key,value) VALUES('watch.discord','1')\"" 2>/dev/null
+say "  watch.discord now: $(adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db \"SELECT value FROM app_kv WHERE key='watch.discord'\"" 2>/dev/null | tr -d '\r')"
+HWM=$(trace_hwm); post "$DCPKG" dc-channel $((NID+=1))
+wait_trace "route · $DCPKG" 20 "$HWM" && say "  S9a: discord channel shape reached route with watch ON ✓ (disposition in kv)" || say "  S9a: no discord route line with watch ON ✗"
+capture s9-dc-channel-on
+HWM=$(trace_hwm); post "$DCPKG" dc-nohistory $((NID+=1))
+wait_trace "route · $DCPKG" 20 "$HWM" && say "  S9b: discord no-history shape reached route with watch ON ✓ (FAIL/announcement disposition in kv)" || say "  S9b: no route line for no-history shape ✗"
+capture s9-dc-nohistory-on
+adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db \"INSERT OR REPLACE INTO app_kv(key,value) VALUES('watch.discord','0')\"" 2>/dev/null
+HWM=$(trace_hwm); post "$DCPKG" dc-channel $((NID+=1))
+wait_trace "route · $DCPKG" 10 "$HWM" && say "  S9c: UNEXPECTED route after watch restored OFF ✗" || say "  S9c: watch OFF again → no route line (registry DISABLED fail-closed) ✓"
+capture s9-dc-off-again
+
 # end-of-run full state (unfiltered): NMS dump + complete logcat for the
 # bind/enable forensics that per-scenario tails cannot reach
 adb shell "dumpsys notification --noredact" > "$EV/dumpsys-notification-final.txt" 2>/dev/null || true
