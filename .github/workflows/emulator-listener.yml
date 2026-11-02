@@ -81,12 +81,10 @@ jobs:
           java-version: "17"
 
       - name: JVM gate (run_tests.sh) on the app under test
-        env:
-          RM_APP_REF: ${{ inputs.app_ref }}
         run: |
           set -e
-          APP_DIR="."
-          [ -n "$RM_APP_REF" ] && APP_DIR="appsrc"
+          APP_DIR="${{ inputs.app_ref != '' && 'appsrc' || '.' }}"
+          echo "gating app source: $APP_DIR"
           chmod +x "$APP_DIR/scripts/run_tests.sh" || true
           ( cd "$APP_DIR" && bash scripts/run_tests.sh )
 
@@ -103,12 +101,10 @@ jobs:
           echo "KVM: PRESENT"
 
       - name: Build ReplyMate harness APK (ephemeral key + debug-mode)
-        env:
-          RM_APP_REF: ${{ inputs.app_ref }}
         run: |
           set -e
-          APP_DIR="."
-          [ -n "$RM_APP_REF" ] && APP_DIR="appsrc"
+          APP_DIR="${{ inputs.app_ref != '' && 'appsrc' || '.' }}"
+          echo "building app source: $APP_DIR"
           mkdir -p "$REPLYMATE_SECRETS"
           chmod +x "$APP_DIR/engine/build.sh" "$APP_DIR"/scripts/*.sh || true
           ( cd "$APP_DIR" && RM_DEBUG_MODE=1 VERSION_CODE=919 VERSION_NAME=1.7.2-emu-harness \
@@ -147,16 +143,18 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
           script: |
             set -e
-            APP_DIR="."
-            [ -n "$RM_APP_REF" ] && APP_DIR="appsrc"
+            # expression-time resolution (run 41488017578: the runtime $APP_DIR
+            # probe came out EMPTY inside the action's script shell → the adb
+            # line collapsed to /ReplyMate-…; never trust runtime env probes
+            # inside an action script — bake the selection into the text)
+            APP_DIR="${{ inputs.app_ref != '' && 'appsrc' || '.' }}"
+            echo "APP_DIR=$APP_DIR"
             chmod +x tools/emulator/run_scenarios.sh
             adb install -r "$APP_DIR/ReplyMate-1.7.2-emu-harness.apk"
             adb install -r build/pingposter-com.whatsapp.apk
             adb install -r build/pingposter-com.discord.apk
             mkdir -p evidence
-            bash tools/emulator/run_scenarios.sh "$PWD/evidence" 2>&1 | tee evidence/runner.log
-        env:
-          RM_APP_REF: ${{ inputs.app_ref }}
+            RM_APP_REF="${{ inputs.app_ref }}" bash tools/emulator/run_scenarios.sh "$PWD/evidence" 2>&1 | tee evidence/runner.log
 
       - name: Upload diagnostic artifacts
         if: always()
