@@ -22,11 +22,35 @@ public final class ReplyMateApp extends Application {
             // Container failure is fatal-but-diagnosable: shell screens must still open.
             android.util.Log.e("RM-App", "container init failed", e);
         }
+        warmListenerStateOffMain();
         nudgeListenerRebind();
         sweepOnConnectivityReturn();
     }
 
     public AppContainer container() { return container; }
+
+    /** P-anr-startup: on a cold install the FIRST kv read opens SQLite and pays
+     *  the journal_mode=WAL commit fsync (device-proven: reason=6 "executing
+     *  service" ANR with the main thread parked in fdatasync via
+     *  SQLiteConnection.setJournalMode). That cost is deliberately paid HERE —
+     *  on the single-threaded capture lane — so it provably never runs on the
+     *  main thread during process start or any listener callback. The same
+     *  task seeds the in-process rebind gate from the persisted stamp, then
+     *  every later listener-path decision is I/O-free (RebindGate). */
+    private void warmListenerStateOffMain() {
+        final AppContainer c = container;
+        com.replymate.app.platform.Tasks.ingest(new Runnable() {
+            @Override public void run() {
+                try {
+                    com.replymate.app.listener.ListenerRebind.warmFromKv(
+                        c == null ? null : c.kv());
+                } catch (Throwable ignored) {
+                    // warm/seed is opportunistic: an unreadable store leaves the
+                    // gate fail-open, which is the RebindPolicy contract anyway
+                }
+            }
+        });
+    }
 
     public static AppContainer containerOf(android.content.Context ctx) {
         ReplyMateApp app = (ReplyMateApp) ctx.getApplicationContext();
