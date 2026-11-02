@@ -132,6 +132,19 @@ except Exception as e:
 PY
 }
 
+pull_anrs() {  # $1=tag ; gunzip procexitstore records mentioning our pkgs
+  local tag="$1" z
+  mkdir -p "$EV/_anr"
+  adb pull /data/system/procexitstore "$EV/_anr" >/dev/null 2>&1 || true
+  for z in "$EV/_anr"/procexitstore/anr_*.gz; do
+    [ -e "$z" ] || continue
+    if gunzip -c "$z" 2>/dev/null | grep -qiE "com.replymate.app|com.android.systemui"; then
+      gunzip -c "$z" > "$EV/anr-$tag-$(basename "$z" .gz).txt" 2>/dev/null || true
+    fi
+  done
+  rm -rf "$EV/_anr"
+}
+
 bound_state() {  # app-side truth via kv + system-side via dumpsys
   local tag="$1"
   adb shell "dumpsys notification --noredact listeners" \
@@ -169,6 +182,7 @@ capture() {  # $1=scenario-tag
   # crash record. exit-info is per-scenario, dropbox slice is end-of-run.
   adb shell "dumpsys activity exit-info $RMPKG" > "$EV/exit-info-$tag.txt" 2>/dev/null || true
   adb shell "dumpsys activity exit-info com.android.systemui" >> "$EV/exit-info-$tag.txt" 2>/dev/null || true
+  pull_anrs "$tag"
   adb logcat -d -s PP RM-NLS RM-App 2>/dev/null > "$EV/logcat-$tag.txt"
   # bounded UNFILTERED logcat — the NMS enable/bind/reject reasons live on
   # system tags (NotificationManager/NotificationService), invisible in the
@@ -228,6 +242,13 @@ say "device: $(adb shell getprop ro.product.model | tr -d '\r') · sdk=$(adb she
 say ""
 
 # ---------------- baseline ----------------
+# fix 13: enable root for /data/system/procexitstore ANR-trace pulls (userdebug
+# image; graceful no-op elsewhere). Run 41404621261 exit-info proved the pid
+# churn is ANR error-handling ('executing service ...RmNotificationListener',
+# trace anr_*.gz recorded 07:19:23, kill executed 07:23:49) — this pulls the
+# actual stack record so app-vs-environment attribution is made FROM THE TRACE.
+adb root >/dev/null 2>&1; adb wait-for-device; sleep 3
+
 say "## S0 baseline (launch + access + first bind)"
 adb shell pm grant "$RMPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
 adb shell pm grant "$WAPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
