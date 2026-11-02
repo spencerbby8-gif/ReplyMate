@@ -15,6 +15,8 @@ import android.util.Log;
  *
  *    --es shape  wa-11 | wa-burst | wa-group | wa-noaction | wa-withaction
  *                | wa-selfstatus | dc-channel | dc-nohistory | plain | clear
+ *                | rebind-rm  (no post: cross-app requestRebind attempt on
+ *                            ReplyMate's listener, result logged to PP)
  *    --ei nid    notification id for this post (distinct per scenario)
  *
  *  Every shape is assembled from the OFFICIAL documented MessagingStyle /
@@ -40,6 +42,25 @@ public final class MainActivity extends Activity {
             if ("clear".equals(shape)) {
                 nm.cancelAll();
                 Log.i(TAG, "posted shape=clear id=0");
+                finish();
+                return;
+            }
+            if ("rebind-rm".equals(shape)) {
+                // fix 12: the ONLY documented trigger for a disconnect/reconnect
+                // cycle while notification access STAYS granted is
+                // NotificationListenerService.requestRebind itself (NMS unbinds
+                // then rebinds the component). Whether a THIRD-PARTY caller may
+                // drive it for another app's component is exactly what the
+                // harness needs to learn empirically — log the outcome either way.
+                try {
+                    android.service.notification.NotificationListenerService.requestRebind(
+                        new android.content.ComponentName("com.replymate.app",
+                            "com.replymate.app.listener.RmNotificationListener"));
+                    Log.i(TAG, "rebind-rm result=accepted (call returned)");
+                } catch (Throwable t) {
+                    Log.i(TAG, "rebind-rm result=rejected ex=" + t.getClass().getName()
+                        + " msg=" + String.valueOf(t.getMessage()));
+                }
                 finish();
                 return;
             }

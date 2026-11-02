@@ -162,6 +162,13 @@ capture() {  # $1=scenario-tag
   kv_pull "$tag"; cp "$EV/kv-$tag.txt" "$EV/" 2>/dev/null || true
   bound_state "$tag"
   adb shell "dumpsys notification --noredact listeners" > "$EV/dumpsys-listeners-$tag.txt" 2>/dev/null || true
+  # fix 12: error-forensics channels — process restarts get their reason from
+  # ApplicationExitInfo (survives logcat rotation); run 41386158198 killed BOTH
+  # com.android.systemui (pid 925, -800) and ReplyMate (2409->3720) 0.8s apart
+  # with 'user request after error' while the rotating -t 3000 tails carried no
+  # crash record. exit-info is per-scenario, dropbox slice is end-of-run.
+  adb shell "dumpsys activity exit-info $RMPKG" > "$EV/exit-info-$tag.txt" 2>/dev/null || true
+  adb shell "dumpsys activity exit-info com.android.systemui" >> "$EV/exit-info-$tag.txt" 2>/dev/null || true
   adb logcat -d -s PP RM-NLS RM-App 2>/dev/null > "$EV/logcat-$tag.txt"
   # bounded UNFILTERED logcat — the NMS enable/bind/reject reasons live on
   # system tags (NotificationManager/NotificationService), invisible in the
@@ -337,6 +344,38 @@ HWM4=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
 wait_trace "ingest · $WAPKG" 30 "$HWM4" && say "  S6c: capture after re-enable ✓" || say "  S6c: no capture after re-enable ✗"
 capture s6-reenabled
 
+# ---------------- S6d disconnect-while-GRANTED (cross-app requestRebind) ----------------
+# Stock AOSP delivers onListenerDisconnected to a bound, granted listener only
+# on revoke / package-update / user-switch — every adb-level control hits one
+# of those (a kill or a grant flip). The one remaining legitimate trigger is
+# requestRebind itself, driven here cross-app by pingposter; if the platform
+# rejects third-party callers the path is marked UNTESTED with the rejection
+# as evidence (owner rule: no fake success, no product hooks to force it).
+say "## S6d DISCONNECT-WHILE-GRANTED via requestRebind (cross-app attempt)"
+HWM=$(trace_hwm)
+adb shell am start -W -n "$WAPKG/com.pingposter.MainActivity" --es shape rebind-rm >/dev/null 2>&1
+sleep 3
+RB=$(adb logcat -d -s PP 2>/dev/null | tr -d '\r' | grep "rebind-rm result=" | tail -1)
+say "  $RB"
+case "$RB" in
+  *result=accepted*)
+    if wait_trace "bound=false" 20 "$HWM"; then
+      say "  S6d: onListenerDisconnected FIRED while access still granted ✓ — the target path is reachable"
+      wait_trace "rebind requested" 15 "$HWM" && say "  S6d: product ListenerRebind answered the disconnect ✓" || say "  S6d: disconnect fired but no rebind request within 15s ✗"
+    else
+      say "  S6d: request accepted but no bound=false within 20s (rebind may be deferred) — check kv/logcat"
+    fi
+    wait_trace "bound=true" 60 "$HWM" && say "  S6d: reconnect observed ✓" || say "  S6d: no reconnect within 60s ✗"
+    ;;
+  *result=rejected*)
+    say "  S6d: cross-app requestRebind REJECTED by the platform (see logcat line above) → disconnect-while-granted is NOT externally exercisable on stock AOSP-34 without a product-side test hook. Marking LF-L1 disconnect→requestRebind→reconnect UNTESTED-in-harness (process-death binds S5 + full NMS admission S0 remain verified; genuine disconnected-state recovery is exercised only by real OEM unbind events — i.e. on the owner device)."
+    ;;
+  *)
+    say "  S6d: PP rebind-rm log line unseen (instrumentation gap) ✗"
+    ;;
+esac
+capture s6d-rebind-granted
+
 # ---------------- S7 doze / standby ----------------
 say "## S7 DOZE + STANDBY RESTRICTED (temporary device states)"
 # force-idle refuses on a charging device ("not enabled"; run 41336986254 hit
@@ -390,6 +429,7 @@ capture s9-dc-off-again
 # end-of-run full state (unfiltered): NMS dump + complete logcat for the
 # bind/enable forensics that per-scenario tails cannot reach
 adb shell "dumpsys notification --noredact" > "$EV/dumpsys-notification-final.txt" 2>/dev/null || true
+adb shell "dumpsys dropbox --print" 2>/dev/null | grep -A30 -iE "data_app_crash|data_app_anr|system_app_crash|system_app_anr|system_server_anr" > "$EV/dropbox-errors.txt" || true
 adb logcat -b all -d > "$EV/logcat-final-full.txt" 2>/dev/null || true
 
 say ""
