@@ -144,7 +144,10 @@ jobs:
           DBG_LINE="$("$BT/aapt2" dump xmltree "$APK" --file AndroidManifest.xml 2>/dev/null \
             | grep -i debuggable || true)"
           echo "manifest debuggable attribute: ${DBG_LINE:-<absent>}"
-          if ! echo "$DBG_LINE" | grep -q "0xffffffff"; then
+          # aapt2 xmltree renders FLAG true as "=true" (aapt v1 prints 0xffffffff)
+          # — accept both encodings (run 41499948914: stamp present as '=true'
+          # while a 0xffffffff-only matcher wrongly aborted the build).
+          if ! echo "$DBG_LINE" | grep -qE "(=true\b|0xffffffff)"; then
             echo "FATAL: harness APK is NOT stamped android:debuggable=true —"
             echo "RM_DEBUG_MODE plumbing broken; refusing to validate blind."
             exit 1
