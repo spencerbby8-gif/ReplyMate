@@ -449,6 +449,29 @@ capture s9-dc-off-again
 
 # end-of-run full state (unfiltered): NMS dump + complete logcat for the
 # bind/enable forensics that per-scenario tails cannot reach
+#_VALIDATION-BRANCH-ONLY (not part of PR #3): when the app DB never materialized
+# (two consecutive silent-capture runs on the ANR-fix tree vs 4 consecutive good
+# runs on 1.7.2) take the definitive thread state: kill -3 forces a full-JNI
+# thread dump for the app, then pull /data/anr records + list the db dir so the
+# wedge frame (if any) is evidence, not inference.
+TRACE_OK=$(adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db \"SELECT count(*) FROM app_kv WHERE key='listener.trace'\"" 2>/dev/null | tr -d "\r")
+if [ -z "$TRACE_OK" ]; then
+  say "(silent-capture diagnostic: listener.trace unreadable at end-of-run — dumping app threads)"
+  RPID=$(adb_pid)
+  if [ -n "$RPID" ]; then
+    adb shell "kill -3 $RPID" 2>/dev/null || true
+    sleep 4
+    mkdir -p "$EV/_anrq"
+    adb pull /data/anr "$EV/_anrq" >/dev/null 2>&1 || true
+    for t in "$EV/_anrq"/anr/*; do
+      [ -e "$t" ] || continue
+      gunzip -c "$t" 2>/dev/null > "$EV/threads-kill3-$(basename "$t" .gz).txt" 2>/dev/null \
+        || cp "$t" "$EV/threads-kill3-$(basename "$t").txt" 2>/dev/null || true
+    done
+    rm -rf "$EV/_anrq"
+  fi
+  adb shell "run-as $RMPKG ls -la databases/" > "$EV/dbdir-final.txt" 2>/dev/null || true
+fi
 adb shell "dumpsys notification --noredact" > "$EV/dumpsys-notification-final.txt" 2>/dev/null || true
 adb shell "dumpsys dropbox --print" 2>/dev/null | grep -A30 -iE "data_app_crash|data_app_anr|system_app_crash|system_app_anr|system_server_anr" > "$EV/dropbox-errors.txt" || true
 adb logcat -b all -d > "$EV/logcat-final-full.txt" 2>/dev/null || true
