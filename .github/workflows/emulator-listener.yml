@@ -143,14 +143,13 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
           script: |
             set -e
-            # expression-time resolution (run 41488017578: the runtime $APP_DIR
-            # probe came out EMPTY inside the action's script shell → the adb
-            # line collapsed to /ReplyMate-…; never trust runtime env probes
-            # inside an action script — bake the selection into the text)
-            APP_DIR="${{ inputs.app_ref != '' && 'appsrc' || '.' }}"
-            echo "APP_DIR=$APP_DIR"
+            # android-emulator-runner runs EVERY SCRIPT LINE via its own sh -c —
+            # variables never persist between lines (proven twice: runs
+            # 41488017578 / 41490180194 both show APP_DIR empty after an explicit
+            # assignment). The app path therefore goes INLINE per command,
+            # resolved at Actions-expression time.
             chmod +x tools/emulator/run_scenarios.sh
-            adb install -r "$APP_DIR/ReplyMate-1.7.2-emu-harness.apk"
+            adb install -r "${{ inputs.app_ref != '' && 'appsrc' || '.' }}/ReplyMate-1.7.2-emu-harness.apk"
             adb install -r build/pingposter-com.whatsapp.apk
             adb install -r build/pingposter-com.discord.apk
             mkdir -p evidence
