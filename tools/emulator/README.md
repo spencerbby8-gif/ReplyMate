@@ -60,6 +60,44 @@ artifact bundle.
 7. **Job timeout is 90 min** — 45 was insufficient once WAL snapshots + the
    verified grant ladder joined the loop (run 41345057505 was killed mid-S6).
 
+## Proven vs not-proven (final, run 41384154178)
+
+**Proven on AOSP-34 x86_64 userdebug (synthetic shapes, anchored evidence):**
+- NMS admits + binds the listener; ingest across foreground / background /
+  screen-off / forced Doze / RESTRICTED standby.
+- Force-stop self-heal: process death -> NMS auto-restarts the ENABLED listener
+  -> fresh `bound=true` -> backlog reconcile replays the posted-while-stopped
+  notification. **Stock-Android baseline for the ColorOS/Oppo device question.**
+- WhatsApp FULL chain on one trace (callback->lane -> shape -> PARSED -> ingest
+  stored=3 -> schedule); groups OFF default drops (stored=0, filtered=2);
+  noise gate IGNORED with category-only labels; dedupe across re-posts /
+  late-action upgrades.
+- Discord parser exercised via S9 lab toggle of the SAME `watch.discord` kv key
+  the Settings switch writes: channel shape PARSED events=2 (group-filtered,
+  groups OFF), no-history shape PARSED+stored with structural `reply=N`;
+  restoring OFF re-arms the registry DISABLED fail-closed wall
+  (`last_reason=watch disabled for discord`, counters consistent).
+
+**Platform observations (reproduced, NOT app defects):**
+- `settings delete` revoke of `enabled_notification_listeners` on AOSP-34 did
+  NOT disconnect the live binding in two consecutive runs: no `bound=false`,
+  callbacks kept arriving while `settings get` already returned null. S6
+  branches on this; Settings-UI toggle teardown on real devices is a separate
+  (device-row) question.
+- `am kill` is a no-op here (pid unchanged) — a launcher-visited app with a
+  bound NLS is not in the cached-kill set. Process-death recovery is covered
+  by S5 force-stop only.
+
+**Harness limitations (deliberately honest):**
+- S0 trace-poll gap: while the app DB is born inside the S0 window, the
+  on-device sqlite3 poll does not observe the just-written `bound=true`
+  (capture-heavy path does). S0 verdict therefore ALSO accepts the logcat
+  `RM-NLS: listener connected` line — three independent channels (dumpsys
+  enabled-set + logcat + captured kv) prove the fact.
+- Shapes are SYNTHETIC and labelled so; real WhatsApp/Discord payloads come
+  only from the owner's device rows. AOSP emulator ≠ ColorOS: this harness
+  proves the stock-Android baseline, never OEM behavior.
+
 ## Local run (optional)
 
 ```
