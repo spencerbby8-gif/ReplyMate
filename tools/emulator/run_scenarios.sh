@@ -239,6 +239,7 @@ NID=2000
 say "# ReplyMate emulator listener harness — SCENARIOS (AOSP emulator, synthetic shapes)"
 say ""
 say "device: $(adb shell getprop ro.product.model | tr -d '\r') · sdk=$(adb shell getprop ro.build.version.sdk | tr -d '\r') · build=$(adb shell getprop ro.build.display.id | tr -d '\r')"
+say "app under test ref: ${RM_APP_REF:-(harness branch itself)}"   # fix 15: candidate-validation label
 say ""
 
 # ---------------- baseline ----------------

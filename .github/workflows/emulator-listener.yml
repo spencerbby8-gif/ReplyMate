@@ -31,6 +31,10 @@ on:
         description: "Android API level for the emulator"
         default: "34"
         required: false
+      app_ref:
+        description: "Optional git ref to build the ReplyMate APP from (candidate validation, e.g. a fix branch). Harness tools/workflows always come from the branch this workflow runs on; only the app-under-test swaps. Default '': build this branch's app."
+        default: ""
+        required: false
 
 permissions:
   contents: read
@@ -58,8 +62,33 @@ jobs:
       # (Same fix release.yml already uses.) Pin our own writable dir.
       REPLYMATE_SDK: ${{ github.workspace }}/.engine-sdk
     steps:
-      - name: Checkout
+      - name: "Checkout (harness branch — tools + workflow)"
         uses: actions/checkout@v4
+
+      - name: Checkout app source (only when validating a candidate ref)
+        if: ${{ inputs.app_ref != '' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.app_ref }}
+          path: appsrc
+
+      # Owner rule: the existing JVM gate runs UNCHANGED before any emulator
+      # scenario, against the app actually under test.
+      - name: Set up JDK 17 (gate)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: JVM gate (run_tests.sh) on the app under test
+        env:
+          RM_APP_REF: ${{ inputs.app_ref }}
+        run: |
+          set -e
+          APP_DIR="."
+          [ -n "$RM_APP_REF" ] && APP_DIR="appsrc"
+          chmod +x "$APP_DIR/scripts/run_tests.sh" || true
+          ( cd "$APP_DIR" && bash scripts/run_tests.sh )
 
       - name: Verify KVM availability (explicit — never silently degrade)
         run: |
@@ -74,13 +103,17 @@ jobs:
           echo "KVM: PRESENT"
 
       - name: Build ReplyMate harness APK (ephemeral key + debug-mode)
+        env:
+          RM_APP_REF: ${{ inputs.app_ref }}
         run: |
           set -e
+          APP_DIR="."
+          [ -n "$RM_APP_REF" ] && APP_DIR="appsrc"
           mkdir -p "$REPLYMATE_SECRETS"
-          chmod +x engine/build.sh scripts/*.sh || true
-          RM_DEBUG_MODE=1 VERSION_CODE=919 VERSION_NAME=1.7.2-emu-harness \
-            bash engine/build.sh
-          APK="ReplyMate-1.7.2-emu-harness.apk"
+          chmod +x "$APP_DIR/engine/build.sh" "$APP_DIR"/scripts/*.sh || true
+          ( cd "$APP_DIR" && RM_DEBUG_MODE=1 VERSION_CODE=919 VERSION_NAME=1.7.2-emu-harness \
+            bash engine/build.sh )
+          APK="$APP_DIR/ReplyMate-1.7.2-emu-harness.apk"
           BT="$(dirname "$(find .engine-sdk/build-tools -name apksigner | head -1)")"
           HARNESS_SHA="$("$BT/apksigner" verify --print-certs "$APK" \
             | sed -n 's/.*SHA-256 digest: //p' | head -1)"
@@ -114,12 +147,16 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
           script: |
             set -e
+            APP_DIR="."
+            [ -n "$RM_APP_REF" ] && APP_DIR="appsrc"
             chmod +x tools/emulator/run_scenarios.sh
-            adb install -r ReplyMate-1.7.2-emu-harness.apk
+            adb install -r "$APP_DIR/ReplyMate-1.7.2-emu-harness.apk"
             adb install -r build/pingposter-com.whatsapp.apk
             adb install -r build/pingposter-com.discord.apk
             mkdir -p evidence
             bash tools/emulator/run_scenarios.sh "$PWD/evidence" 2>&1 | tee evidence/runner.log
+        env:
+          RM_APP_REF: ${{ inputs.app_ref }}
 
       - name: Upload diagnostic artifacts
         if: always()
