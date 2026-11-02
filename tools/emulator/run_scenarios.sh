@@ -172,21 +172,43 @@ capture() {  # $1=scenario-tag
   line ""
 }
 
-wait_trace() {  # $1=regex $2=timeout-s ; live kv poll (WAL-aware, light)
-  local pat="$1" max="$2" i=0
-  while [ $i -lt "$max" ]; do
-    kv_snapshot /tmp/.harness-kv.db light
-    if python3 -c "
-import sqlite3,json,sys
+# fix 8 — anchored, atomic verdict polls. Runs ≤41352701042 evidence of two
+# poll-path defects and their exact symptoms: (1) wait_trace matched ANY line
+# in the 12-deep ring with no timestamp anchor → stale committed lines made
+# S5/S6a read ✗ ('UNEXPECTED capture') and S6b read ✓ off an old bound=true;
+# (2) the light snapshot cats db and -wal separately → salt mismatch silently
+# discards fresh WAL rows, which is how S0 read ✗ while the captured (heavy)
+# file visibly contained bound=true written at 21:46:44.9, inside the window.
+# Polls now read the key on-device through sqlite3 (one atomic WAL-aware view,
+# no checkpoint cost — the ~17min blowout was FULL checkpoints, not reads)
+# and only accept lines with ts newer than a watermark taken just before the
+# gated action.
+trace_hwm() {  # prints newest listener.trace ts (0 when ring empty/unreadable)
+  adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db \"SELECT value FROM app_kv WHERE key='listener.trace'\"" 2>/dev/null \
+    | python3 -c "
+import sys, json
+raw = sys.stdin.read().strip()
 try:
-    con=sqlite3.connect('/tmp/.harness-kv.db')
-    r=con.execute(\"SELECT value FROM app_kv WHERE key='listener.trace'\").fetchone()
-    if r and r[0]:
-        for o in json.loads(r[0]):
-            import re
-            if re.search('$1', o.get('line','')): sys.exit(0)
-except Exception: pass
-sys.exit(1)"; then return 0; fi
+    print(max(int(o.get('ts', 0)) for o in json.loads(raw)) if raw else 0)
+except Exception:
+    print(0)"
+}
+
+wait_trace() {  # $1=regex $2=timeout-s $3=hwm ; anchored on-device poll
+  local pat="$1" max="$2" hwm="${3:-0}" i=0
+  while [ $i -lt "$max" ]; do
+    if adb shell "run-as $RMPKG /system/bin/sqlite3 databases/replymate.db \"SELECT value FROM app_kv WHERE key='listener.trace'\"" 2>/dev/null \
+      | python3 -c "
+import sys, json, re
+pat, hwm = sys.argv[1], int(sys.argv[2])
+raw = sys.stdin.read().strip()
+try:
+    for o in json.loads(raw) if raw else []:
+        if int(o.get('ts', 0)) > hwm and re.search(pat, o.get('line', '')):
+            sys.exit(0)
+except Exception:
+    pass
+sys.exit(1)" "$pat" "$hwm"; then return 0; fi
     sleep 1; i=$((i+1))
   done
   return 1
@@ -203,12 +225,13 @@ say "## S0 baseline (launch + access + first bind)"
 adb shell pm grant "$RMPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
 adb shell pm grant "$WAPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
 adb shell pm grant "$DCPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
+HWM=$(trace_hwm)
 grant_nls
 adb shell monkey -p "$RMPKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 i=0; while [ $i -lt 20 ] && [ -z "$(adb_pid)" ]; do sleep 1; i=$((i+1)); done
 say "  pid0=$(adb_pid || echo none)"
 adb shell "dumpsys package $RMPKG" > "$EV/dumpsys-package-$RMPKG.txt" 2>/dev/null || true
-wait_trace "bound=true (onListenerConnected)" 30 \
+wait_trace "bound=true (onListenerConnected)" 30 "$HWM" \
   && say "  S0: first bind observed (bound=true) ✓" \
   || say "  S0: no bound=true within 30s of enable+launch ✗"
 capture s0-baseline
@@ -216,60 +239,95 @@ capture s0-baseline
 # ---------------- S1 foreground ----------------
 say "## S1 FOREGROUND (ReplyMate visibly open)"
 adb shell monkey -p "$RMPKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 2
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 30 && say "  S1: ingest boundary reached ✓" || say "  S1: NO ingest line within 30s ✗"
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+wait_trace "ingest · $WAPKG" 30 "$HWM" && say "  S1: ingest boundary reached ✓" || say "  S1: NO ingest line within 30s ✗"
 capture s1-foreground
 
 # ---------------- S2 background ----------------
 say "## S2 BACKGROUND (Home only — no swipe-kill)"
 adb shell input keyevent KEYCODE_HOME; sleep 30
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 30 && say "  S2: ingest boundary reached ✓" || say "  S2: NO ingest line within 30s ✗"
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+wait_trace "ingest · $WAPKG" 30 "$HWM" && say "  S2: ingest boundary reached ✓" || say "  S2: NO ingest line within 30s ✗"
 capture s2-background
 
 # ---------------- S3 screen-off ----------------
 say "## S3 SCREEN-OFF (sleep 60s → post → wake→read)"
 adb shell input keyevent KEYCODE_SLEEP; sleep 60
-post "$WAPKG" wa-11 $((NID+=1))
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
 sleep 8
 adb shell input keyevent KEYCODE_WAKEUP; sleep 3
-wait_trace "ingest · $WAPKG" 20 && say "  S3: ingest boundary reached ✓" || say "  S3: NO ingest line ✗"
+wait_trace "ingest · $WAPKG" 20 "$HWM" && say "  S3: ingest boundary reached ✓" || say "  S3: NO ingest line ✗"
 capture s3-screenoff
 
 # ---------------- S4 am kill (trim) ----------------
 say "## S4 PROCESS KILL — am kill (trim class; NOT force-stop)"
 ADB_BEFORE=$(adb_pid); say "  pid before kill: $ADB_BEFORE"
 adb shell am kill "$RMPKG"; sleep 3; say "  pid after kill: $(adb_pid || echo dead)"
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 45 && say "  S4: capture resumed after am kill ✓" || say "  S4: NO capture after am kill ✗"
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+wait_trace "ingest · $WAPKG" 45 "$HWM" && say "  S4: capture resumed after am kill ✓" || say "  S4: NO capture after am kill ✗"
 say "  pid now: $(adb_pid || echo none)"
 capture s4-amkill
 
 # ---------------- S5 force-stop ----------------
 say "## S5 FORCE-STOP (hard stop; separate control — NOT a kill simulation)"
 adb shell am force-stop "$RMPKG"; sleep 2; say "  pid after force-stop: $(adb_pid || echo dead)"
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 20 && say "  S5: UNEXPECTED capture while force-stopped ✗" || say "  S5: no capture while force-stopped (honest stock-Android semantics) ✓"
+# run 41352701042 proved AOSP-34 NMS auto-restarts an ENABLED listener from
+# stopped state (force-stop ~21:55:02 → am_proc_start 21:55:22 → bound=true
+# 21:55:45 → backlog reconcile delivered the posted-while-stopped notif). So
+# post-force-stop capture is legitimate ONLY through a fresh rebind chain —
+# verify that chain instead of blanket-flagging any capture.
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+if wait_trace "ingest · $WAPKG" 25 "$HWM"; then
+  wait_trace "bound=true" 5 "$HWM" >/dev/null 2>&1 \
+    && say "  S5: capture after force-stop WITH a fresh bound=true — NMS auto-rebind recovery confirmed ✓ (stock self-heal baseline for the ColorOS comparison)" \
+    || say "  S5: capture after force-stop WITHOUT new bound=true — UNEXPLAINED, investigate ✗"
+else
+  say "  S5: no capture while force-stopped (listener stayed down — valid on builds without NMS auto-rebind)"
+fi
 capture s5-forcestop
 say "  relaunching…"
 adb shell monkey -p "$RMPKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 5
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 30 && say "  S5b: capture after relaunch ✓" || say "  S5b: STILL no capture after relaunch ✗"
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+wait_trace "ingest · $WAPKG" 30 "$HWM" && say "  S5b: capture after relaunch ✓" || say "  S5b: STILL no capture after relaunch ✗"
 capture s5-relaunch
 
 # ---------------- S6 listener toggle (disconnect while alive) ----------------
 say "## S6 LISTENER TOGGLE (access OFF/ON — exercises onListenerDisconnected + requestRebind recovery)"
 adb logcat -c
+# run 41352701042 proved a settings-delete revoke may NOT tear down the live
+# binding on AOSP-34 ('Deleted 1 rows', get → null, yet NO bound=false ever
+# and a callback k#b3243f20 delivered 21:57:46 AFTER the delete). Detect the
+# disconnect first and branch honestly — a 'capture while disallowed' verdict
+# is only meaningful when the listener was actually disconnected.
+HWM=$(trace_hwm)
 revoke_nls
-sleep 4
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 10 && say "  S6a: UNEXPECTED capture while disallowed ✗" || say "  S6a: no capture while disallowed ✓ (expected)"
+if wait_trace "bound=false" 30 "$HWM"; then
+  say "  S6a: onListenerDisconnected fired after revoke ✓ (revoke really torn down)"
+  DISC=1
+else
+  say "  S6a: NO bound=false within 30s of settings-delete revoke — platform observation: AOSP-34 adb-level revoke keeps the live binding (differs from Settings-UI toggle teardown on devices)"
+  DISC=0
+fi
+HWM2=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+if [ "$DISC" = 1 ]; then
+  wait_trace "ingest · $WAPKG" 10 "$HWM2" && say "  S6a-post: UNEXPECTED capture while genuinely disconnected ✗" || say "  S6a-post: no capture while disconnected ✓ (expected)"
+else
+  wait_trace "ingest · $WAPKG" 10 "$HWM2" \
+    && say "  S6a-post: callback still delivered — consistent with the never-disconnected binding (platform state, not an app defect)" \
+    || say "  S6a-post: no callback while disallowed"
+fi
 capture s6-disallowed
+HWGRANT=$(trace_hwm)
 grant_nls
-say "  access re-enabled; watching for bound=true via requestRebind within 40s…"
-wait_trace "bound=true" 40 && say "  S6b: LF-L1 reconnect sequence OBSERVED ✓" || say "  S6b: no bound=true within 40s after re-enable ✗"
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 30 && say "  S6c: post-reconnect capture ✓" || say "  S6c: no post-reconnect capture ✗"
+say "  access re-enabled"
+if [ "$DISC" = 1 ]; then
+  wait_trace "rebind requested" 15 "$HWM" && say "  S6b: ListenerRebind fired on disconnect ✓" || say "  S6b: disconnect seen but NO rebind-requested line ✗"
+  wait_trace "bound=true" 40 "$HWGRANT" && say "  S6b: LF-L1 reconnect sequence OBSERVED ✓" || say "  S6b: no bound=true within 40s after re-enable ✗"
+else
+  say "  S6b: n/a on this stack — binding never dropped, so continuity (not reconnect) is being observed; disconnect→requestRebind recovery on AOSP is only exercised via S4/S5 process-death binds"
+fi
+HWM4=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+wait_trace "ingest · $WAPKG" 30 "$HWM4" && say "  S6c: capture after re-enable ✓" || say "  S6c: no capture after re-enable ✗"
 capture s6-reenabled
 
 # ---------------- S7 doze / standby ----------------
@@ -279,14 +337,14 @@ say "## S7 DOZE + STANDBY RESTRICTED (temporary device states)"
 adb shell dumpsys battery unplug >/dev/null 2>&1
 adb shell input keyevent KEYCODE_SLEEP; sleep 3
 adb shell dumpsys deviceidle force-idle; sleep 3
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 25 && say "  S7a: capture under forced Doze ✓" || say "  S7a: no capture under forced Doze ✗"
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+wait_trace "ingest · $WAPKG" 25 "$HWM" && say "  S7a: capture under forced Doze ✓" || say "  S7a: no capture under forced Doze ✗"
 adb shell dumpsys deviceidle unforce >/dev/null 2>&1
 adb shell dumpsys battery reset >/dev/null 2>&1
 adb shell input keyevent KEYCODE_WAKEUP; sleep 3
 adb shell am set-standby-bucket "$RMPKG" restricted 2>/dev/null; sleep 3
-post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 25 && say "  S7b: capture in RESTRICTED standby ✓" || say "  S7b: no capture in RESTRICTED standby ✗"
+HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
+wait_trace "ingest · $WAPKG" 25 "$HWM" && say "  S7b: capture in RESTRICTED standby ✓" || say "  S7b: no capture in RESTRICTED standby ✗"
 adb shell am set-standby-bucket "$RMPKG" active 2>/dev/null; sleep 2
 capture s7-doze-standby
 
