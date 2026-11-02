@@ -1,0 +1,130 @@
+name: emulator-listener
+
+# ReplyMate Android-emulator listener harness. HARNESS ONLY:
+#  * zero product-code changes (engine flag defaults off: the release path is
+#    untouched; RM_DEBUG_MODE is set ONLY here and only stamps aapt2's output
+#    binary so the harness can run-as/pull diagnostics from the test APK)
+#  * isolated TEST signing: a fresh ephemeral key generated per run; the
+#    production keystore/secrets are never referenced (asserted in logs)
+#  * runs automatically for ANY PR changing these harness paths, and manually
+#    via workflow_dispatch once present on the default branch
+#
+# Runs the real ReplyMate NotificationListenerService on a stock AOSP Android
+# emulator against REAL NotificationManager notifications posted by PingPoster
+# (installed as com.whatsapp / com.discord on a clean emulator with neither app
+# present). All notification SHAPES are synthetic and labelled as such: this
+# harness produces genuine-platform-delivery + real-ReplyMate-pipeline evidence.
+# It is NOT genuine app-integration evidence and proves NOTHING about
+# Oppo/ColorOS (which needs the owner's physical device).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/emulator-listener.yml"
+      - "tools/pingposter/**"
+      - "tools/emulator/**"
+      - "engine/build.sh"
+  workflow_dispatch:
+    inputs:
+      api_level:
+        description: "Android API level for the emulator"
+        default: "34"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emulator-listener-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  listener-scenarios:
+    runs-on: ubuntu-latest
+    # 45 was real-world insufficient (run 41345057505 hit it mid-S6 once the
+    # WAL snapshot + verified grant ladder joined the loop); 90 leaves double
+    # headroom even with every scenario red.
+    timeout-minutes: 90
+    # harness-only ephemeral signing key location. A plain runner-local path:
+    # the `runner` context is NOT available at any env scope per GitHub's
+    # context-availability rules (validated with actionlint) — nothing else
+    # on the runner uses this directory, so isolation is still total and
+    # production secrets stay unreferenced.
+    env:
+      REPLYMATE_SECRETS: /tmp/replymate-harness-keys
+      # ubuntu runners ship a READ-ONLY preinstalled Android SDK at $ANDROID_HOME;
+      # the engine would die trying to chmod/unzip the PINNED toolchain into it.
+      # (Same fix release.yml already uses.) Pin our own writable dir.
+      REPLYMATE_SDK: ${{ github.workspace }}/.engine-sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify KVM availability (explicit — never silently degrade)
+        run: |
+          set -e
+          uname -r
+          if [ ! -e /dev/kvm ]; then
+            echo "FATAL: /dev/kvm ABSENT — this runner cannot hardware-accelerate the"
+            echo "emulator; refusing to pretend otherwise (owner rule: verify KVM first)."
+            exit 1
+          fi
+          ls -la /dev/kvm
+          echo "KVM: PRESENT"
+
+      - name: Build ReplyMate harness APK (ephemeral key + debug-mode)
+        run: |
+          set -e
+          mkdir -p "$REPLYMATE_SECRETS"
+          chmod +x engine/build.sh scripts/*.sh || true
+          RM_DEBUG_MODE=1 VERSION_CODE=919 VERSION_NAME=1.7.2-emu-harness \
+            bash engine/build.sh
+          APK="ReplyMate-1.7.2-emu-harness.apk"
+          BT="$(dirname "$(find .engine-sdk/build-tools -name apksigner | head -1)")"
+          HARNESS_SHA="$("$BT/apksigner" verify --print-certs "$APK" \
+            | sed -n 's/.*SHA-256 digest: //p' | head -1)"
+          echo "harness signing cert SHA-256: $HARNESS_SHA"
+          PROD="b15f2f37fce19b564683fe6b85725a9d3192df93181ef2f36286b5e21c6a85ed"
+          if [ "$HARNESS_SHA" = "$PROD" ]; then
+            echo "FATAL: harness build was signed with the PRODUCTION key — aborting."
+            exit 1
+          fi
+          echo "SIGNING ISOLATION OK: harness cert != production cert"
+          "$BT/aapt2" dump badging "$APK" | grep -E "^package|debuggable" || true
+          mkdir -p evidence
+          cp "$APK" evidence/
+
+      - name: Build PingPoster (com.whatsapp + com.discord packages)
+        run: |
+          set -e
+          chmod +x tools/pingposter/build.sh
+          PP_PKG=com.whatsapp bash tools/pingposter/build.sh build/pingposter-com.whatsapp.apk
+          PP_PKG=com.discord  bash tools/pingposter/build.sh build/pingposter-com.discord.apk
+          cp build/pingposter-com.whatsapp.apk build/pingposter-com.discord.apk evidence/
+
+      - name: Boot emulator + run scenarios (API ${{ inputs.api_level || '34' }})
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api_level || '34' }}
+          target: default
+          arch: x86_64
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
+          script: |
+            set -e
+            chmod +x tools/emulator/run_scenarios.sh
+            adb install -r ReplyMate-1.7.2-emu-harness.apk
+            adb install -r build/pingposter-com.whatsapp.apk
+            adb install -r build/pingposter-com.discord.apk
+            mkdir -p evidence
+            bash tools/emulator/run_scenarios.sh "$PWD/evidence" 2>&1 | tee evidence/runner.log
+
+      - name: Upload diagnostic artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-listener-evidence
+          path: evidence/
+          if-no-files-found: warn

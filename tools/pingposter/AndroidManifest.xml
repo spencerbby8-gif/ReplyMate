@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PingPoster — HARNESS-ONLY test app (never shipped). Its package id is
+     stamped at build time (__PPKG__) as com.whatsapp or com.discord so that
+     ReplyMate's REAL NotificationListenerService sees REAL platform-posted
+     notifications travelling the real package→registry→parser route on a CLEAN
+     emulator (no genuine WhatsApp/Discord apps or accounts are present). The
+     notification SHAPES are synthetic (built from the official MessagingStyle
+     documentation) and are labelled synthetic in every artifact they appear in.
+     This is genuine NotificationManager DELIVERY evidence, not genuine app
+     integration evidence. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="__PPKG__">
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:label="PingPoster"
+        android:allowBackup="false">
+        <activity
+            android:name="com.pingposter.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
