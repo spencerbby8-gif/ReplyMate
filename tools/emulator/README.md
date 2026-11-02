@@ -88,6 +88,37 @@ artifact bundle.
   bound NLS is not in the cached-kill set. Process-death recovery is covered
   by S5 force-stop only.
 
+**Resolved investigations (runs 41386158198 / 41404621261 / 41407382911):**
+- **Foreground→background PID churn (2409→3720 / 2403→3739 / 2721→3978, three
+  consecutive runs) is ANR error-handling, NOT background trimming.**
+  exit-info records: ReplyMate killed with reason=6 ANR, description
+  'user request after error: executing service …RmNotificationListener';
+  trace recorded ~07:47:31 / kill executed ~07:52:23 — a ~5-min DEFERRED
+  resolution sweep that happens to land in the S1→S2 window (HOME press is
+  timing coincidence, not cause). SystemUI is killed in the same sweep from
+  its OWN 'executing service …KeyguardService' ANR, then respawn-dies again
+  ('timeout publishing content providers' / 'start timeout') — chronic on this
+  CI image, which also ANR-kills phone/ext.services/system_server/bluetooth in
+  the same windows (contention storm).
+  **Pulled stack record (anr_…gz): main thread state=D inside fdatasync ←
+  `SQLiteConnection.setJournalMode` (PRAGMA journal_mode=WAL commit) — i.e.
+  synchronous DB journal fsync on the main thread during listener-service
+  bring-up**, stretched past the exec timeout by CI disk/CPU contention.
+  Attribution: environment amplifies every synchronous IO into an ANR here;
+  the app-side factor (main-thread journal/fsync work on the service start
+  path) is real and stack-proven — a product-side improvement candidate,
+  owner-gated, NOT part of this harness scope and not claimed as the Oppo
+  failure cause.
+- **Disconnect-while-granted is platform-forbidden for third-party callers:**
+  pingposter `rebind-rm` → `SecurityException: Package com.replymate.app is
+  not owned by uid 10142` (twice). Stock AOSP delivers onListenerDisconnected
+  only on revoke / package-update / user-switch. **LF-L1
+  disconnect→requestRebind→reconnect is therefore marked UNTESTED-in-harness**
+  (S0 admission + S5 process-death rebind remain verified); genuine
+  disconnected-state recovery is exercised only by real OEM unbind events —
+  i.e. on the owner device — or by a product-side debug hook the owner has
+  not approved.
+
 **Harness limitations (deliberately honest):**
 - S0 trace-poll gap: while the app DB is born inside the S0 window, the
   on-device sqlite3 poll does not observe the just-written `bound=true`
