@@ -79,6 +79,8 @@ public final class AppContainer {
     private final UsageStore usageStore;
     private com.replymate.core.auth.SessionStore sessionStore;      // lazy (P-auth)
     private com.replymate.core.auth.SupabaseAuth supabaseAuth;      // lazy (P-auth)
+    private com.replymate.core.listener.DiagQueue diagQueue;         // lazy (P-anr-startup)
+    private com.replymate.core.listener.RebindGate rebindGate;       // lazy (P-anr-startup)
 
     public AppContainer(Context context) {
         Context applicationContext = context.getApplicationContext();
@@ -286,6 +288,35 @@ public final class AppContainer {
 
     public KvStore kv() {
         return this.kvStore;
+    }
+
+    /** P-anr-startup: the async diagnostic writer (trace ring, lifecycle scalars).
+     *  Lazy; construction does NO disk IO — the IO lane only runs on enqueue. */
+    public synchronized com.replymate.core.listener.DiagQueue diagQueue() {
+        if (diagQueue == null) {
+            diagQueue = new com.replymate.core.listener.DiagQueue(kvStore, clock,
+                new java.util.concurrent.Executor() {
+                    @Override public void execute(Runnable r) {
+                        com.replymate.app.platform.Tasks.diag(r);
+                    }
+                });
+        }
+        return diagQueue;
+    }
+
+    /** P-anr-startup: the main-thread-safe rebind throttle (memory-first; the
+     *  durable stamp is seeded/persisted on the diagnostics lane). Lazy, IO-free. */
+    public synchronized com.replymate.core.listener.RebindGate rebindGate() {
+        if (rebindGate == null) {
+            rebindGate = new com.replymate.core.listener.RebindGate(kvStore, clock,
+                new java.util.concurrent.Executor() {
+                    @Override public void execute(Runnable r) {
+                        com.replymate.app.platform.Tasks.diag(r);
+                    }
+                });
+            rebindGate.seedAsync();
+        }
+        return rebindGate;
     }
 
     /** P-auth: local auth session persistence (guest or signed-in). */

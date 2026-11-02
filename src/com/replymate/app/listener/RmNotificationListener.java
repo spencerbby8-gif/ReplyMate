@@ -79,9 +79,8 @@ public final class RmNotificationListener extends NotificationListenerService {
         final AppContainer c = ReplyMateApp.containerOf(this);
         if (c == null) return;
         // P-listener-foundation §3: the only thing that may ever mark us bound.
-        com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-            "bound=true (onListenerConnected)");
-        c.kv().put("listener.connected_at", String.valueOf(c.clock().now()));
+        c.diagQueue().trace("bound=true (onListenerConnected)");
+        c.diagQueue().put("listener.connected_at", String.valueOf(c.clock().now()));
         c.logger().i("NLS", "listener connected");
         // P-background-4 (restart self-heal): on every (re)bind, re-run the watched
         // pipeline once over everything still ACTIVE. Notifications posted while we
@@ -133,10 +132,9 @@ public final class RmNotificationListener extends NotificationListenerService {
         if (ACTIVE == this) ACTIVE = null;
         AppContainer c = ReplyMateApp.containerOf(this);
         if (c != null) {
-            c.kv().put("listener.disconnected_at", String.valueOf(c.clock().now()));
+            c.diagQueue().put("listener.disconnected_at", String.valueOf(c.clock().now()));
             c.logger().w("NLS", "listener disconnected");
-            com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                "bound=false (onListenerDisconnected)");
+            c.diagQueue().trace("bound=false (onListenerDisconnected)");
             // P-listener-foundation §4: official recovery point. Docs
             // (developer.android.com): after this callback "you will not receive
             // any events ... and may only call requestRebind(ComponentName) at
@@ -173,8 +171,7 @@ public final class RmNotificationListener extends NotificationListenerService {
                 // P-listener-foundation §3: first link of the boundary trace.
                 // Key is hashed (k#…): re-posts of the SAME notification are
                 // recognizable across lines without persisting the platform key.
-                com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                    "callback→lane · " + cbPkg + " · k#"
+                c.diagQueue().trace("callback→lane · " + cbPkg + " · k#"
                         + com.replymate.core.listener.ListenerTrace.keyTag(cbKey)
                         + " · bound=" + (ACTIVE != null));
                 process(sbn, c);
@@ -192,13 +189,11 @@ public final class RmNotificationListener extends NotificationListenerService {
                 bump(c, KV_PARSE_ERRORS);
                 ringLine(c, "extract error · " + pkg + " · " + boom.getClass().getSimpleName());
                 c.logger().e("NLS", "extract failed", boom);
-                com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                    "extract · " + pkg + " · error · " + boom.getClass().getSimpleName());
+                c.diagQueue().trace("extract · " + pkg + " · error · " + boom.getClass().getSimpleName());
                 return;
             }
             if (raw == null) {
-                com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                    "extract · " + pkg + " · null (nothing readable)");
+                c.diagQueue().trace("extract · " + pkg + " · null (nothing readable)");
                 return;
             }
             if (getPackageName(c).equals(pkg)) return;      // never ingest our own pings
@@ -222,18 +217,15 @@ public final class RmNotificationListener extends NotificationListenerService {
                     return;                                  // drop BEFORE processing; stats recorded
                 case IGNORED:
                     bump(c, KV_UNPARSED);                    // watched app, nothing readable/supported
-                    com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                        "route · " + pkg + " · IGNORED · " + reasonLabel(out.reason));
+                    c.diagQueue().trace("route · " + pkg + " · IGNORED · " + reasonLabel(out.reason));
                     return;
                 case FAILED:
                     ringLine(c, "parse fail · " + pkg + " · " + safe(out.reason));
                     c.logger().w("NLS", "parser FAIL " + pkg + ": " + safe(out.reason));
-                    com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                        "route · " + pkg + " · FAILED · " + reasonLabel(out.reason));
+                    c.diagQueue().trace("route · " + pkg + " · FAILED · " + reasonLabel(out.reason));
                     return;
                 case PARSED:
-                    com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                        "route · " + pkg + " · PARSED · events=" + out.events.size());
+                    c.diagQueue().trace("route · " + pkg + " · PARSED · events=" + out.events.size());
                     break;
                 default:
                     return;
@@ -245,8 +237,7 @@ public final class RmNotificationListener extends NotificationListenerService {
                 IngestReport rep = engine.handle(out.events, enabled);
                 // P-listener-foundation §3: the storage/aggregation boundary —
                 // numbers only (no bodies, no names).
-                com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                    "ingest · " + pkg + " · " + rep.summary());
+                c.diagQueue().trace("ingest · " + pkg + " · " + rep.summary());
                 for (IngestReport.PingRequest ping : rep.pings) {
                     NotifierPings.schedule(c.app(), ping);
                     // P-background: remember where this conversation's quick-reply
@@ -261,8 +252,7 @@ public final class RmNotificationListener extends NotificationListenerService {
                         c.kv(), ping.contactId, sbn);
                     com.replymate.app.assistant.AssistantRunner.schedule(c, ping);
                     // P-listener-foundation §3: last link — generation scheduling.
-                    com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                        "schedule · " + pkg + " · contact#" + ping.contactId);
+                    c.diagQueue().trace("schedule · " + pkg + " · contact#" + ping.contactId);
                 }
                 // P-intelligence-1: learn from replies the owner typed by hand inside
                 // the chat app (the same MessagingStyle history that just stored an
