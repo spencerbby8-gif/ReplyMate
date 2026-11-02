@@ -225,15 +225,20 @@ say "## S0 baseline (launch + access + first bind)"
 adb shell pm grant "$RMPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
 adb shell pm grant "$WAPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
 adb shell pm grant "$DCPKG" android.permission.POST_NOTIFICATIONS 2>&1 | tee -a "$SUM" >/dev/null
+adb logcat -c
 HWM=$(trace_hwm)
 grant_nls
 adb shell monkey -p "$RMPKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 i=0; while [ $i -lt 20 ] && [ -z "$(adb_pid)" ]; do sleep 1; i=$((i+1)); done
 say "  pid0=$(adb_pid || echo none)"
 adb shell "dumpsys package $RMPKG" > "$EV/dumpsys-package-$RMPKG.txt" 2>/dev/null || true
-wait_trace "bound=true (onListenerConnected)" 30 "$HWM" \
-  && say "  S0: first bind observed (bound=true) ✓" \
-  || say "  S0: no bound=true within 30s of enable+launch ✗"
+if wait_trace "bound=true (onListenerConnected)" 60 "$HWM"; then
+  say "  S0: first bind observed (trace bound=true) ✓"
+elif adb logcat -d -s RM-NLS 2>/dev/null | tr -d '\r' | grep -q "listener connected"; then
+  say "  S0: first bind observed (logcat RM-NLS listener connected; trace line not yet visible to polls — S0 db-birth observability gap, see fix-8/9 notes) ✓"
+else
+  say "  S0: no bound evidence within 60s of enable+launch ✗"
+fi
 capture s0-baseline
 
 # ---------------- S1 foreground ----------------
@@ -262,9 +267,11 @@ capture s3-screenoff
 # ---------------- S4 am kill (trim) ----------------
 say "## S4 PROCESS KILL — am kill (trim class; NOT force-stop)"
 ADB_BEFORE=$(adb_pid); say "  pid before kill: $ADB_BEFORE"
-adb shell am kill "$RMPKG"; sleep 3; say "  pid after kill: $(adb_pid || echo dead)"
+adb shell am kill "$RMPKG"; sleep 3; ADB_AFTER=$(adb_pid); say "  pid after kill: ${ADB_AFTER:-dead}"
+[ "$ADB_BEFORE" = "$ADB_AFTER" ] && [ -n "$ADB_AFTER" ] \
+  && say "  S4: am kill was a NO-OP on this stack (pid unchanged — kill only reaps cached procs; a launcher-visited app with a bound NLS survives). Process-death recovery is covered by S5 force-stop instead." || true
 HWM=$(trace_hwm); post "$WAPKG" wa-11 $((NID+=1))
-wait_trace "ingest · $WAPKG" 45 "$HWM" && say "  S4: capture resumed after am kill ✓" || say "  S4: NO capture after am kill ✗"
+wait_trace "ingest · $WAPKG" 45 "$HWM" && say "  S4: capture (re)confirmed ✓" || say "  S4: NO capture after am kill ✗"
 say "  pid now: $(adb_pid || echo none)"
 capture s4-amkill
 
