@@ -105,6 +105,23 @@ jobs:
           set -e
           APP_DIR="${{ inputs.app_ref != '' && 'appsrc' || '.' }}"
           echo "building app source: $APP_DIR"
+          if [ -n "${{ inputs.app_ref }}" ]; then
+            # fix 18: the candidate's OWN engine/build.sh may predate
+            # RM_DEBUG_MODE support. PROVEN: run 41491780011 built
+            # arena/fix-listener-startup-anr with appsrc/engine/build.sh,
+            # which silently IGNORED RM_DEBUG_MODE=1 → the installed APK had
+            # flags=[HAS_CODE ALLOW_CLEAR_USER_DATA] (no DEBUGGABLE) → every
+            # run-as kv evidence check was blind for the whole 25-min run
+            # ('no such table: app_kv' everywhere was a PULL failure, not an
+            # app failure). Overlay the harness-side build.sh: its ONLY delta
+            # is the aapt2 --debug-mode stamp gated on RM_DEBUG_MODE (diffed
+            # into this log for audit, every run). CI workspace only; the
+            # candidate branch's bytes stay untouched.
+            echo "=== audit diff: candidate engine/build.sh → harness engine/build.sh ==="
+            diff "$APP_DIR/engine/build.sh" engine/build.sh || true
+            echo "=== overlaying harness build.sh onto the candidate tree (workspace-only) ==="
+            cp engine/build.sh "$APP_DIR/engine/build.sh"
+          fi
           mkdir -p "$REPLYMATE_SECRETS"
           chmod +x "$APP_DIR/engine/build.sh" "$APP_DIR"/scripts/*.sh || true
           ( cd "$APP_DIR" && RM_DEBUG_MODE=1 VERSION_CODE=919 VERSION_NAME=1.7.2-emu-harness \
@@ -121,6 +138,18 @@ jobs:
           fi
           echo "SIGNING ISOLATION OK: harness cert != production cert"
           "$BT/aapt2" dump badging "$APK" | grep -E "^package|debuggable" || true
+          # fix 18 (build-side fail-fast): without the debuggable stamp every
+          # run-as kv evidence check is blind. aapt2 badging does not print
+          # the attribute — read the manifest xmltree directly.
+          DBG_LINE="$("$BT/aapt2" dump xmltree "$APK" --file AndroidManifest.xml 2>/dev/null \
+            | grep -i debuggable || true)"
+          echo "manifest debuggable attribute: ${DBG_LINE:-<absent>}"
+          if ! echo "$DBG_LINE" | grep -q "0xffffffff"; then
+            echo "FATAL: harness APK is NOT stamped android:debuggable=true —"
+            echo "RM_DEBUG_MODE plumbing broken; refusing to validate blind."
+            exit 1
+          fi
+          echo "DEBUGGABLE STAMP OK: run-as kv evidence channel is available"
           mkdir -p evidence
           cp "$APK" evidence/
 

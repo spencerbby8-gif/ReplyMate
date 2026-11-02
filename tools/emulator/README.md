@@ -120,6 +120,16 @@ artifact bundle.
   not approved.
 
 **Harness limitations (deliberately honest):**
+- Candidate builds are overlay-stamped: when `app_ref` is set the workflow
+  copies the harness-side `engine/build.sh` over the candidate's before
+  building (audit diff printed every run). Proven necessary by run
+  41491780011: a candidate whose own build.sh predates RM_DEBUG_MODE support
+  installs NON-debuggable, and every run-as/kv evidence check then reports
+  `no such table: app_kv` for the WHOLE run — pull failures, not app failures
+  (the candidate was simultaneously ANR-free and healthy: pid constant,
+  dvm_lock_sample showed real DB opens on rm-bg/rm-ingest/rm-diag). Since
+  fix 18 the harness refuses to run blind: build-side xmltree assert +
+  device-side DEBUGGABLE-flag assert both abort before any scenario.
 - S0 trace-poll gap: while the app DB is born inside the S0 window, the
   on-device sqlite3 poll does not observe the just-written `bound=true`
   (capture-heavy path does). S0 verdict therefore ALSO accepts the logcat

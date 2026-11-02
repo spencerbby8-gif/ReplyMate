@@ -242,6 +242,26 @@ say "device: $(adb shell getprop ro.product.model | tr -d '\r') · sdk=$(adb she
 say "app under test ref: ${RM_APP_REF:-(harness branch itself)}"   # fix 15: candidate-validation label
 say ""
 
+# fix 18 (device ground-truth fail-fast): the app under test MUST be installed
+# DEBUGGABLE or every run-as/sqlite3 kv evidence check below (trace_hwm,
+# wait_trace, kv_pull) is silently blind. PROVEN: run 41491780011's candidate
+# was built from an engine/build.sh predating RM_DEBUG_MODE support and
+# installed with flags=[HAS_CODE ALLOW_CLEAR_USER_DATA] — all ~25 minutes of
+# 'no such table: app_kv' artifacts were run-as PULL failures while the app
+# itself was healthy (dvm_lock_sample showed rm-bg/rm-ingest/rm-diag inside
+# SQLiteOpenHelper at first open; zero exceptions; zero ANR). Never burn a
+# 25-minute blind run again.
+PKG_FLAGS="$(adb shell "dumpsys package $RMPKG" 2>/dev/null | tr -d '\r')"
+PKG_LINE="$(echo "$PKG_FLAGS" | grep -m1 'flags=\[' || true)"
+if echo "$PKG_LINE" | grep -q " DEBUGGABLE"; then
+  say "debuggable assert: $PKG_LINE — run-as kv evidence channel ENABLED ✓"
+else
+  say "FATAL: $RMPKG installed WITHOUT the DEBUGGABLE flag ($PKG_LINE)."
+  say "Every run-as/kv check below would be blind (run 41491780011 lesson;"
+  say "fix-18 in workflow build step). Refusing to run a blind validation."
+  exit 1
+fi
+
 # ---------------- baseline ----------------
 # fix 13: enable root for /data/system/procexitstore ANR-trace pulls (userdebug
 # image; graceful no-op elsewhere). Run 41404621261 exit-info proved the pid
