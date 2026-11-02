@@ -78,10 +78,11 @@ public final class RmNotificationListener extends NotificationListenerService {
         ACTIVE = this;
         final AppContainer c = ReplyMateApp.containerOf(this);
         if (c == null) return;
-        // P-listener-foundation §3: the only thing that may ever mark us bound.
-        com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-            "bound=true (onListenerConnected)");
-        c.kv().put("listener.connected_at", String.valueOf(c.clock().now()));
+        // P-anr-startup: lifecycle callbacks run on the main thread — NOTHING here:
+        // no kv, no trace, no SQLite. The bound=true boundary line + connected_at
+        // are written at the HEAD of the capture-lane task below, so ordering
+        // against every other trace line is preserved while the callback stays
+        // I/O-free (logcat logger only — no storage).
         c.logger().i("NLS", "listener connected");
         // P-background-4 (restart self-heal): on every (re)bind, re-run the watched
         // pipeline once over everything still ACTIVE. Notifications posted while we
@@ -98,6 +99,11 @@ public final class RmNotificationListener extends NotificationListenerService {
         // without the owner ever opening ReplyMate.
         Tasks.ingest(new Runnable() {
             @Override public void run() {
+                // P-listener-foundation §3 boundary lines — first on the lane, so
+                // they precede anything reconcile() emits for this reconnect.
+                com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
+                    "bound=true (onListenerConnected)");
+                c.kv().put("listener.connected_at", String.valueOf(c.clock().now()));
                 StatusBarNotification[] active;
                 try {
                     active = getActiveNotifications();
@@ -131,19 +137,29 @@ public final class RmNotificationListener extends NotificationListenerService {
     @Override public void onListenerDisconnected() {
         super.onListenerDisconnected();
         if (ACTIVE == this) ACTIVE = null;
-        AppContainer c = ReplyMateApp.containerOf(this);
+        final AppContainer c = ReplyMateApp.containerOf(this);
         if (c != null) {
-            c.kv().put("listener.disconnected_at", String.valueOf(c.clock().now()));
-            c.logger().w("NLS", "listener disconnected");
-            com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
-                "bound=false (onListenerDisconnected)");
+            c.logger().w("NLS", "listener disconnected");    // logcat only — no storage
+            // P-anr-startup: this callback must stay I/O-free. The durable boundary
+            // lines go to the capture lane FIRST (enqueue order = trace order), so
+            // the requestRebind verdict line recorded by ListenerRebind lands after
+            // them — same chronological guarantee the synchronous writes gave.
+            Tasks.ingest(new Runnable() {
+                @Override public void run() {
+                    c.kv().put("listener.disconnected_at", String.valueOf(c.clock().now()));
+                    com.replymate.core.listener.ListenerTrace.line(c.kv(), c.clock(),
+                        "bound=false (onListenerDisconnected)");
+                }
+            });
             // P-listener-foundation §4: official recovery point. Docs
             // (developer.android.com): after this callback "you will not receive
             // any events ... and may only call requestRebind(ComponentName) at
             // this time" — and requestRebind is the ONE call safe in this exact
-            // state. Routed through the single 30s-bounded mechanism so it can
-            // never storm, and it never CLAIMS a bind — ACTIVE stays null until
-            // the system delivers a real onListenerConnected().
+            // state. NEVER deferred beyond this callback: the RebindGate decision
+            // is synchronous and I/O-free, so the request goes out HERE, on this
+            // thread, exactly as before. Routed through the single 30s-bounded
+            // mechanism so it can never storm, and it never CLAIMS a bind — ACTIVE
+            // stays null until the system delivers a real onListenerConnected().
             ListenerRebind.request(c, this, "onListenerDisconnected");
         }
     }
