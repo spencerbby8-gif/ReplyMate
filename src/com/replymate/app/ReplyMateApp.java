@@ -23,7 +23,28 @@ public final class ReplyMateApp extends Application {
             android.util.Log.e("RM-App", "container init failed", e);
         }
         nudgeListenerRebind();
+        warmDatabaseOffMain();
         sweepOnConnectivityReturn();
+    }
+
+    /** P-anr-startup: the first SQLite open (onConfigure → WAL switch → journal
+     *  commit fsync) must never run on the main thread — emulator evidence
+     *  (runs 41386158198/41404621261/41407382911, pulled procexitstore stack)
+     *  showed exactly that chain inside the listener-service bind window
+     *  recording "executing service …RmNotificationListener" ANR and later
+     *  killing the process. The listener path no longer opens the DB on main
+     *  (RebindGate decides from memory; DiagQueue writes async), and this
+     *  background open takes the cold-start fsync cost off any user-facing
+     *  first-read as well. A warmup failure is irrelevant here — real reads
+     *  retry on their own lanes. */
+    private void warmDatabaseOffMain() {
+        final AppContainer c = container;
+        if (c == null) return;
+        com.replymate.app.platform.Tasks.bg(new Runnable() {
+            @Override public void run() {
+                try { c.kv().contains("db.warmup"); } catch (RuntimeException ignored) { }
+            }
+        });
     }
 
     public AppContainer container() { return container; }

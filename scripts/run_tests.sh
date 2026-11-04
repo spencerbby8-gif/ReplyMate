@@ -76,6 +76,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.listener.DiscordGroupAttributionTest \
     com.replymate.core.listener.DeviceShapeContractTest \
     com.replymate.core.listener.ListenerTraceTest \
+    com.replymate.core.listener.RebindGateTest \
+    com.replymate.core.listener.DiagQueueTest \
     com.replymate.core.listener.RebindPolicyTest \
     com.replymate.core.assistant.DeliveryGuardTest \
     com.replymate.core.assistant.TargetRulesTest \

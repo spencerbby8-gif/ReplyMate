@@ -34,9 +34,16 @@ public final class RebindPolicy {
      *  (>60s) also fails open — recovery is the point; the stamp re-arms
      *  immediately so openness cannot become a storm either. */
     public static boolean due(KvStore kv, Clock clock) {
-        long last = lastAttempt(kv);
-        long now = clock.now();
-        return last <= 0L || now - last >= MIN_INTERVAL_MS || now < last - 60_000L;
+        return due(lastAttempt(kv), clock.now());
+    }
+
+    /** P-anr-startup: pure longs form — the caller supplies already-known values
+     *  so the decision needs no kv read (RebindGate calls this from the main
+     *  thread). lastAttempt <= 0 means "never recorded" and decides due. */
+    public static boolean due(long lastAttemptMs, long nowMs) {
+        return lastAttemptMs <= 0L
+            || nowMs - lastAttemptMs >= MIN_INTERVAL_MS
+            || nowMs < lastAttemptMs - 60_000L;
     }
 
     /** Record that a request is about to go out (call BEFORE the API call, so a

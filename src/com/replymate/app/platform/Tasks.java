@@ -74,6 +74,14 @@ public final class Tasks {
         6, 6, 0L, TimeUnit.MILLISECONDS,
         new PriorityBlockingQueue<Runnable>(), named("rm-gen"));
 
+    // P-anr-startup: diagnostics lane — every DIAGNOSTIC kv write (trace ring,
+    // diag ring, lifecycle scalars, rebind stamps) serialized here, so caller
+    // threads (Application.onCreate, NLS lifecycle callbacks, ingest lane)
+    // never execute synchronous SQLite and the trace ring has exactly one
+    // writer (kills the pre-existing cross-lane read-modify-write race too).
+    private static final ExecutorService DIAG = Executors.newSingleThreadExecutor(
+        named("rm-diag"));
+
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private Tasks() { }
@@ -109,6 +117,9 @@ public final class Tasks {
 
     /** Listener capture lane — ordered, never blocked by generation/network. */
     public static void ingest(Runnable r) { INGEST.execute(r); }
+
+    /** Diagnostics lane — single-writer ordering for trace/diag kv writes. */
+    public static void diag(Runnable r) { DIAG.execute(r); }
 
     /** Background generation lane — research/reasoning/provider calls. LIVE
      *  priority: new-message drafts and the owner's own taps. */
