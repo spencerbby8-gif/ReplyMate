@@ -203,6 +203,31 @@ public final class SourcesActivity extends Activity {
             });
             card.addView(groupTv);
 
+            // P21-production §3: Discord server channels are their OWN opt-in —
+            // separate from group DMs, default OFF. Announcement/bot/webhook
+            // posts stay draft-proof even when ON (reply-capability rule).
+            if (channel == com.replymate.core.model.Channel.DISCORD) {
+                final boolean serversOn =
+                    com.replymate.core.listener.ServerGate.allowed(c.kv(), channel);
+                TextView srvTv = Ui.sub(this, "server channels (#…): "
+                    + (serversOn
+                        ? "ON — repliable server messages can be captured"
+                        : "OFF (default) — servers are not conversations here")
+                    + " · tap to change");
+                srvTv.setTextSize(12);
+                srvTv.setTextColor(serversOn ? Ui.GREEN : Ui.ACCENT);
+                srvTv.setPadding(0, Ui.dp(this, 4), 0, 0);
+                srvTv.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        c.kv().put(
+                            com.replymate.core.listener.ServerGate.keyFor(channel),
+                            serversOn ? "0" : "1");
+                        render();
+                    }
+                });
+                card.addView(srvTv);
+            }
+
             TextView statsTv = Ui.sub(this,
                 "received " + stats.receivedOf(ch)
                 + " · parsed " + stats.parsedOf(ch)

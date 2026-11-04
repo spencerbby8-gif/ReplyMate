@@ -189,6 +189,7 @@ public final class DeviceShapeContractTest {
 
     @Test public void whatsappGroupOptInPingsOnce() {
         kv.put(GroupPolicy.KV_GLOBAL, "1");
+        kv.put(ServerGate.keyFor(Channel.DISCORD), "1");   // P21 §3: fixture intent was "server traffic allowed" — servers became a SEPARATE opt-in after these tests were written
         NotifParser.Result r = WatchedApps.defFor(Channel.WHATSAPP).parser.parse(
             whatsappGroup(6000));
         IngestReport rep = engine.handle(r.events, null);
@@ -262,6 +263,7 @@ public final class DeviceShapeContractTest {
 
     @Test public void discordNoHistoryAnnouncementShapeStaysClosed() {
         kv.put(GroupPolicy.KV_GLOBAL, "1");     // groups ON — honesty must survive anyway
+        kv.put(ServerGate.keyFor(Channel.DISCORD), "1");   // P21 §3: fixture intent was "server traffic allowed" — servers became a SEPARATE opt-in after these tests were written
         NotifParser parser = WatchedApps.defFor(Channel.DISCORD).parser;
         NotifParser.Result r = parser.parse(discordChannelNoHistory());
         assertEquals(NotifParser.Result.Kind.EVENTS, r.kind);
