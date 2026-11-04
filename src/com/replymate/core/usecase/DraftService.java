@@ -434,7 +434,8 @@ public final class DraftService {
         }
 
         long t0 = clock.now();
-        Result<ChatReply> reply = provider.generate(request);
+        GenOutcome gen = generateWithFallback(provider, request, why);
+        Result<ChatReply> reply = gen.result;
         long latency = clock.now() - t0;
         if (!reply.ok) {
             log.w("DraftService", "generation failed for contact " + contactId + ": " + reply.error);
@@ -454,7 +455,7 @@ public final class DraftService {
 
         // P-intelligence-6 post-call: capability outcomes are audit metadata.
         if (!r.note.isEmpty()) why.add(r.note);   // honest degradation, verbatim
-        appendCapabilityAudit(why, bundle, gateFired, think, r, provider);
+        appendCapabilityAudit(why, bundle, gateFired, think, r, provider, gen.answeredBy);
 
         // P-ux-fix: (Re)generate REPLACES the current draft instead of stacking duplicate
         // cards. Only untouched drafts are cleared — anything the owner explicitly kept
@@ -466,7 +467,9 @@ public final class DraftService {
 
         long now = clock.now();
         String group = ids.next();
-        String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        String model = gen.answeredBy == null
+            ? (gateway.activeModel() == null ? provider.type() : gateway.activeModel())
+            : gen.answeredBy;
         String snapshot = PromptBuilder.snapshot(request, model, "reply", why,
             auditContextFor(c, lastIncoming, mem));
         int outEach = r.tokensOut > 0 ? Math.max(1, r.tokensOut / r.variants.size()) : 0;
@@ -790,7 +793,8 @@ public final class DraftService {
             return Result.err(SUPERSEDED_ERROR);
         }
         long t0 = clock.now();
-        Result<ChatReply> reply = provider.generate(request);
+        GenOutcome gen = generateWithFallback(provider, request, why);
+        Result<ChatReply> reply = gen.result;
         long latency = clock.now() - t0;
         if (!reply.ok) {
             log.w("DraftService", "compose(" + kind.wire + ") failed for contact "
@@ -804,14 +808,16 @@ public final class DraftService {
         ChatReply r = reply.value;
         if (r.variants.isEmpty()) return Result.err("The provider returned no reply text.");
         if (!r.note.isEmpty()) why.add(r.note);
-        appendCapabilityAudit(why, bundle, gateFired, think, r, provider);
+        appendCapabilityAudit(why, bundle, gateFired, think, r, provider, gen.answeredBy);
 
         int replaced = purgeUnsavedDrafts(contactId);
         if (replaced > 0) why.add("compose replaced " + replaced + " unsaved draft(s)");
 
         long now = clock.now();
         String group = ids.next();
-        String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        String model = gen.answeredBy == null
+            ? (gateway.activeModel() == null ? provider.type() : gateway.activeModel())
+            : gen.answeredBy;
         String snapshot = PromptBuilder.snapshot(request, model, kind.wire, why,
             auditContextFor(c, lastIncoming, mem));
         List<Draft> saved = new ArrayList<Draft>();
@@ -856,6 +862,94 @@ public final class DraftService {
      *  the on-device cache, otherwise asks for the provider's native search
      *  in-call or looks the subject up on the free encyclopedia path. Mutates
      *  bundle + why; returns whether the gate fired. Never throws into a reply. */
+    /** P21-production §7: one provider call WITH a bounded, fully-audited
+     *  fallback chain. The active provider fails (its adapter has already applied
+     *  its own retries) → each other configured, usable provider gets ONE attempt,
+     *  in preference order. Every hop is recorded in the audit notes with its
+     *  provider and model; when a fallback answers, the reply carries an honest
+     *  note naming the fallback. When nothing else is configured the error stands
+     *  — no simulated recovery, ever (owner rule: "no fallback occurred" must
+     *  never again be an unexplained dead end).
+     *  @param why audit notes (nullable; interactive callers pass null) */
+    private GenOutcome generateWithFallback(AiProvider provider,
+            ChatRequest request, java.util.List<String> why) {
+        Result<ChatReply> reply = provider.generate(request);
+        if (reply.ok) return new GenOutcome(reply, primaryModelLabel(provider));
+        String firstErr = shortLine(reply.error);
+        java.util.List<com.replymate.core.model.ProviderDef> chain;
+        try {
+            chain = gateway.fallbackDefs();
+        } catch (RuntimeException boom) {
+            chain = java.util.Collections.emptyList();
+        }
+        int hops = 0;
+        for (com.replymate.core.model.ProviderDef def : chain) {
+            if (hops >= 2) break;                       // bounded: at most 2 extra calls
+            AiProvider next = null;
+            try {
+                next = gateway.buildFor(def);
+            } catch (RuntimeException boom) {
+                next = null;
+            }
+            if (next == null) continue;
+            hops++;
+            String who = def.type.label + " / " + def.modelName;
+            log.w("DraftService", "primary provider failed (" + firstErr
+                + ") — trying fallback " + who);
+            if (why != null) {
+                why.add("fallback hop " + hops + ": primary failed (" + firstErr
+                    + ") → trying " + who);
+            }
+            Result<ChatReply> r2 = next.generate(request);
+            if (r2.ok) {
+                String note = "answered by fallback provider " + who
+                    + " after the primary failed (" + firstErr + ")";
+                if (why != null) why.add(note);
+                // P21 §7: annotate the reply so the owner sees WHICH provider/model
+                // actually answered (capability audit surfaces `note`). withNote keeps
+                // every other field (variants, tokens, limits, search, reasoning).
+                ChatReply val = r2.value;
+                // answeredBy names the FALLBACK model — persisted drafts/usage must
+                // never credit the failed primary for someone else's answer.
+                return new GenOutcome(Result.ok(val.withNote(
+                    val.note.isEmpty() ? note : val.note + " · " + note)),
+                    def.modelName.isEmpty() ? def.type.wire : def.modelName);
+            }
+            firstErr = firstErr + " | fallback " + hops + " (" + who + "): "
+                + shortLine(r2.error);
+            if (why != null) why.add("fallback hop " + hops + " failed too: " + who);
+        }
+        if (hops > 0) {
+            return new GenOutcome(Result.err(reply.error == null ? firstErr
+                : reply.error + "\n(fallback tried " + hops + " other provider(s) — all failed)"),
+                null);
+        }
+        return new GenOutcome(reply, null);
+    }
+
+    /** The display label the OLD persistence code used for the active provider's
+     *  model — extracted so primary answers keep byte-identical attribution. */
+    private String primaryModelLabel(AiProvider provider) {
+        return gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+    }
+
+    /** A generation attempt plus the name of the model that ACTUALLY answered
+     *  (null when the attempt failed — nothing then gets persisted). */
+    private static final class GenOutcome {
+        final Result<ChatReply> result;
+        final String answeredBy;
+        GenOutcome(Result<ChatReply> result, String answeredBy) {
+            this.result = result;
+            this.answeredBy = answeredBy;
+        }
+    }
+
+    private static String shortLine(String err) {
+        if (err == null) return "unknown";
+        String one = err.split("\n", 2)[0].trim();
+        return one.length() > 100 ? one.substring(0, 100) + "…" : one;
+    }
+
     private boolean applyLiveSearchGate(Contact c, AiProvider provider,
             java.util.List<String> searchHearing, List<Message> thread,
             PromptBundle bundle, java.util.List<String> why) {
@@ -963,14 +1057,17 @@ public final class DraftService {
      *  UNCONFIRMED marker for unbillable deeper thinking. */
     private void appendCapabilityAudit(java.util.List<String> why, PromptBundle bundle,
             boolean gateFired, com.replymate.core.reason.Reasoning.Decision think,
-            ChatReply r, AiProvider provider) {
+            ChatReply r, AiProvider provider, String answeringModel) {
         if (gateFired) {
             // live-search generations are metered as their own kind so the usage
             // dashboard prices them honestly: native searches show the provider's
             // token/call figures; free paths (cache, encyclopedia) show zero.
             UsageEvent su = new UsageEvent();
             su.ts = clock.now();
-            su.model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+            // P21 §7: credit the model that answered (a fallback may differ).
+            su.model = answeringModel == null
+                ? (gateway.activeModel() == null ? provider.type() : gateway.activeModel())
+                : answeringModel;
             su.kind = UsageKind.SEARCH;
             su.tokensIn = bundle.requestSearch ? r.tokensIn : 0;
             su.tokensOut = bundle.requestSearch ? r.tokensOut : 0;
@@ -1242,13 +1339,16 @@ public final class DraftService {
         ChatRequest request = PromptBuilder.build(previewBundle);
 
         long t0 = clock.now();
-        Result<ChatReply> reply = provider.generate(request);
+        GenOutcome gen = generateWithFallback(provider, request, null);
+        Result<ChatReply> reply = gen.result;
         if (!reply.ok) return Result.err(reply.error);
         ChatReply r = reply.value;
 
         UsageEvent u = new UsageEvent();
         u.ts = clock.now();
-        u.model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        u.model = gen.answeredBy == null
+            ? (gateway.activeModel() == null ? provider.type() : gateway.activeModel())
+            : gen.answeredBy;
         u.tokensIn = r.tokensIn;
         u.tokensOut = r.tokensOut;
         u.kind = UsageKind.REPLY;
@@ -1293,7 +1393,8 @@ public final class DraftService {
             com.replymate.core.ai.GenerationOpts.defaults());
 
         long t0 = clock.now();
-        Result<ChatReply> reply = provider.generate(request);
+        GenOutcome gen = generateWithFallback(provider, request, null);
+        Result<ChatReply> reply = gen.result;
         long latency = clock.now() - t0;
         if (!reply.ok) {
             log.w("DraftService", "tone transform failed for draft " + draftId + ": " + reply.error);
@@ -1304,7 +1405,9 @@ public final class DraftService {
 
         long now = clock.now();
         String group = ids.next();
-        String model = gateway.activeModel() == null ? provider.type() : gateway.activeModel();
+        String model = gen.answeredBy == null
+            ? (gateway.activeModel() == null ? provider.type() : gateway.activeModel())
+            : gen.answeredBy;
         java.util.List<String> why = new java.util.ArrayList<String>();
         why.add("tone transform: " + tone.label);
         why.add("rewrite-only request — no profile, style rules or thread history was sent");

@@ -119,6 +119,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.memory.MemoryContinuityTest \
     com.replymate.core.budget.TokenBudgeterTest \
     com.replymate.core.usecase.DraftServiceTest \
+    com.replymate.core.usecase.ProviderFallbackTest \
     com.replymate.core.usecase.DraftServiceToneTest \
     com.replymate.core.usecase.ContactServiceTest \
     com.replymate.core.usecase.ContactPurgeTest \
@@ -182,6 +183,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.provider.AnthropicApiTest \
     com.replymate.provider.GeminiDiscoveryTest \
     com.replymate.provider.DiagnosticsTest \
+    com.replymate.core.provider.ProviderHealthTest \
     com.replymate.provider.GeminiCandidatesFallbackTest \
     com.replymate.provider.GeminiGroundingTest \
     com.replymate.provider.AnthropicCapsTest \

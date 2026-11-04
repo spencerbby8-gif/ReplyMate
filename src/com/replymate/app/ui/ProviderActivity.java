@@ -95,22 +95,37 @@ public final class ProviderActivity extends Activity {
         sub.append(def.modelName.isEmpty() ? "no model selected" : def.modelName);
         sub.append(def.type.needsKey ? (hasKey ? " · key saved" : " · key missing!")
             : " · no key needed");
-        // P-background-12: health wording reflects the LAST REAL PROBE only —
-        // "key saved" states storage, never reachability. A successful connection
-        // test stamps "tested ✓ <when>"; a failed one is surfaced as such.
-        String probe = c.kv().get("provider.health." + def.type.wire, "");
-        if (probe.startsWith("ok|")) {
-            try {
-                long at = Long.parseLong(probe.substring(3));
-                sub.append(" · tested ✓ ").append(
-                    com.replymate.core.util.TimeFmt.dayTime(at));
-            } catch (NumberFormatException ignored) { }
-        } else if (probe.startsWith("fail|")) {
-            try {
-                long at = Long.parseLong(probe.substring(5));
-                sub.append(" · last test FAILED ").append(
-                    com.replymate.core.util.TimeFmt.dayTime(at));
-            } catch (NumberFormatException ignored) { }
+        // P-background-12 + P21 §7: health wording reflects the LAST REAL PROBE
+        // only, and that probe is MODEL-SCOPED — "key saved" states storage, never
+        // reachability, and a ✓ earned on another model/key never vouches for this
+        // row. Mismatched or model-less legacy marks say so plainly.
+        com.replymate.core.provider.ProviderHealth.Mark probe =
+            com.replymate.core.provider.ProviderHealth.decode(
+                c.kv().get(com.replymate.core.provider.ProviderHealth.keyFor(def.type.wire), ""));
+        boolean staleModel = false;
+        if (probe != null) {
+            String when = probe.millis > 0
+                ? " " + com.replymate.core.util.TimeFmt.dayTime(probe.millis) : "";
+            if (probe.ok) {
+                if (probe.model.isEmpty()) {
+                    sub.append(" · tested ✓").append(when)
+                        .append(" (model not recorded — re-test to trust this)");
+                    staleModel = true;
+                } else if (!probe.model.equals(def.modelName)) {
+                    sub.append(" · ✓ was for model \"").append(probe.model)
+                        .append("\"").append(when)
+                        .append(" — model changed, test again");
+                    staleModel = true;
+                } else {
+                    sub.append(" · ✓ this model tested").append(when);
+                }
+            } else {
+                sub.append(" · last test FAILED")
+                    .append(probe.model.isEmpty() ? "" : " (" + probe.model + ")")
+                    .append(when);
+            }
+        } else if (!def.modelName.isEmpty()) {
+            sub.append(" · this model not tested yet");
         }
         // P-intelligence-3: mode badge per row (detected, not declared)
         sub.append(" · ").append(com.replymate.core.privacy.ProviderPrivacy.badge(
@@ -128,7 +143,7 @@ public final class ProviderActivity extends Activity {
             + "  ·  " + def.type.label;
         texts.addView(Ui.tv(this, title, 16.0f, Ui.PRIMARY));
         TextView subTv = Ui.sub(this, sub.toString());
-        if (!hasKey || probe.startsWith("fail|")) subTv.setTextColor(Ui.RED);
+        if (!hasKey || staleModel || (probe != null && !probe.ok)) subTv.setTextColor(Ui.RED);
         else if (def.isActive) subTv.setTextColor(Ui.GREEN);
         subTv.setPadding(0, Ui.dp(this, 2), 0, 0);
         texts.addView(subTv);

@@ -181,6 +181,16 @@ public final class AppContainer {
                     return null;
                 }
             }
+
+            @Override // com.replymate.core.ports.ProviderGateway
+            public java.util.List<ProviderDef> fallbackDefs() {
+                return AppContainer.this.fallbackProviderDefs();
+            }
+
+            @Override // com.replymate.core.ports.ProviderGateway
+            public AiProvider buildFor(ProviderDef def) {
+                return AppContainer.this.buildProviderForDef(def);
+            }
         };
         this.gateway = providerGateway;
         this.draftService = new DraftService(sqlContactStore, sqlMessageStore, sqlStyleStore, profileService, sqlDraftStore, sqlUsageStore, providerGateway, uuidGen, systemClock, wrap, styleService, learningService, memoryService);
@@ -259,6 +269,45 @@ public final class AppContainer {
     public synchronized void invalidateProvider() {
         this.cachedProvider = null;
         this.cachedSignature = null;
+    }
+
+    /** P21-production §7: fallback candidates — every configured provider except the
+     *  active one, in store order, restricted to rows that could actually serve a
+     *  call right now (model picked; key present when the type requires one). */
+    java.util.List<ProviderDef> fallbackProviderDefs() {
+        try {
+            ProviderDef active = this.providerStore.active();
+            java.util.List<ProviderDef> out = new java.util.ArrayList<ProviderDef>();
+            for (ProviderDef d : this.providerStore.all()) {
+                if (d == null || (active != null && d.id == active.id)) continue;
+                if (d.modelName == null || d.modelName.trim().isEmpty()) continue;
+                if (d.type.needsKey) {
+                    String s = d.keyRef.isEmpty() ? null : this.secretVault.getSecret(d.keyRef);
+                    if (s == null || s.trim().isEmpty()) continue;
+                }
+                out.add(d);
+            }
+            return out;
+        } catch (RuntimeException e) {
+            this.logger.e("DI", "fallback provider scan failed", e);
+            return java.util.Collections.emptyList();
+        }
+    }
+
+    /** Build an adapter for one stored def (fallback path — never cached, so it can
+     *  never displace the active provider's cache/signature pair). */
+    AiProvider buildProviderForDef(ProviderDef def) {
+        if (def == null) return null;
+        try {
+            String key = def.keyRef.isEmpty() ? "" : this.secretVault.getSecret(def.keyRef);
+            if (key == null) key = "";
+            if (def.type.needsKey && key.trim().isEmpty()) return null;
+            return com.replymate.provider.ProviderFactory.build(
+                def, key, new HttpClient(), new RetryPolicy(), this.logger);
+        } catch (RuntimeException e) {
+            this.logger.e("DI", "fallback provider build failed", e);
+            return null;
+        }
     }
 
     /** Application context for platform helpers (deep links, package manager). */
