@@ -44,6 +44,13 @@ public final class MessagingStyleParser implements NotifParser {
                 String text = trim(raw.text);
                 if (text.isEmpty()) text = trim(raw.bigText);
                 if (text.isEmpty()) return Result.ignore("no readable message content");
+                // P21-production §2: status LIKES / REACTIONS / RESHARES carry no
+                // MessagingStyle and no conversation — never a draft target. A real
+                // status REPLY is a normal chat message (with history) and is NOT
+                // touched here.
+                if (ContentSignals.isStatusNotice(text)) {
+                    return Result.ignore("status like/react/reshare notice");
+                }
                 // P-intelligence-7: app service-summary geometry ("23 new messages",
                 // "you have new messages", "tap to view…") is chrome, never a human
                 // message — dropped before it can become a conversation.

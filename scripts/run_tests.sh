@@ -151,6 +151,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.prompt.PromptSecurityTest \
     com.replymate.core.auth.AuthFlowTest \
     com.replymate.core.listener.StatusFilterTest \
+    com.replymate.core.listener.StatusNoticeTest \
     com.replymate.core.listener.IdentityResolverTest \
     com.replymate.core.listener.TextIdsTest \
     com.replymate.core.listener.MessageClassifierTest \

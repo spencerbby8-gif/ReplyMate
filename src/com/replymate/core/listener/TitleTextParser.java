@@ -97,6 +97,12 @@ public class TitleTextParser implements NotifParser {
             String title = MessagingStyleParser.trim(raw.title);
             String sender = senderFrom(raw, text);
             String body = bodyFrom(raw, text, sender);
+            // P21-production §2: status-notice notices on the title/text path —
+            // same strict no-history provenance gate as MessagingStyleParser's
+            // fallback (a chat message with history can never match).
+            if (raw.messages.isEmpty() && ContentSignals.isStatusNotice(body)) {
+                return Result.ignore("status like/react/reshare notice");
+            }
             // P-intelligence-7: service-summary geometry is chrome, never a person.
             if (NoiseGate.isSummaryGeometry(body)) {
                 return Result.ignore("service summary: " + body);
