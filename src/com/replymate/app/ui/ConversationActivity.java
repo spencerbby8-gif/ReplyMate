@@ -46,7 +46,7 @@ import java.util.Set;
 
 /** S04 — Conversation: thread (with in-thread search), manual capture buttons,
  *  AI draft cards (Edit / Copy / Regenerate / Delete / Favorite + tone transforms
- *  + open-in-source-app via official deep links), prompt-audit entry point.
+ *  + open-in-source-app via official deep links). P21 §8: the developer-style prompt-audit button was removed from the conversation header — audit records stay internal (prompt snapshots still persist per draft; Diagnostics carries the user-facing view).
  *  Layout contract preserved from P2 (same view ids), features are additive. */
 public final class ConversationActivity extends Activity {
 
@@ -103,13 +103,6 @@ public final class ConversationActivity extends Activity {
             @Override public void onClick(View v) {
                 Intent i = new Intent(ConversationActivity.this, ContactEditActivity.class);
                 i.putExtra("contact_id", contact.id);
-                startActivity(i);
-            }
-        });
-        findViewById(R.id.audit_btn).setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                Intent i = new Intent(ConversationActivity.this, PromptAuditActivity.class);
-                i.putExtra(PromptAuditActivity.EXTRA_CONTACT_ID, contact.id);
                 startActivity(i);
             }
         });
