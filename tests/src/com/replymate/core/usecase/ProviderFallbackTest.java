@@ -172,6 +172,50 @@ public class ProviderFallbackTest {
                 || r.error.contains("fallback 1"));
     }
 
+    @Test public void ownerOffSwitchMeansNoProviderBeyondThePrimaryIsEverContacted() {
+        // P21-review §7-audit consent: the Settings toggle is the contract — OFF
+        // must mean the backup provider is never even called, and the failure
+        // surfaces the ORIGINAL error unedited (and nothing is persisted).
+        Fakes.FakeProvider primary = Fakes.FakeProvider.failing("HTTP 502 backend not-found");
+        Fakes.FakeProvider fb = Fakes.FakeProvider.returning("must never be sent for");
+        Fakes.GatewayFake gw = new Fakes.GatewayFake(primary);
+        gw.fallbacks.add(def(61, ProviderType.DEEPSEEK, "deepseek-chat"));
+        gw.byId.put(61L, fb);
+
+        DraftService svc = service(gw);
+        Fakes.KvStoreFake liveKv = new Fakes.KvStoreFake();
+        liveKv.put(com.replymate.core.privacy.FallbackPolicy.KV_ENABLED, "0");
+        svc.setLiveKv(liveKv);
+        Result<DraftOutcome> r = svc.generateForContact(1);
+
+        assertFalse(r.ok);
+        assertEquals("the backup was: never", 0, fb.calls);
+        assertTrue(r.error.contains("HTTP 502 backend not-found"));
+        assertFalse(r.error.contains("fallback"));
+        assertEquals(0, drafts.saved.size());
+        assertEquals(0, usage.events.size());
+    }
+
+    @Test public void ownerOnSwitchKeepsTheChainAlive() {
+        // control for the consent gate: default/"1" state leaves P21 §7 behavior
+        // exactly as designed.
+        Fakes.FakeProvider primary = Fakes.FakeProvider.failing("boom");
+        Fakes.FakeProvider fb = Fakes.FakeProvider.returning("backup answer");
+        Fakes.GatewayFake gw = new Fakes.GatewayFake(primary);
+        gw.fallbacks.add(def(62, ProviderType.KIMI, "kimi-latest"));
+        gw.byId.put(62L, fb);
+
+        DraftService svc = service(gw);
+        Fakes.KvStoreFake liveKv = new Fakes.KvStoreFake();
+        liveKv.put(com.replymate.core.privacy.FallbackPolicy.KV_ENABLED, "1");
+        svc.setLiveKv(liveKv);
+        Result<DraftOutcome> r = svc.generateForContact(1);
+
+        assertTrue(r.ok);
+        assertEquals(1, fb.calls);
+        assertEquals("kimi-latest", drafts.saved.get(0).model);
+    }
+
     @Test public void primarySuccessNeverTouchesFallbacksAndCreditsThePrimary() {
         Fakes.FakeProvider primary = Fakes.FakeProvider.returning("straight from the top");
         Fakes.FakeProvider fb = Fakes.FakeProvider.returning("never used");

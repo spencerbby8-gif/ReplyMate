@@ -160,4 +160,38 @@ public final class DiscordCategoriesTest {
         e.group = true; e.channel = Channel.WHATSAPP; e.conversationTitle = "#chants";
         assertFalse("gate is Discord-scoped", ServerGate.isServerEvent(e));
     }
+
+    /* ---------------- P21-review: the '#'-substring mis-route, pinned ---------- */
+
+    @Test public void groupDmContainingHashStaysAGroupDm() {
+        // P21-review finding: a substring '#' check mis-routed a group DM named
+        // "Weekend #crew" into the OFF-by-default server bucket; its genuine
+        // replies were silently dropped. The marker must LEAD.
+        Run r = drive(ParserFixtures.styleGroup("com.discord", "Weekend #crew",
+                "mira", "there?"), "watch.discord", "1",
+            GroupPolicy.KV_GLOBAL, "1");
+        assertNotNull(r.rep);
+        assertEquals("a group DM whose name merely CONTAINS '#' is still a group DM",
+            1, r.rep.stored);
+        assertEquals(1, r.rep.pings.size());
+
+        NotifEvent e = new NotifEvent();
+        e.channel = Channel.DISCORD; e.group = true; e.conversationTitle = "Weekend #crew";
+        assertFalse(ServerGate.isServerEvent(e));
+    }
+
+    @Test public void groupDmLiterallyNamedLeadingHashIsServerFailClosedButNeverLost() {
+        // documented residual: "#squad" reads structurally like a channel —
+        // fail-CLOSED by default, recoverable via the opt-in; never a silent 1:1.
+        NotifEvent e = new NotifEvent();
+        e.channel = Channel.DISCORD; e.group = true; e.conversationTitle = "#squad";
+        assertTrue("leading '#' = server marker by contract", ServerGate.isServerEvent(e));
+        Run r = drive(server("#squad", "zee", "yo", true, true),
+            "watch.discord", "1", GroupPolicy.KV_GLOBAL, "1");
+        assertNotNull(r.rep);
+        assertEquals(0, r.rep.stored);   // server gate is fail-closed…
+        Run on = drive(server("#squad", "zee", "yo", true, true),
+            "watch.discord", "1", "servers.enabled.discord", "1");
+        assertEquals(1, on.rep.stored);  // …and the owner opt-in recovers it
+    }
 }

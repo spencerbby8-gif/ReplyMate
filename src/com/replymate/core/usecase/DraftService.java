@@ -873,8 +873,27 @@ public final class DraftService {
      *  @param why audit notes (nullable; interactive callers pass null) */
     private GenOutcome generateWithFallback(AiProvider provider,
             ChatRequest request, java.util.List<String> why) {
+        String labelAtCall = gateway.activeModel();       // attribution confidence
         Result<ChatReply> reply = provider.generate(request);
-        if (reply.ok) return new GenOutcome(reply, primaryModelLabel(provider));
+        if (reply.ok) {
+            String labelNow = gateway.activeModel();
+            if (why != null && labelNow != null && !labelNow.equals(
+                    labelAtCall == null ? "" : labelAtCall)) {
+                // P21-review: the owner edited the provider/model while a call
+                // was in flight — say the label may reflect the pre-edit state.
+                why.add("active model changed while generating (now " + labelNow
+                    + ") — model attribution on this draft may be stale");
+            }
+            String label = labelAtCall == null ? provider.type() : labelAtCall;
+            return new GenOutcome(reply, label);
+        }
+        if (!com.replymate.core.privacy.FallbackPolicy.enabled(liveKv)) {
+            // P21-review consent: explicit owner OFF — the real error stands,
+            // no other provider ever sees the content.
+            if (why != null) why.add("cross-provider fallback is OFF in Settings"
+                + " — no backup provider was contacted; the error stands");
+            return new GenOutcome(reply, null);
+        }
         String firstErr = shortLine(reply.error);
         java.util.List<com.replymate.core.model.ProviderDef> chain;
         try {
@@ -925,12 +944,6 @@ public final class DraftService {
                 null);
         }
         return new GenOutcome(reply, null);
-    }
-
-    /** The display label the OLD persistence code used for the active provider's
-     *  model — extracted so primary answers keep byte-identical attribution. */
-    private String primaryModelLabel(AiProvider provider) {
-        return gateway.activeModel() == null ? provider.type() : gateway.activeModel();
     }
 
     /** A generation attempt plus the name of the model that ACTUALLY answered

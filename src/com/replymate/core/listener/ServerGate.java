@@ -42,10 +42,17 @@ public final class ServerGate {
 
     /** Structural server-channel tell for one parsed event. Discord-only today —
      *  other apps' channel surfaces are handled by their own gates (Slack's '#'
-     *  convention is documented in the support matrix, not changed here). */
+     *  convention is documented in the support matrix, not changed here).
+     *  P21-review tightening: the marker must LEAD ("#general", "#general · HQ").
+     *  A group DM merely CONTAINING '#' ("Study #crew") stays a group DM — the
+     *  substring match mis-routed those into the (default-OFF) server bucket.
+     *  Residual, fail-closed either way: a group DM literally NAMED "#…" is a
+     *  server here (dropped unless opted in, never drafted silently; if Discord
+     *  drops the marker one day, events degrade to the groups gate, also OFF
+     *  by default). */
     public static boolean isServerEvent(NotifEvent e) {
         if (e == null || e.channel != Channel.DISCORD || !e.group) return false;
-        String t = e.conversationTitle == null ? "" : e.conversationTitle;
-        return t.indexOf('#') >= 0;
+        String t = e.conversationTitle == null ? "" : e.conversationTitle.trim();
+        return t.startsWith("#");
     }
 }

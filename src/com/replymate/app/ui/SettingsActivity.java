@@ -93,6 +93,32 @@ public final class SettingsActivity extends Activity {
         root.addView(providerRow);
         root.addView(Ui.divider(this));
 
+        // P21-review §7-audit: cross-provider fallback is an owner CONSENT
+        // decision — a backup provider receives the draft content with ITS OWN
+        // key, billing and privacy mode. Default ON (the §7 defect was "no
+        // fallback"); every hop is audited and the saved draft names the model
+        // that actually answered. The built-in shared key can never be a
+        // fallback target while the owner runs their own key.
+        Ui.ToggleRow fallbackRow = Ui.toggleRow(this, "Cross-provider fallback",
+            "when the active provider fails a draft, each other provider YOU"
+            + " configured gets one try (max 2) — its own key, billing and"
+            + " privacy rules apply, and nothing extra is sent while off");
+        fallbackRow.sw.setChecked(
+            com.replymate.core.privacy.FallbackPolicy.enabled(c.kv()));
+        fallbackRow.sw.setOnCheckedChangeListener(
+            new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(
+                        android.widget.CompoundButton b, boolean on) {
+                    c.kv().put(com.replymate.core.privacy.FallbackPolicy.KV_ENABLED,
+                        on ? "1" : "0");
+                    Ui.setRowSub(fallbackRow.row, on
+                        ? "on — a failing provider gets up to 2 backup tries on your other providers"
+                        : "off — the original error stands; no other provider is contacted");
+                }
+            });
+        root.addView(fallbackRow.row);
+        root.addView(Ui.divider(this));
+
         addSection("NOTIFICATION SOURCES");
         listenRow = Ui.row(this, "Message listening", "");
         listenRow.setOnClickListener(new View.OnClickListener() {
@@ -252,6 +278,14 @@ public final class SettingsActivity extends Activity {
                 startActivity(new Intent(SettingsActivity.this, DiagnosticsActivity.class));
             }
         });
+        root.addView(Ui.divider(this));
+
+        LinearLayout auditRow = Ui.row(this, "Prompt audit (per contact, read-only)",
+            "the exact text sent to your provider for any draft, stored on this phone");
+        auditRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickPromptAuditContact(); }
+        });
+        root.addView(auditRow);
         root.addView(Ui.divider(this));
 
         addSection("ABOUT");
@@ -689,6 +723,37 @@ public final class SettingsActivity extends Activity {
             : s.isGuest()
                 ? "guest session (local-only) — tap to sign in"
                 : s.email + " · " + (s.provider.isEmpty() ? "email" : s.provider));
+    }
+
+    /** P21-review: contact picker for the read-only prompt audit (drafts only —
+     *  a contact without drafts has nothing to show). */
+    private void pickPromptAuditContact() {
+        java.util.List<com.replymate.core.model.Contact> all = c.contacts().all();
+        final java.util.List<com.replymate.core.model.Contact> withDrafts =
+            new java.util.ArrayList<com.replymate.core.model.Contact>();
+        for (com.replymate.core.model.Contact ct : all) {
+            if (!c.drafts().byContact(ct.id, 1).isEmpty()) withDrafts.add(ct);
+        }
+        if (withDrafts.isEmpty()) {
+            Toast.makeText(this, "No drafts yet — a prompt audit appears after the first draft",
+                Toast.LENGTH_LONG).show();
+            return;
+        }
+        final String[] names = new String[withDrafts.size()];
+        for (int i = 0; i < withDrafts.size(); i++) names[i] = withDrafts.get(i).displayName;
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Prompt audit — pick a contact")
+            .setItems(names, new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface d, int which) {
+                    android.content.Intent i = new android.content.Intent(
+                        SettingsActivity.this, PromptAuditActivity.class);
+                    i.putExtra(PromptAuditActivity.EXTRA_CONTACT_ID,
+                        withDrafts.get(which).id);
+                    startActivity(i);
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
     /** Active provider line for the Settings hub (friendly diagnostics, no secrets). */

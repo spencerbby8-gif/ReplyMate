@@ -271,16 +271,18 @@ public final class AppContainer {
         this.cachedSignature = null;
     }
 
-    /** P21-production §7: fallback candidates — every configured provider except the
-     *  active one, in store order, restricted to rows that could actually serve a
-     *  call right now (model picked; key present when the type requires one). */
+    /** P21-production §7 + P21-review §7-audit: fallback candidates, filtered by
+     *  the ONE core rule-set (FallbackPolicy): active excluded, model-less rows
+     *  out, and the built-in SHARED free key is never a fallback while the owner
+     *  runs on their own key (a private thread must never silently downgrade to
+     *  a training-eligible key). This layer then drops needsKey rows with no
+     *  usable credential in the vault (the vault cannot live in core). */
     java.util.List<ProviderDef> fallbackProviderDefs() {
         try {
             ProviderDef active = this.providerStore.active();
             java.util.List<ProviderDef> out = new java.util.ArrayList<ProviderDef>();
-            for (ProviderDef d : this.providerStore.all()) {
-                if (d == null || (active != null && d.id == active.id)) continue;
-                if (d.modelName == null || d.modelName.trim().isEmpty()) continue;
+            for (ProviderDef d : com.replymate.core.privacy.FallbackPolicy
+                    .candidates(this.providerStore.all(), active)) {
                 if (d.type.needsKey) {
                     String s = d.keyRef.isEmpty() ? null : this.secretVault.getSecret(d.keyRef);
                     if (s == null || s.trim().isEmpty()) continue;
@@ -295,15 +297,20 @@ public final class AppContainer {
     }
 
     /** Build an adapter for one stored def (fallback path — never cached, so it can
-     *  never displace the active provider's cache/signature pair). */
+     *  never displace the active provider's cache/signature pair). The resolved key
+     *  registers with the log scrubber exactly like the active provider's key —
+     *  an echo of it in any log line becomes "***" either way. */
     AiProvider buildProviderForDef(ProviderDef def) {
         if (def == null) return null;
         try {
             String key = def.keyRef.isEmpty() ? "" : this.secretVault.getSecret(def.keyRef);
             if (key == null) key = "";
             if (def.type.needsKey && key.trim().isEmpty()) return null;
-            return com.replymate.provider.ProviderFactory.build(
+            AiProvider built = com.replymate.provider.ProviderFactory.build(
                 def, key, new HttpClient(), new RetryPolicy(), this.logger);
+            // P21-review: hygiene parity with providerOrNull() (line ~230).
+            if (!key.trim().isEmpty()) registerSensitive(key);
+            return built;
         } catch (RuntimeException e) {
             this.logger.e("DI", "fallback provider build failed", e);
             return null;

@@ -112,6 +112,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.privacy.BuiltInSetupTest \
     com.replymate.core.privacy.SecretsTest \
     com.replymate.core.privacy.RedactorTest \
+    com.replymate.core.privacy.FallbackPolicyTest \
     com.replymate.core.memory.LongChatMemoryTest \
     com.replymate.core.memory.FactNormalizerTest \
     com.replymate.core.memory.MemoryMergeTest \
