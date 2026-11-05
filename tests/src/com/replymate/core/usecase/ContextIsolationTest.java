@@ -112,7 +112,7 @@ public class ContextIsolationTest {
             || provider.lastRequest.system.contains("amara thread line 1"));
         // (c) A's pinned fact + learned style arrive
         assertTrue(req, req.contains("mum's shop in Wuse 2"));
-        assertTrue(req, req.contains("approved replies"));
+        assertTrue(req, req.contains("your own messages"));   // P22 provenance-neutral wording
         // (d) NOTHING from Uche — thread, latest, fact, summary, style
         assertFalse("B leaked into the request", req.contains("UCHE-SECRET"));
         assertFalse(req, req.contains("Uche"));

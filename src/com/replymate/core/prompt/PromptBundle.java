@@ -75,6 +75,15 @@ public final class PromptBundle {
      *  0 = unknown ⇒ legacy behavior (byte-identical). */
     public long answeredWatermark;
 
+    /* P22 (tone-system consistency fix): the EFFECTIVE resolved level of the
+     * LENGTH voice control (contact override > global > control default),
+     * mirrored into the hard Rules clause so the generation contract can never
+     * contradict the LENGTH dial (detailed/OFF used to coexist with a hard
+     * "usually 1–3 short sentences" rule — the dial lied). -1 = unspecified
+     * ⇒ legacy clause bytes (transforms/old tests that never set it).
+     * DraftService fills it for every real generation and every preview. */
+    public int lengthLevel = -1;
+
     public PromptBundle(ProfileService.Profile profile, Contact contact, String styleRules,
                         List<Message> thread) {
         this(profile, contact, styleRules, thread, "", null, "");

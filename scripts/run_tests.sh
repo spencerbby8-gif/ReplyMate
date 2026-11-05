@@ -100,6 +100,9 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.prompt.ThreadMapperTest \
     com.replymate.core.prompt.PromptAuditCompletenessTest \
     com.replymate.core.prompt.VoiceCharterTest \
+    com.replymate.core.prompt.LengthRulesConsistencyTest \
+    com.replymate.core.learning.WritingSamplesTest \
+    com.replymate.core.usecase.NaturalnessContractTest \
     com.replymate.core.style.StyleSettingsTest \
     com.replymate.core.style.StyleServiceTest \
     com.replymate.core.style.LearningPrecedenceTest \
