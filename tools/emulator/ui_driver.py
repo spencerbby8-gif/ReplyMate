@@ -209,6 +209,8 @@ REQ_LOG = os.path.join(MOCK_DIR, "requests.jsonl")
 _tls_ok = False
 _req_n = [0]
 
+_fail = [False]                    # S9b: force the mock provider down
+
 REPLY_VARIANTS = [
     "omo say less, 4pm still works for me",
     "lol noted, we move",
@@ -248,6 +250,11 @@ class Handler(BaseHTTPRequestHandler):
         with open(REQ_LOG, "a") as f:
             f.write(json.dumps({"ts": time.time(), "seq": _req_n[0],
                                 "path": self.path, "body": body}) + "\n")
+        if _fail[0]:
+            # S9b: honest provider outage, recorded like any other request
+            self._send(503, {"error": {"message": "mock outage (harness-forced)",
+                                       "type": "server_error"}})
+            return
         blob = json.dumps(body)
         # the provider-editor contract probe ("Reply with exactly: RM-OK")
         if "RM-OK" in blob:
@@ -652,6 +659,40 @@ def s9_banner_regen():
         "workingCard=%s freshCard=%s mockRoundTrip=%s (%s.png,%s.png)"
         % (w is not None, fresh, regen_called, fn, fn2))
 
+def s9b_banner_regen_failure_feedback():
+    """P22-fix companion: provider DOWN at tap time must never look like a dead
+    button — the working card resolves to an honest 'Couldn't regenerate' state.
+    On the pre-fix candidate (6d03767) this scenario is EXPECTED-RED: that red IS
+    the emulator reproduction of the owner's physical-device report."""
+    _fail[0] = True
+    try:
+        n, _ = wait_for("Regenerate", timeout=10)
+        if n is None:
+            click_text("Draft reply for", timeout=6)
+            n, _ = wait_for("Regenerate", timeout=8)
+        if n is None:
+            rec("FAIL", "S9b", "fresh card's Regenerate action not visible")
+            shot("s9b-no-action")
+            return
+        tap_node(n)
+        t0 = time.time()
+        honest = False
+        while time.time() - t0 < 75:
+            d = dev_out(["shell", "dumpsys", "notification", "--noredact"],
+                        timeout=30)
+            if "Couldn't regenerate" in d:
+                honest = True
+                break
+            time.sleep(3)
+        fn = shot("s9b-honest-failure")
+        rec("PASS" if honest else "FAIL", "S9b",
+            "provider down + Regenerate tap -> honest outcome card, never a "
+            "dead button (the owner's exact complaint)",
+            "honestCard=%s (%s.png)" % (honest, fn))
+    finally:
+        _fail[0] = False
+
+
 def press_home():
     sh_ok("input keyevent 3")
     time.sleep(1)
@@ -717,6 +758,7 @@ def main():
         if s6_provider_setup():
             s7_preview_pipeline()
             s9_banner_regen()
+            s9b_banner_regen_failure_feedback()
         else:
             rec("SKIP", "S7/S9", "provider-dependent phases",
                 "provider setup failed")
