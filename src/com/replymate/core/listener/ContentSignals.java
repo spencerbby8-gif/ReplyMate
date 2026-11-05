@@ -136,6 +136,32 @@ public final class ContentSignals {
         return BARE_WORDS.contains(norm) ? null : k;
     }
 
+    /** P21-production §2 (owner order): status-notice detection for the
+     *  no-MessagingStyle single-shot branch ONLY. "Liked your status" / "Reacted
+     *  ❤️ to your status" / "Reshared your status" are NOT conversation messages —
+     *  a draft for them is nonsense (there is nothing to reply TO).
+     *  Evidence rules, mirroring this class's honesty contract:
+     *   - canonical app phrasing matched on NORMALIZED text (exact or tight
+     *     prefix+suffix), never fuzzy contains against a human sentence;
+     *   - the CALLER guarantees provenance (no MessagingStyle history = it is not
+     *     a chat message). A genuine status REPLY arrives as a normal chat message
+     *     WITH MessagingStyle history and can never match here;
+     *   - deliberately limited to likes / reactions / reshares: nothing else
+     *     status-shaped is filtered, so a real status-mention or reply survives. */
+    public static boolean isStatusNotice(String text) {
+        String t = normalize(text);
+        if (t.isEmpty()) return false;
+        if (t.equals("liked your status") || t.equals("loved your status")
+                || t.equals("liked your status update") || t.equals("loved your status update")
+                || t.equals("reshared your status") || t.equals("re-shared your status")) {
+            return true;
+        }
+        // "reacted <emoji> to your status" — both the verb prefix AND the
+        // status destination are required.
+        if (t.startsWith("reacted ") && t.endsWith("to your status")) return true;
+        return false;
+    }
+
     /** Missed/declined-call event text (WhatsApp: \"Missed voice call\", …). Kept
      *  contains-based on \"missed\"/\"declined\" + \"call\" because apps append details;
      *  only consulted together with the notification's call category. */

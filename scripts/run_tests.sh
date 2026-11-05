@@ -57,6 +57,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.util.ResultTest \
     com.replymate.core.ui.SplashChoreoTest \
     com.replymate.core.assistant.AssistantPlannerTest \
+    com.replymate.core.assistant.AlertCycleTest \
     com.replymate.core.assistant.JobCoalescerTest \
     com.replymate.core.assistant.AssistantEventTest \
     com.replymate.core.assistant.AssistantLearningTest \
@@ -110,6 +111,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.privacy.ProviderPrivacyTest \
     com.replymate.core.privacy.BuiltInSetupTest \
     com.replymate.core.privacy.SecretsTest \
+    com.replymate.core.privacy.RedactorTest \
+    com.replymate.core.privacy.FallbackPolicyTest \
     com.replymate.core.memory.LongChatMemoryTest \
     com.replymate.core.memory.FactNormalizerTest \
     com.replymate.core.memory.MemoryMergeTest \
@@ -118,6 +121,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.memory.MemoryContinuityTest \
     com.replymate.core.budget.TokenBudgeterTest \
     com.replymate.core.usecase.DraftServiceTest \
+    com.replymate.core.usecase.ProviderFallbackTest \
     com.replymate.core.usecase.DraftServiceToneTest \
     com.replymate.core.usecase.ContactServiceTest \
     com.replymate.core.usecase.ContactPurgeTest \
@@ -150,6 +154,8 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.core.prompt.PromptSecurityTest \
     com.replymate.core.auth.AuthFlowTest \
     com.replymate.core.listener.StatusFilterTest \
+    com.replymate.core.listener.StatusNoticeTest \
+    com.replymate.core.listener.DiscordCategoriesTest \
     com.replymate.core.listener.IdentityResolverTest \
     com.replymate.core.listener.TextIdsTest \
     com.replymate.core.listener.MessageClassifierTest \
@@ -179,6 +185,7 @@ java -Djava.io.tmpdir="$TMPD" -Dreplymate.src="$ROOT/src" -cp "$OUT:$CP" org.jun
     com.replymate.provider.AnthropicApiTest \
     com.replymate.provider.GeminiDiscoveryTest \
     com.replymate.provider.DiagnosticsTest \
+    com.replymate.core.provider.ProviderHealthTest \
     com.replymate.provider.GeminiCandidatesFallbackTest \
     com.replymate.provider.GeminiGroundingTest \
     com.replymate.provider.AnthropicCapsTest \

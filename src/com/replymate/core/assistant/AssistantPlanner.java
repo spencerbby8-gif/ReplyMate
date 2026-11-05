@@ -119,6 +119,32 @@ public final class AssistantPlanner {
         return "assistant.alerted." + contactId;
     }
 
+    /** P21-production §1 (banner-fix, owner-reported on OPPO): the cycle decision,
+     *  shared by the draft alert and the follow-up alert so both obey one rule.
+     *  A generation result may pop ONLY for a cycle that has not alerted yet;
+     *  force (the Regenerate button) NEVER re-pops. */
+    public static boolean isFreshCycle(com.replymate.core.ports.KvStore kv,
+                                       long contactId, boolean force) {
+        if (force) return false;
+        if (kv == null) return true;                    // no storage: alert honestly
+        return !"1".equals(kv.get(alertedKvKey(contactId), "0"));
+    }
+
+    /** The pop went out — this cycle has claimed its one audible alert. */
+    public static void markAlerted(com.replymate.core.ports.KvStore kv, long contactId) {
+        if (kv != null) kv.put(alertedKvKey(contactId), "1");
+    }
+
+    /** P21-production §1 ROOT-CAUSE FIX: a genuinely NEW incoming message starts a
+     *  new alert cycle. Before this, the flag was cleared ONLY by card interaction
+     *  (approve/copy/dismiss) — an owner who replied inside the source app instead
+     *  left it armed forever, so every later draft posted as a silent refresh and
+     *  the heads-up banner "disappeared". Called from the live-capture schedule
+     *  path only; recovery reposts of an EXISTING draft stay silent by design. */
+    public static void rearmAlert(com.replymate.core.ports.KvStore kv, long contactId) {
+        if (kv != null) kv.put(alertedKvKey(contactId), "0");
+    }
+
     /* ------------------------------------------------------------------ trigger */
 
     /** Battery/dedupe rule: background-generate only for an incoming message we

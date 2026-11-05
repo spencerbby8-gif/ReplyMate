@@ -486,10 +486,20 @@ public final class Fakes {
         public com.replymate.core.model.ProviderRef meta =
             new com.replymate.core.model.ProviderRef("gemini", "Google Gemini",
                 "https://generativelanguage.googleapis.com", "test-model");
+        /** P21 §7: scriptable fallback chain — defs in order, keyed by def.id. */
+        public final java.util.List<com.replymate.core.model.ProviderDef> fallbacks =
+            new java.util.ArrayList<com.replymate.core.model.ProviderDef>();
+        public final java.util.Map<Long, AiProvider> byId = new java.util.HashMap<Long, AiProvider>();
         public GatewayFake(AiProvider provider) { this.provider = provider; }
         @Override public synchronized AiProvider active() { return provider; }
         @Override public synchronized String activeModel() { return model; }
         @Override public synchronized com.replymate.core.model.ProviderRef activeMeta() { return provider == null ? null : meta; }
+        @Override public synchronized java.util.List<com.replymate.core.model.ProviderDef> fallbackDefs() {
+            return new java.util.ArrayList<com.replymate.core.model.ProviderDef>(fallbacks);
+        }
+        @Override public synchronized AiProvider buildFor(com.replymate.core.model.ProviderDef def) {
+            return def == null ? null : byId.get(def.id);
+        }
     }
 
     /** P-intelligence-3: in-memory ProviderStore (privacy-mode + built-in seed tests). */

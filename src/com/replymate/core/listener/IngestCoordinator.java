@@ -82,9 +82,23 @@ public final class IngestCoordinator {
                 continue;
             }
 
+            // P21-production §3: a Discord SERVER channel is its own category,
+            // OFF by default — it must not ride the groups toggle (a group's a
+            // private conversation; a server is a semi-public room). When the
+            // owner opts in, server conversations flow like a group conversation,
+            // but an item with no free-form reply action (announcements, bot and
+            // webhook broadcasts) can never ping or draft — you couldn't answer
+            // it anyway.
+            boolean serverChannel = ServerGate.isServerEvent(e);
+            if (serverChannel && !ServerGate.allowed(kv, e.channel)) {
+                rep.filtered++;
+                continue;
+            }
             // P-intelligence-13: group policy resolved ONCE per event — master
-            // switch with per-app override (GroupPolicy); default OFF.
-            boolean groupsAllowed = GroupPolicy.allowed(kv, e.channel);
+            // switch with per-app override (GroupPolicy); default OFF. An opted-in
+            // server channel is treated AS an allowed group conversation here.
+            boolean groupsAllowed = GroupPolicy.allowed(kv, e.channel)
+                || (serverChannel && ServerGate.allowed(kv, e.channel));
             ListenerFilter.Verdict v = ListenerFilter.verdict(e, groupsAllowed);
             if (v == ListenerFilter.Verdict.SKIP) { rep.filtered++; continue; }
 
@@ -96,6 +110,13 @@ public final class IngestCoordinator {
             // but never allowed to ping a burst/draft (generation also hard-stops
             // on the class stamp — belt + braces).
             if (ic.cls == ItemClass.ANNOUNCEMENT && v == ListenerFilter.Verdict.STORE_AND_PING) {
+                v = ListenerFilter.Verdict.STORE_ONLY;
+            }
+            // P21-production §3: in an opted-in server channel, an item WITHOUT
+            // its own free-form quick-reply (announcement cards, bot/webhook
+            // broadcasts) is store-only capability honesty — no ping, no draft.
+            if (serverChannel && v == ListenerFilter.Verdict.STORE_AND_PING
+                    && !e.hasFreeFormReply) {
                 v = ListenerFilter.Verdict.STORE_ONLY;
             }
 

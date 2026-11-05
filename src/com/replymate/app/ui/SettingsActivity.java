@@ -19,7 +19,11 @@ import com.replymate.core.util.TimeFmt;
 import com.replymate.data.db.DbHealth;
 import java.util.List;
 
-/** S13 — Settings hub (P2): profile, provider, listening controls, diagnostics, about. */
+/** S13 — Settings hub. P21-production §5: grouped information architecture —
+ *  ACCOUNT & PRIVACY · AI PROVIDERS · NOTIFICATION SOURCES · ASSISTANT BEHAVIOUR ·
+ *  DATA & DIAGNOSTICS · ABOUT. Every pre-existing row/function is preserved
+ *  1:1 (re-grouped, never duplicated or dropped). No "Appearance" group exists:
+ *  the app has zero appearance settings and an empty section would be a lie. */
 public final class SettingsActivity extends Activity {
 
     private static final int REQ_POST_NOTIF = 42;
@@ -36,6 +40,13 @@ public final class SettingsActivity extends Activity {
      *  finishes the enable only when nothing can still block execution. */
     private static final String KV_PENDING_ENABLE = "assistant.pending_enable";
 
+    /** Group header (uppercase grey label) separating one IA category. */
+    private void addSection(String title) {
+        TextView l = Ui.label(this, title);
+        l.setPadding(0, Ui.dp(this, 18), 0, 0);
+        root.addView(l);
+    }
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
@@ -50,6 +61,7 @@ public final class SettingsActivity extends Activity {
         });
         root.addView(header);
 
+        addSection("ACCOUNT & PRIVACY");
         LinearLayout profileRow = Ui.row(this, "My profile", "name, languages, bio, topics");
         profileRow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -70,16 +82,8 @@ public final class SettingsActivity extends Activity {
         root.addView(accountRow);
         root.addView(Ui.divider(this));
 
-        LinearLayout voiceRow = Ui.row(this, "My voice (global style)",
-            "tone, length, emoji, humor… the base style for every chat");
-        voiceRow.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                startActivity(new Intent(SettingsActivity.this, VoiceActivity.class));
-            }
-        });
-        root.addView(voiceRow);
-        root.addView(Ui.divider(this));
 
+        addSection("AI PROVIDERS");
         providerRow = Ui.row(this, "AI providers", "");
         providerRow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -89,6 +93,33 @@ public final class SettingsActivity extends Activity {
         root.addView(providerRow);
         root.addView(Ui.divider(this));
 
+        // P21-review §7-audit: cross-provider fallback is an owner CONSENT
+        // decision — a backup provider receives the draft content with ITS OWN
+        // key, billing and privacy mode. Default ON (the §7 defect was "no
+        // fallback"); every hop is audited and the saved draft names the model
+        // that actually answered. The built-in shared key can never be a
+        // fallback target while the owner runs their own key.
+        Ui.ToggleRow fallbackRow = Ui.toggleRow(this, "Cross-provider fallback",
+            "when the active provider fails a draft, each other provider YOU"
+            + " configured gets one try (max 2) — its own key, billing and"
+            + " privacy rules apply, and nothing extra is sent while off");
+        fallbackRow.sw.setChecked(
+            com.replymate.core.privacy.FallbackPolicy.enabled(c.kv()));
+        fallbackRow.sw.setOnCheckedChangeListener(
+            new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(
+                        android.widget.CompoundButton b, boolean on) {
+                    c.kv().put(com.replymate.core.privacy.FallbackPolicy.KV_ENABLED,
+                        on ? "1" : "0");
+                    Ui.setRowSub(fallbackRow.row, on
+                        ? "on — a failing provider gets up to 2 backup tries on your other providers"
+                        : "off — the original error stands; no other provider is contacted");
+                }
+            });
+        root.addView(fallbackRow.row);
+        root.addView(Ui.divider(this));
+
+        addSection("NOTIFICATION SOURCES");
         listenRow = Ui.row(this, "Message listening", "");
         listenRow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -126,6 +157,7 @@ public final class SettingsActivity extends Activity {
         root.addView(notifRow);
         root.addView(Ui.divider(this));
 
+        addSection("ASSISTANT BEHAVIOUR");
         // P-background: master switch for the assistant. Real switch, live state,
         // honest subtitle (permission prerequisite + human-approval contract).
         assistantRow = Ui.toggleRow(this, "Background reply assistant",
@@ -215,6 +247,17 @@ public final class SettingsActivity extends Activity {
         root.addView(depthRowRef);
         root.addView(Ui.divider(this));
 
+        LinearLayout voiceRow = Ui.row(this, "My voice (global style)",
+            "tone, length, emoji, humor… the base style every assistant reply is built from");
+        voiceRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, VoiceActivity.class));
+            }
+        });
+        root.addView(voiceRow);
+        root.addView(Ui.divider(this));
+
+        addSection("DATA & DIAGNOSTICS");
         LinearLayout usageRow = Ui.row(this, "Usage dashboard",
             "local metering of every AI call (count + tokens)");
         usageRow.setOnClickListener(new View.OnClickListener() {
@@ -225,26 +268,27 @@ public final class SettingsActivity extends Activity {
         root.addView(usageRow);
         root.addView(Ui.divider(this));
 
-        LinearLayout diagRow = Ui.row(this, "Diagnostics", "database + listener self-test, per-app stats, recent events");
+        // P21-production §6: Diagnostics is a REAL dedicated screen (live report,
+        // copy-for-sharing with redaction) — no more inline accordion.
+        LinearLayout diagRow = Ui.row(this, "Diagnostics",
+            "dedicated screen — database, listener, per-app stats, alert verdicts; safe-to-share copy");
         root.addView(diagRow);
-        final TextView diagDetails = Ui.sub(this, "");
-        diagDetails.setVisibility(View.GONE);
-        diagDetails.setPadding(0, 0, 0, Ui.dp(this, 8));
-        root.addView(diagDetails);
         diagRow.setOnClickListener(new View.OnClickListener() {
-            boolean open;
             @Override public void onClick(View v) {
-                open = !open;
-                if (open) {
-                    diagDetails.setText(buildDiagnostics());
-                    diagDetails.setVisibility(View.VISIBLE);
-                } else {
-                    diagDetails.setVisibility(View.GONE);
-                }
+                startActivity(new Intent(SettingsActivity.this, DiagnosticsActivity.class));
             }
         });
         root.addView(Ui.divider(this));
 
+        LinearLayout auditRow = Ui.row(this, "Prompt audit (per contact, read-only)",
+            "the exact text sent to your provider for any draft, stored on this phone");
+        auditRow.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickPromptAuditContact(); }
+        });
+        root.addView(auditRow);
+        root.addView(Ui.divider(this));
+
+        addSection("ABOUT");
         LinearLayout aboutRow = Ui.row(this, "About", buildAboutLine());
         root.addView(aboutRow);
         final TextView aboutDetails = Ui.sub(this, "");
@@ -681,6 +725,54 @@ public final class SettingsActivity extends Activity {
                 : s.email + " · " + (s.provider.isEmpty() ? "email" : s.provider));
     }
 
+    /** P21-review: contact picker for the read-only prompt audit (drafts only —
+     *  a contact without drafts has nothing to show). */
+    private void pickPromptAuditContact() {
+        // P21-audit R3-2: contact+draft lookups are SQLite — never on main.
+        com.replymate.app.platform.Tasks.call(
+            new com.replymate.app.platform.Tasks.Job<java.util.List<com.replymate.core.model.Contact>>() {
+                @Override public java.util.List<com.replymate.core.model.Contact> run() {
+                    java.util.List<com.replymate.core.model.Contact> all = c.contacts().all();
+                    java.util.List<com.replymate.core.model.Contact> withDrafts =
+                        new java.util.ArrayList<com.replymate.core.model.Contact>();
+                    for (com.replymate.core.model.Contact ct : all) {
+                        if (!c.drafts().byContact(ct.id, 1).isEmpty()) withDrafts.add(ct);
+                    }
+                    return withDrafts;
+                }
+            },
+            new com.replymate.app.platform.Tasks.Done<java.util.List<com.replymate.core.model.Contact>>() {
+                @Override public void accept(java.util.List<com.replymate.core.model.Contact> withDrafts) {
+                    if (isFinishing()) return;
+                    showPromptAuditPicker(withDrafts);
+                }
+            });
+    }
+
+    private void showPromptAuditPicker(
+            final java.util.List<com.replymate.core.model.Contact> withDrafts) {
+        if (withDrafts.isEmpty()) {
+            Toast.makeText(this, "No drafts yet — a prompt audit appears after the first draft",
+                Toast.LENGTH_LONG).show();
+            return;
+        }
+        final String[] names = new String[withDrafts.size()];
+        for (int i = 0; i < withDrafts.size(); i++) names[i] = withDrafts.get(i).displayName;
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Prompt audit — pick a contact")
+            .setItems(names, new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface d, int which) {
+                    android.content.Intent i = new android.content.Intent(
+                        SettingsActivity.this, PromptAuditActivity.class);
+                    i.putExtra(PromptAuditActivity.EXTRA_CONTACT_ID,
+                        withDrafts.get(which).id);
+                    startActivity(i);
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
     /** Active provider line for the Settings hub (friendly diagnostics, no secrets). */
     private String providerSummary(com.replymate.core.model.ProviderDef d) {
         String label = d.label.isEmpty() ? d.type.label : d.label;
@@ -691,172 +783,5 @@ public final class SettingsActivity extends Activity {
         return "active: " + label + " · " + d.modelName + " ✓";
     }
 
-    private String buildDiagnostics() {
-        StringBuilder sb = new StringBuilder();
-        DbHealth.Report r = DbHealth.check(c.db());
-        sb.append("Database:\n").append(r.details()).append('\n');
-        sb.append("Listener:\n");
-        sb.append("  enabled in system: ").append(ListenerStatus.isServiceEnabled(this)).append('\n');
-        sb.append("  own notifications: ").append(ListenerStatus.canPostNotifications(this)).append('\n');
-        sb.append("  battery optimization ignored: ").append(ListenerStatus.batteryWhitelisted(this))
-          .append("  (false + delivery trouble = set Battery → Unrestricted)").append('\n');
-        sb.append("  Android 9+ background restricted: ")
-          .append(ListenerStatus.backgroundRestricted(this)).append('\n');
-        sb.append("  app standby bucket: ").append(ListenerStatus.standbyBucketName(this))
-          .append(ListenerStatus.standbyRestricted(this)
-              ? "  ← RESTRICTED: network/jobs heavily limited until it lifts" : "")
-          .append('\n');
-        sb.append("  power save mode on: ").append(ListenerStatus.powerSaveOn(this))
-          .append(" · low-power-standby exempt: ")
-          .append(ListenerStatus.lowPowerStandbyExempt(this)).append('\n');
-        sb.append("  last background pipeline: ")
-          .append(c.kv().get(com.replymate.app.assistant.AssistantRunner.KV_LATENCY_LAST,
-              "no completed generation yet")).append('\n');
-        sb.append("  ColorOS background switch (unreadable by Android): ")
-          .append(com.replymate.app.assistant.AssistantPrereq.isOplus()
-              ? (com.replymate.app.assistant.AssistantPrereq.oplusConfirmed(c.kv())
-                    ? "owner-confirmed ON ✓ (Android can't read it directly)"
-                    : "NOT CONFIRMED — Battery usage page → \"Allow background activity\"")
-              : "n/a (not an Oppo/OnePlus/realme device)").append('\n');
-        sb.append("  connected at: ").append(tsLine("listener.connected_at")).append('\n');
-        sb.append("  disconnected at: ").append(tsLine("listener.disconnected_at")).append('\n');
-        // P-intelligence-20: access-granted ≠ bound. On ColorOS the listener can
-        // be enabled in Settings yet not actually bound after a kill — the one
-        // state the secure string cannot show. This is the live truth.
-        sb.append("  listener bound right now: ")
-          .append(com.replymate.app.listener.RmNotificationListener.active() != null)
-          .append("  (enabled but not bound = toggle its access OFF/ON in system settings)").append('\n');
-        sb.append("  watch whatsapp: ").append(c.kv().get("watch.whatsapp", "1"))
-          .append(" · telegram: ").append(c.kv().get("watch.telegram", "1")).append('\n');
-        sb.append("  messages stored (listener): ")
-          .append(c.kv().get(IngestCoordinator.KV_STORED_TOTAL, "0")).append('\n');
-        sb.append("Per-app listener stats:\n");
-        sb.append(perAppStats()).append('\n');
-        sb.append("  last event: ").append(tsLine(IngestCoordinator.KV_LAST_EVENT)).append('\n');
-        // P-listener-foundation: rebind-request evidence (bounded mechanism) +
-        // the capture-boundary trace so a device report shows exactly where a
-        // notification disappeared (callback→lane → extract → route → ingest →
-        // schedule), with zero bodies/names/keys.
-        sb.append("  last rebind requested: ")
-          .append(tsLine(com.replymate.core.listener.RebindPolicy.KV_LAST_ATTEMPT))
-          .append('\n');
-        sb.append("Listener boundary trace (newest first):\n");
-        java.util.List<String> traceLines =
-            com.replymate.core.listener.ListenerTrace.lines(c.kv());
-        if (traceLines.isEmpty()) {
-            sb.append("  (none yet)\n");
-        } else {
-            for (String tl : traceLines) {
-                int tab = tl.indexOf('\t');
-                long ts = tab > 0 ? parseLong(tl.substring(0, tab)) : 0;
-                String text = tab > 0 ? tl.substring(tab + 1) : tl;
-                sb.append("  ").append(ts > 0 ? TimeFmt.dayTime(ts) : "?")
-                  .append(" — ").append(text).append('\n');
-            }
-        }
-        sb.append("Cloud (foundation):\n");
-        sb.append("  endpoint: ").append(com.replymate.core.supabase.SupabaseConfig.PROJECT_URL).append('\n');
-        sb.append("  tables provisioned: ")
-          .append(com.replymate.core.supabase.SupabaseConfig.TABLES.length)
-          .append(" · sync: ").append(com.replymate.core.supabase.SupabaseConfig.SYNC_ENABLED ? "ON" : "OFF (local-first)")
-          .append('\n');
-        sb.append("  parse errors: ").append(c.kv().get("listener.parse_errors", "0"))
-          .append(" · unparsed (non-chat) notifs: ").append(c.kv().get("listener.unparsed_total", "0"))
-          .append('\n');
-        sb.append("Recent events (newest first):\n");
-        List<String> lines = DiagnosticsRing.lines(c.kv().get(IngestCoordinator.KV_RING, ""));
-        if (lines.isEmpty()) {
-            sb.append("  (none yet)");
-        } else {
-            for (String l : lines) {
-                int tab = l.indexOf('\t');
-                long ts = tab > 0 ? parseLong(l.substring(0, tab)) : 0;
-                String text = tab > 0 ? l.substring(tab + 1) : l;
-                sb.append("  ").append(ts > 0 ? TimeFmt.dayTime(ts) : "?").append(" — ")
-                  .append(text).append('\n');
-            }
-        }
-        // P-background-2: structured assistant ledger — every assistant failure with
-        // conversation / provider / model / alert id / stage / reason / action / fix.
-        sb.append("\nAssistant ledger (newest first):\n");
-        sb.append("  assistant switch: ")
-          .append(com.replymate.app.assistant.AssistantRunner.enabled(c) ? "ON" : "OFF")
-          .append('\n');
-        List<String> aLines = com.replymate.app.assistant.AssistantDiag.lines(c.kv(), 8);
-        if (aLines.isEmpty()) {
-            sb.append("  (no assistant events recorded)");
-        } else {
-            for (String l : aLines) {
-                sb.append("  ").append(l).append('\n');
-            }
-        }
-        return sb.toString();
-    }
 
-    /** Per-app stats ONLY for apps really installed on this device (detection via
-     *  PackageManager; not-installed apps can't emit notifications to count). */
-    private String perAppStats() {
-        StringBuilder sb = new StringBuilder();
-        com.replymate.core.listener.ListenerStats stats =
-            new com.replymate.core.listener.ListenerStats(c.kv());
-        java.util.LinkedHashSet<com.replymate.core.model.Channel> ordered =
-            new java.util.LinkedHashSet<com.replymate.core.model.Channel>();
-        for (com.replymate.core.listener.WatchedApps.AppDef def
-                : com.replymate.core.listener.WatchedApps.all()) {
-            ordered.add(def.channel);
-        }
-        java.util.Set<com.replymate.core.model.Channel> enabled =
-            com.replymate.core.listener.ParserRegistry.enabledFromKv(
-                c.kv(), java.util.EnumSet.of(
-                    com.replymate.core.model.Channel.WHATSAPP,
-                    com.replymate.core.model.Channel.TELEGRAM));
-        StringBuilder notInstalled = new StringBuilder();
-        int installed = 0;
-        for (com.replymate.core.model.Channel ch : ordered) {
-            boolean has = false;
-            for (String p : com.replymate.core.listener.WatchedApps.packagesFor(ch)) {
-                has |= com.replymate.app.platform.DeepLinks.packageExists(this, p);
-            }
-            if (!has) {
-                if (notInstalled.length() > 0) notInstalled.append(", ");
-                notInstalled.append(com.replymate.core.listener.WatchedApps.labelFor(ch));
-                continue;
-            }
-            installed++;
-            sb.append("  ").append(ch.wire)
-              .append(enabled.contains(ch) ? " [on]" : " [off]").append(": ")
-              .append("recv ").append(stats.receivedOf(ch))
-              .append(" · parsed ").append(stats.parsedOf(ch))
-              .append(" · ignored ").append(stats.ignoredOf(ch))
-              .append(" · failed ").append(stats.failedOf(ch));
-            String reason = stats.lastReasonOf(ch);
-            if (reason != null && !reason.isEmpty()) {
-                sb.append(" · last: ").append(reason);
-            }
-            sb.append('\n');
-        }
-        StringBuilder out = new StringBuilder();
-        out.append("  installed supported apps: ").append(installed)
-           .append(" of ").append(ordered.size()).append('\n');
-        out.append(sb);
-        if (notInstalled.length() > 0) {
-            out.append("  not installed: ").append(notInstalled).append('\n');
-        }
-        // Provider audit: the most recent AI provider failure, verbatim — provider,
-        // endpoint, model, HTTP status, the provider's own words, ReplyMate's read,
-        // and the suggested fix. Written by every failing surface (see LastProviderError).
-        String lastErr = c.kv().get(LastProviderError.KV_KEY, "");
-        out.append("Last AI provider error:\n");
-        out.append(lastErr.isEmpty() ? "  (none recorded)" : lastErr).append('\n');
-        return out.toString();
-    }
-
-    private String tsLine(String key) {
-        long ts = parseLong(c.kv().get(key, ""));
-        return ts > 0 ? TimeFmt.dayTime(ts) : "—";
-    }
-
-    private static long parseLong(String s) {
-        try { return Long.parseLong(s); } catch (Exception e) { return 0; }
-    }
 }

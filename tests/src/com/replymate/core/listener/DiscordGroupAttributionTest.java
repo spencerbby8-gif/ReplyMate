@@ -42,6 +42,7 @@ public final class DiscordGroupAttributionTest {
         messages = new Fakes.MessageStoreFake();
         kv = new Fakes.KvStoreFake();
         kv.put(GroupPolicy.KV_GLOBAL, "1");
+        kv.put(ServerGate.keyFor(Channel.DISCORD), "1");   // P21 §3: fixture intent was "server traffic allowed" — servers became a SEPARATE opt-in after these tests were written
         kv.put(ProfileService.KEY_NAME, "Spencer");
         engine = new IngestCoordinator(
             new ContactService(contacts, Fakes.FIXED_CLOCK),

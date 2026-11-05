@@ -45,15 +45,6 @@
         </LinearLayout>
 
         <TextView
-            android:id="@+id/audit_btn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Audit"
-            android:textColor="@color/accent"
-            android:textSize="14sp"
-            android:padding="8dp" />
-
-        <TextView
             android:id="@+id/edit_btn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

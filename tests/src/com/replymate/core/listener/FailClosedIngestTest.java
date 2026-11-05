@@ -71,6 +71,7 @@ public final class FailClosedIngestTest {
         // Groups enabled; the item speaks AS the channel itself — context for the
         // conversation, never a reply target: stored, zero pings, honestly stamped.
         kv.put(GroupPolicy.KV_GLOBAL, "1");
+        kv.put(ServerGate.keyFor(Channel.DISCORD), "1");   // P21 §3: fixture intent was "server traffic allowed" — servers became a SEPARATE opt-in after these tests were written
         NotifEvent e = ev(Channel.DISCORD, "#announcements", "#announcements", "Me",
             "new rules are live, read them", 1000, true);
         e.conversationId = "999000111";
@@ -90,6 +91,7 @@ public final class FailClosedIngestTest {
 
     @Test public void mentionKeepsIdentityStampsAndPings() {
         kv.put(GroupPolicy.KV_GLOBAL, "1");
+        kv.put(ServerGate.keyFor(Channel.DISCORD), "1");   // P21 §3: fixture intent was "server traffic allowed" — servers became a SEPARATE opt-in after these tests were written
         kv.put(ProfileService.KEY_NAME, "Spencer");
         NotifEvent e = ev(Channel.WHATSAPP, "Family group", "Musa", "Me",
             "Spencer are you coming?", 1000, true);
@@ -124,6 +126,7 @@ public final class FailClosedIngestTest {
         // action is a normal conversation — stored, pings, honestly stamped
         // direct_reply (the announcement demote must NOT touch it).
         kv.put(GroupPolicy.KV_GLOBAL, "1");
+        kv.put(ServerGate.keyFor(Channel.DISCORD), "1");   // P21 §3: fixture intent was "server traffic allowed" — servers became a SEPARATE opt-in after these tests were written
         NotifEvent e = ev(Channel.DISCORD, "#general", "#general", "Me",
             "match moved to sunday?", 1000, true);
         e.conversationId = "4477445566";

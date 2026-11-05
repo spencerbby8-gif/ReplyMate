@@ -187,6 +187,25 @@ public final class Diagnostics {
             interpretation += ".";
             suggestion = "Wait for the window to reset and try again. If it keeps happening on a "
                 + "fresh day, switch model or check the plan with the provider.";
+        } else if (status >= 500 && status < 600 && looksModelish(low)) {
+            // P21-production §7 (owner device evidence, 2026-11-04): a gateway can
+            // return HTTP 502 whose BODY carries the backend's real verdict —
+            // the configured OpenAI-compatible endpoint answered 502 wrapping the
+            // backend's "Requested entity was not found" (a 404) for the selected
+            // model. Classifying that as "temporary server problem" both masks the
+            // real cause and burns pointless retries. When the body bears model
+            // evidence, the model/endpoint configuration is the verdict.
+            cause = Cause.MODEL; type = ApiError.Type.UNKNOWN; retryable = false;
+            interpretation = "The endpoint accepted the request but its backend could not find"
+                + " this model"
+                + (model == null || model.isEmpty() ? "" : " (\"" + model + "\")")
+                + " — the gateway answer was HTTP " + status + " wrapping a backend"
+                + " not-found. This is a CONFIGURATION verdict, not an outage:"
+                + " retrying the same request cannot succeed."
+                + (msg.isEmpty() ? "" : " Backend said: \"" + truncate(msg, 160) + "\"");
+            suggestion = "The endpoint responds but does not serve this model. Open the provider"
+                + ", tap \"Discover models (live)\" and pick a model the endpoint actually lists"
+                + " — or fix the model name / base URL to match the backend's catalog.";
         } else if (status >= 500 && status < 600) {
             cause = Cause.SERVER; type = ApiError.Type.SERVER; retryable = true;
             interpretation = "The provider's own server failed (HTTP " + status + ") — usually temporary.";
@@ -290,7 +309,13 @@ public final class Diagnostics {
             || low.contains("is not found for api version")
             || low.contains("not supported for generatecontent")
             || low.contains("unsupported model")
-            || low.contains("invalid model");
+            || low.contains("invalid model")
+            // gateway/backend wrappers (owner evidence: Vercel-fronted backend
+            // answering {"error":{"code":404,"message":"Requested entity was not
+            // found."}} at HTTP 502 for an unknown model) — the OBJECT of the
+            // request is the model; the phrase marks a not-found verdict
+            || low.contains("requested entity was not found")
+            || low.contains("entity was not found");
     }
 
     /** "limit: 0" or "quotaValue": "0" anywhere in the body → quota was never granted. */

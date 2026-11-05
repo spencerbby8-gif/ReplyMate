@@ -13,9 +13,14 @@ import com.replymate.app.R;
 import com.replymate.app.ReplyMateApp;
 import com.replymate.app.di.AppContainer;
 import com.replymate.app.platform.Tasks;
+import com.replymate.core.ai.ChatReply;
+import com.replymate.core.ai.ChatRequest;
+import com.replymate.core.ai.GenerationOpts;
+import com.replymate.core.ai.Turn;
 import com.replymate.core.model.ProviderDef;
 import com.replymate.core.model.ProviderType;
 import com.replymate.core.ports.AiProvider;
+import com.replymate.core.provider.ProviderHealth;
 import com.replymate.core.util.Result;
 import com.replymate.provider.ProviderFactory;
 import com.replymate.provider.http.HttpClient;
@@ -35,11 +40,13 @@ public final class ProviderEditActivity extends Activity {
     private ProviderType type = ProviderType.GEMINI;
     private ProviderDef existing;
     private EditText label, baseUrl, model, keyInput;
-    private TextView status, keyHint, urlHint, testBtn, capsHint;
+    private TextView status, keyHint, urlHint, capsHint;
+    private Button testButton;
     private LinearLayout modelList;
     private final Map<ProviderType, TextView> chips =
         new HashMap<ProviderType, TextView>();
     private boolean deleteArmed;
+    private boolean testRunning;        // P21 §7: duplicate-tap guard
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -134,15 +141,15 @@ public final class ProviderEditActivity extends Activity {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(0, -2, 1.0f);
         alp.topMargin = Ui.dp(this, 14);
-        Button test = Ui.btn(this, "Test connection");
-        actions.addView(test, new LinearLayout.LayoutParams(alp));
+        testButton = Ui.btn(this, "Test connection");
+        actions.addView(testButton, new LinearLayout.LayoutParams(alp));
         Button save = Ui.btn(this, "Save & activate");
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(alp);
         slp.leftMargin = Ui.dp(this, 8);
         actions.addView(save, slp);
         root.addView(actions);
 
-        test.setOnClickListener(new View.OnClickListener() {
+        testButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { testConnection(); }
         });
         save.setOnClickListener(new View.OnClickListener() {
@@ -486,7 +493,20 @@ public final class ProviderEditActivity extends Activity {
         }
     }
 
+    /** P21-production §7 (owner device evidence, Nov 4): the ONLY honest test is a
+     *  REAL generation with the configured type + base URL + MODEL + credential.
+     *  The old validateKey() probe (GET /models) answered "Connection OK ✓" while
+     *  the selected model was unknown to the backend — generation then 502/404'd,
+     *  and the stale health mark kept vouching for it. This probe:
+     *    - asks the selected model one harmless, fixed question (no user content,
+     *      nothing personal — the endpoint receives only this non-sensitive prompt);
+     *    - shows the real reply excerpt + latency on success, the full diagnostics
+     *      block on failure (never a generic/masked copy, never simulated success);
+     *    - stamps health MODEL-SCOPED, so a ✓ earned by model A never vouches for
+     *      model B or a swapped key;
+     *    - is single-flight: the button is disabled while a probe runs. */
     private void testConnection() {
+        if (testRunning) return;                     // duplicate-tap guard
         final String key = effectiveKey();
         if (type.needsKey && key.isEmpty()) {
             showStatus("Paste an API key to test (or save one first).", Ui.RED);
@@ -496,27 +516,48 @@ public final class ProviderEditActivity extends Activity {
             showStatus("Base URL is empty.", Ui.RED);
             return;
         }
-        showStatus("Testing…", Ui.DIM);
+        final String modelId = model.getText().toString().trim();
+        if (modelId.isEmpty()) {
+            showStatus("Pick or type a model first — the test puts a real question to"
+                + " THAT model; a key-shape check can't prove the model exists.", Ui.RED);
+            return;
+        }
+        testRunning = true;
+        testButton.setEnabled(false);
+        testButton.setText("Testing…");
+        showStatus("Asking " + modelId + " one small test question (real request, "
+            + type.label + " endpoint)…", Ui.DIM);
         final AiProvider provider = formProvider(key);
-        Tasks.call(new Tasks.Job<Result<Boolean>>() {
-            @Override public Result<Boolean> run() { return provider.validateKey(); }
-        }, new Tasks.Done<Result<Boolean>>() {
-            @Override public void accept(Result<Boolean> r) {
-                // P-background-12: health is a REAL PROBE VERDICT, persisted — the
-                // provider list renders "tested ✓ <when>" from this, never from
-                // configuration presence alone.
-                if (!r.ok || !Boolean.TRUE.equals(r.value)) {
+        final long t0 = System.currentTimeMillis();
+        final ChatRequest probe = new ChatRequest(
+            "You are a connectivity probe. Reply exactly as instructed — nothing else.",
+            java.util.Collections.<Turn>emptyList(),
+            Turn.user("Reply with exactly: RM-OK"),
+            GenerationOpts.of(1, 0.0, 16));
+        Tasks.call(new Tasks.Job<Result<ChatReply>>() {
+            @Override public Result<ChatReply> run() { return provider.generate(probe); }
+        }, new Tasks.Done<Result<ChatReply>>() {
+            @Override public void accept(Result<ChatReply> r) {
+                testRunning = false;
+                testButton.setEnabled(true);
+                testButton.setText("Test connection");
+                long ms = System.currentTimeMillis() - t0;
+                if (!r.ok) {
                     LastProviderError.save(c, r.error);
-                    c.kv().put("provider.health." + type.wire,
-                        "fail|" + System.currentTimeMillis());
-                    showStatus("Connection failed:\n" + r.error, Ui.RED);
-                } else {
-                    if (!key.isEmpty()) c.registerSensitive(key);
-                    c.kv().put("provider.health." + type.wire,
-                        "ok|" + System.currentTimeMillis());
-                    showStatus("Connection OK ✓ — provider is reachable"
-                        + (type.needsKey ? " and the key works." : "."), Ui.GREEN);
+                    c.kv().put(ProviderHealth.keyFor(type.wire),
+                        ProviderHealth.encode(false, modelId, System.currentTimeMillis()));
+                    showStatus("Model test failed — " + modelId + ":\n" + r.error, Ui.RED);
+                    return;
                 }
+                if (!key.isEmpty()) c.registerSensitive(key);
+                c.kv().put(ProviderHealth.keyFor(type.wire),
+                    ProviderHealth.encode(true, modelId, System.currentTimeMillis()));
+                String excerpt = r.value.variants.isEmpty() ? "" : r.value.variants.get(0);
+                if (excerpt.length() > 80) excerpt = excerpt.substring(0, 80) + "…";
+                showStatus("Works ✓ — real reply from " + modelId + " on this key in "
+                    + ms + " ms" + (excerpt.isEmpty() ? "." : ": \"" + excerpt + "\"")
+                    + "\nHealth is recorded for THIS model only — changing model or key"
+                    + " requires a re-test.", Ui.GREEN);
             }
         });
     }
@@ -556,6 +597,16 @@ public final class ProviderEditActivity extends Activity {
             showStatus("This provider needs an API key.", Ui.RED);
             return;
         }
+        // P21 §7: a health verdict belongs to the exact (model, key, base URL)
+        // triple it tested. Changing any of them invalidates the old verdict —
+        // the provider list must never carry a "tested ✓" over to a different
+        // model or key (the Nov-4 stale-"tested" defect).
+        boolean keyReplaced = !typed.isEmpty();
+        boolean modelChanged = existing != null && !d.modelName.equals(existing.modelName);
+        boolean urlChanged = existing != null && !d.baseUrl.equals(existing.baseUrl);
+        if (keyReplaced || modelChanged || urlChanged || existing == null) {
+            c.kv().delete(ProviderHealth.keyFor(type.wire));
+        }
         c.providers().upsertActive(d);
         c.invalidateProvider();
         // P-intelligence-7: catch up messages that arrived while no provider was
@@ -575,6 +626,8 @@ public final class ProviderEditActivity extends Activity {
         if (existing != null) {
             if (!existing.keyRef.isEmpty()) c.vault().deleteSecret(existing.keyRef);
             c.providers().delete(existing.id);
+            // its health mark dies with the row — a re-added provider starts untested
+            c.kv().delete(ProviderHealth.keyFor(type.wire));
             c.invalidateProvider();
         }
         Toast.makeText(this, "Provider removed", Toast.LENGTH_SHORT).show();

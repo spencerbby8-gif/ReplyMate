@@ -96,6 +96,13 @@ public final class AssistantRunner {
         if (ping == null) return;
         final long contactId = ping.contactId;
         final long token = JOBS.begin(contactId);
+        // P21-production §1: a genuinely new incoming ping starts a NEW alert
+        // cycle. Pings only fire for newly stored incoming messages (dedupe
+        // swallows replays before this point), and generation is debounced per
+        // conversation, so a burst re-arms N times but still pops ONCE; the
+        // durable hash gate can never double-generate. Recovery catch-up of an
+        // EXISTING draft does not come through here — it stays silent by design.
+        AssistantPlanner.rearmAlert(c.kv(), contactId);
 
         Runnable previous;
         synchronized (PENDING) {
@@ -225,8 +232,7 @@ public final class AssistantRunner {
                     AssistantNotifier.ensureChannels(c.app());
                     // ONE pop per cycle, same discipline as reply drafts: the
                     // approval cleared the flag, so this follow-up pops once.
-                    String alertedKey = AssistantPlanner.alertedKvKey(contactId);
-                    boolean fresh = !"1".equals(c.kv().get(alertedKey, "0"));
+                    boolean fresh = AssistantPlanner.isFreshCycle(c.kv(), contactId, false);
                     AssistantNotifier.postFollowUp(c.app(), contactId, who,
                         lastIncoming == null
                             ? "" : WatchedApps.labelFor(lastIncoming.channel),
@@ -234,7 +240,7 @@ public final class AssistantRunner {
                         lastIncoming == null ? null : lastIncoming.body,
                         lastIncoming == null ? 0L : lastIncoming.sentAt,
                         d.createdAt > 0 ? d.createdAt : System.currentTimeMillis());
-                    if (fresh) c.kv().put(alertedKey, "1");
+                    if (fresh) AssistantPlanner.markAlerted(c.kv(), contactId);
                 } catch (RuntimeException e) {
                     AssistantDiag.record(c, contactId, "#" + contactId, tag, "",
                         AssistantEvent.Stage.GENERATE,
@@ -450,8 +456,7 @@ public final class AssistantRunner {
         // refresh the SAME alert silently. Approve/Copy/fallback and any
         // dismissal of the card clear the flag, so the next genuinely new
         // burst pops again. force (the Regenerate button) never re-pops.
-        String alertedKey = AssistantPlanner.alertedKvKey(contactId);
-        boolean fresh = !force && !"1".equals(c.kv().get(alertedKey, "0"));
+        boolean fresh = AssistantPlanner.isFreshCycle(c.kv(), contactId, force);
         // P-background-11: the alert names exactly WHAT is being answered — the
         // fire-time latest incoming message (never a stale scheduled one) + its
         // time, and the draft's own generation time.
@@ -475,7 +480,16 @@ public final class AssistantRunner {
             d.id, cap, fresh, lastIncoming.body, lastIncoming.sentAt,
             d.createdAt > 0 ? d.createdAt : System.currentTimeMillis(),
             titleLabel, contextLabel);
-        if (fresh) c.kv().put(alertedKey, "1");
+        if (fresh) AssistantPlanner.markAlerted(c.kv(), contactId);
+        // P21 §1: post the VERDICT, not just the fact — diagnostics must answer
+        // "posted, suppressed or blocked, and exactly WHY" without logcat spelunking.
+        AssistantDiag.record(c, contactId, who, tag, t.sbnKey,
+            AssistantEvent.Stage.NOTIFY,
+            fresh ? "draft #" + d.id + " posted as a fresh heads-up alert"
+                : force ? "draft #" + d.id + " refreshed silently (Regenerate never re-pops)"
+                : "draft #" + d.id + " refreshed silently (this cycle's alert was already used — a new incoming message re-arms it)",
+            fresh ? "banner + sound on the high-importance channel" : "same card updated in place",
+            fresh ? "" : "no banner expected — that's the one-pop-per-cycle rule, not a failure");
     }
 
     /** P-intelligence-7: approval/provider catch-up. A message that arrived while a

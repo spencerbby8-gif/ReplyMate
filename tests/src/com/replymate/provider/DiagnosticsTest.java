@@ -387,6 +387,51 @@ public class DiagnosticsTest {
         assertTrue("the honest explanation still shows", d.display().contains("ReplyMate read:"));
     }
 
+    /** P21-production §7 — the owner's Nov-4 device evidence VERBATIM: his
+     *  OpenAI-compatible Vercel endpoint answered HTTP 502 whose body wrapped the
+     *  backend's ``{"error":{"code":404,"message":"Requested entity was not
+     *  found."}}`` for the configured model ``gemini-3.1-pro-high``. The old
+     *  classifier reported a retryable "server problem" — masking a configuration
+     *  defect AND promising pointless retries. It is a MODEL verdict: named model,
+     *  never retried, never called an outage. */
+    static final String OWNER_502_WRAPS_404 =
+        "{\"error\":{\"code\":404,\"message\":\"Requested entity was not found.\"}}";
+
+    @Test public void gateway502WrappingBackend404IsAModelVerdictNotAServerOutage() {
+        Diagnostics d = Diagnostics.build("openai_compat", "POST",
+            "https://owner-gateway.example/api/chat/completions", "gemini-3.1-pro-high",
+            new HttpResponse(502, OWNER_502_WRAPS_404, null),
+            OpenAiParser.extractProviderMessage(OWNER_502_WRAPS_404));
+        assertEquals(Diagnostics.Cause.MODEL, d.cause);
+        assertFalse("a configuration defect must never auto-retry", d.error.retryable());
+        assertTrue("the model is NAMED in the interpretation",
+            d.interpretation.contains("gemini-3.1-pro-high"));
+        assertTrue("the wrapping is described, not hidden",
+            d.interpretation.contains("502"));
+        assertTrue(d.interpretation.contains("not-found"));
+        assertTrue("explicitly NOT framed as an outage",
+            d.interpretation.contains("not an outage"));
+        assertTrue("the backend's own words survive into the verdict",
+            d.interpretation.contains("Requested entity was not found."));
+        assertTrue("the fix suggestion points at model discovery",
+            d.suggestion.contains("Discover models"));
+        assertTrue(d.display().contains("gemini-3.1-pro-high"));
+        assertFalse("no temporary-server framing anywhere",
+            d.display().contains("usually temporary"));
+    }
+
+    @Test public void plain502WithoutModelEvidenceStaysARetryableServerVerdict() {
+        // control: a 502 with NO model evidence must remain the old honest SERVER
+        // classification — the ladder must not over-fit every 5xx to the model.
+        Diagnostics d = Diagnostics.build("openai", "POST",
+            "https://api.openai.com/v1/chat/completions", "gpt-x",
+            new HttpResponse(502, "<html><head><title>502 Bad Gateway</title></head></html>", null),
+            "");
+        assertEquals(Diagnostics.Cause.SERVER, d.cause);
+        assertTrue(d.error.retryable());
+        assertFalse(d.interpretation.contains("CONFIGURATION"));
+    }
+
     // ---- shape-tolerant extraction (the four real envelopes) ----
 
     @Test public void extractionCoversEveryRealShape() {

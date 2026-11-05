@@ -15,6 +15,7 @@ import com.replymate.app.R;
 import com.replymate.app.ReplyMateApp;
 import com.replymate.app.di.AppContainer;
 import com.replymate.app.listener.ListenerStatus;
+import com.replymate.app.platform.Tasks;
 import com.replymate.core.listener.ParserRegistry;
 import com.replymate.core.listener.WatchedApps;
 import com.replymate.core.model.Channel;
@@ -132,15 +133,25 @@ public final class HomeActivity extends Activity {
     }
 
     private void renderHealth() {
-        DbHealth.Report r = DbHealth.check(c.db());
-        if (!r.ok) {
-            status.setVisibility(View.VISIBLE);
-            status.setTextColor(Ui.RED);
-            status.setText("Storage issue: " + r.shortReason());
-            status.setOnClickListener(null);
-            status.setClickable(false);
-            return;
-        }
+        // P21-audit R3-1 (ANR class, owner's PR #4 evidence): DbHealth.check
+        // performs a real SQLite WRITE probe — never on the main thread despite
+        // its own old javadoc claim ("safe… fast"). Listener state renders NOW
+        // (cheap settings read); the storage verdict lands off-lane and only
+        // overrides the chip when it FAILS.
+        Tasks.call(new Tasks.Job<DbHealth.Report>() {
+            @Override public DbHealth.Report run() { return DbHealth.check(c.db()); }
+        }, new Tasks.Done<DbHealth.Report>() {
+            @Override public void accept(DbHealth.Report r) {
+                if (isFinishing()) return;
+                if (!r.ok) {
+                    status.setVisibility(View.VISIBLE);
+                    status.setTextColor(Ui.RED);
+                    status.setText("Storage issue: " + r.shortReason());
+                    status.setOnClickListener(null);
+                    status.setClickable(false);
+                }
+            }
+        });
         // Storage fine → surface listener state (health chip).
         boolean listening = ListenerStatus.isServiceEnabled(this);
         status.setVisibility(View.VISIBLE);
