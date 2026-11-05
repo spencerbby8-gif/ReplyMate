@@ -25,6 +25,16 @@ on:
       - "tools/pingposter/**"
       - "tools/emulator/**"
       - "engine/build.sh"
+  # harness-branch pushes run the harness directly (owner directive P22-emu:
+  # "do not stop at 'no local emulator'"). The app-under-test on this route is
+  # tools/emulator/CANDIDATE_REF (currently arena/p22-intelligence).
+  push:
+    branches: [arena/emu-listener-harness]
+    paths:
+      - ".github/workflows/emulator-listener.yml"
+      - "tools/pingposter/**"
+      - "tools/emulator/**"
+      - "engine/build.sh"
   workflow_dispatch:
     inputs:
       api_level:
@@ -65,11 +75,31 @@ jobs:
       - name: "Checkout (harness branch — tools + workflow)"
         uses: actions/checkout@v4
 
+      # P22-emu directive: a dispatch input can pin the candidate, but the
+      # push/cron route needs a default — tools/emulator/CANDIDATE_FILE selects
+      # the app-under-test ref. Normalized ONCE here; every later step reads
+      # env.APP_REF / env.APP_DIR so the route is never ambiguous.
+      - name: Normalize app-under-test ref
+        run: |
+          set -e
+          REF="${{ inputs.app_ref }}"
+          if [ -z "$REF" ] && [ -f tools/emulator/CANDIDATE_REF ]; then
+            REF="$(cat tools/emulator/CANDIDATE_REF)"
+            echo "app-under-test from tools/emulator/CANDIDATE_REF: $REF"
+          fi
+          echo "APP_REF=$REF" >> "$GITHUB_ENV"
+          if [ -n "$REF" ]; then
+            echo "APP_DIR=appsrc" >> "$GITHUB_ENV"
+          else
+            echo "APP_DIR=." >> "$GITHUB_ENV"
+          fi
+          echo "app-under-test: REF='${REF}' (dir '$([ -n "$REF" ] && echo appsrc || echo .)')"
+
       - name: Checkout app source (only when validating a candidate ref)
-        if: ${{ inputs.app_ref != '' }}
+        if: ${{ env.APP_REF != '' }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.app_ref }}
+          ref: ${{ env.APP_REF }}
           path: appsrc
 
       # Owner rule: the existing JVM gate runs UNCHANGED before any emulator
@@ -83,7 +113,7 @@ jobs:
       - name: JVM gate (run_tests.sh) on the app under test
         run: |
           set -e
-          APP_DIR="${{ inputs.app_ref != '' && 'appsrc' || '.' }}"
+          APP_DIR="${{ env.APP_DIR }}"
           echo "gating app source: $APP_DIR"
           chmod +x "$APP_DIR/scripts/run_tests.sh" || true
           ( cd "$APP_DIR" && bash scripts/run_tests.sh )
@@ -103,9 +133,9 @@ jobs:
       - name: Build ReplyMate harness APK (ephemeral key + debug-mode)
         run: |
           set -e
-          APP_DIR="${{ inputs.app_ref != '' && 'appsrc' || '.' }}"
+          APP_DIR="${{ env.APP_DIR }}"
           echo "building app source: $APP_DIR"
-          if [ -n "${{ inputs.app_ref }}" ]; then
+          if [ -n "${{ env.APP_REF }}" ]; then
             # fix 18: the candidate's OWN engine/build.sh may predate
             # RM_DEBUG_MODE support. PROVEN: run 41491780011 built
             # arena/fix-listener-startup-anr with appsrc/engine/build.sh,
@@ -181,11 +211,43 @@ jobs:
             # assignment). The app path therefore goes INLINE per command,
             # resolved at Actions-expression time.
             chmod +x tools/emulator/run_scenarios.sh
-            adb install -r "${{ inputs.app_ref != '' && 'appsrc' || '.' }}/ReplyMate-1.7.2-emu-harness.apk"
+            adb install -r "${{ env.APP_DIR }}/ReplyMate-1.7.2-emu-harness.apk"
             adb install -r build/pingposter-com.whatsapp.apk
             adb install -r build/pingposter-com.discord.apk
             mkdir -p evidence
-            RM_APP_REF="${{ inputs.app_ref }}" bash tools/emulator/run_scenarios.sh "$PWD/evidence" 2>&1 | tee evidence/runner.log
+            RM_APP_REF="${{ env.APP_REF }}" bash tools/emulator/run_scenarios.sh "$PWD/evidence" 2>&1 | tee evidence/runner.log
+
+      # ---------------------------------------------------------------- UI
+      # P22-emu (owner directive): a SECOND, fresh emulator — API 30, the
+      # owner's OPPO A16K / Android 11 class — drives the REAL ReplyMate UI of
+      # the SAME candidate APK: onboarding, Settings tabs, all tone dials, live
+      # preview, writing samples, persistence across force-stop/relaunch, and
+      # the banner-Regenerate feedback fix (owner's physical-device report).
+      # Provider traffic goes over REAL TLS to a mock OpenAI-compatible server
+      # on the runner (10.0.2.2), with the harness CA trusted into the system
+      # store (writable-system + root; honestly SKIP-logged if the image
+      # refuses) — the captured request bodies are the on-device proof that
+      # changed settings reach the real generation pipeline. It is a genuine
+      # platform/UI/pipeline run; it is NOT genuine provider-quality evidence
+      # (the mock answers deterministically) and says so in results.md.
+      - name: Boot clean emulator #2 + run UI scenarios (API 30)
+        if: always()
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -writable-system
+          script: |
+            set +e
+            chmod +x tools/emulator/run_ui_scenarios.sh tools/emulator/ui_driver.py
+            adb install -r "${{ env.APP_DIR }}/ReplyMate-1.7.2-emu-harness.apk"
+            adb install -r build/pingposter-com.whatsapp.apk
+            adb install -r build/pingposter-com.discord.apk
+            RM_APP_REF="${{ env.APP_REF }}" bash tools/emulator/run_ui_scenarios.sh "$PWD/evidence"
+            echo "(per-line shells: the UI verdict is enforced fail-closed by the 'UI verdict gate' step reading evidence/ui/results.md)"
 
       - name: Upload diagnostic artifacts
         if: always()
@@ -194,3 +256,23 @@ jobs:
           name: emulator-listener-evidence
           path: evidence/
           if-no-files-found: warn
+
+      # P22-emu: the job is RED when any UI scenario FAILED; SKIP lines are
+      # tolerated ONLY because each carries its explicit reason into results.md
+      # + the step log (owner rule: no silent gaps, no pretending).
+      - name: UI verdict gate
+        if: always()
+        run: |
+          set -e
+          if [ ! -f evidence/ui/results.md ]; then
+            echo "FATAL: evidence/ui/results.md missing — the UI suite never ran"
+            echo "(infrastructure failure, NOT a green result)"; exit 1
+          fi
+          echo "================ ui/results.md ================"
+          cat evidence/ui/results.md
+          echo "==============================================="
+          if grep -q "^FAIL" evidence/ui/results.md; then
+            echo "UI scenarios FAILED — see evidence above (artifact: emulator-listener-evidence/ui/)"
+            exit 1
+          fi
+          echo "UI verdict gate: no FAIL lines (SKIPs, if any, are reasoned above)"
