@@ -45,6 +45,20 @@ public final class SystemComposer {
                                  String voiceLine, java.util.List<String> voiceExtra,
                                  String aboutExtra, java.util.List<String> memoryLines,
                                  java.util.List<String> situationLines) {
+        return compose(profile, contact, styleRules, voiceLine, voiceExtra, aboutExtra,
+            memoryLines, situationLines, -1);
+    }
+
+    /** P22: lengthLevel = the EFFECTIVE level of the LENGTH voice control
+     *  (0 very short / 1 short / 2 detailed / 3 OFF; -1 = unspecified → legacy).
+     *  The hard Rules must never contradict the dial: detailed and OFF emit NO
+     *  length clause at all (OFF means "no length instruction, anywhere");
+     *  very-short gets the one-sentence clause; short/unspecified keeps the
+     *  legacy 1–3-sentences clause byte-identical. */
+    public static String compose(ProfileService.Profile profile, Contact contact, String styleRules,
+                                 String voiceLine, java.util.List<String> voiceExtra,
+                                 String aboutExtra, java.util.List<String> memoryLines,
+                                 java.util.List<String> situationLines, int lengthLevel) {
         String owner = profile == null ? "the owner of this phone" : profile.displayName();
         StringBuilder sb = new StringBuilder();
 
@@ -127,8 +141,26 @@ public final class SystemComposer {
         // 6) Hard boundaries (compact — the charter carries the human-voice rules).
         //    P-background-8: the chosen voice must allow honest pushback — a direct
         //    tone is capable of firmness WITHOUT drifting into random hostility.
+        //    P22: the length clause is derived from the EFFECTIVE LENGTH dial —
+        //    detailed/OFF emit no length rule (the dial was a documented lie:
+        //    "OFF = omitted from the prompt" while this clause still constrained
+        //    length); very-short tightens to one sentence; short/unspecified is
+        //    the legacy clause, byte-identical.
+        String lengthClause;
+        switch (lengthLevel) {
+            case 0:
+                lengthClause = " usually one short sentence unless the context clearly needs more;";
+                break;
+            case 2:
+            case 3:   // detailed / OFF — no length rule in the hard boundaries
+                lengthClause = "";
+                break;
+            default:  // 1 or unspecified (-1): legacy bytes
+                lengthClause = " usually 1–3 short sentences unless the context clearly needs more;";
+                break;
+        }
         sb.append("\n\nRules: reply in ").append(owner)
-          .append("'s voice; usually 1–3 short sentences unless the context clearly needs more;")
+          .append("'s voice;").append(lengthClause)
           .append(" when the honest reply is to disagree, correct ").append(contact.displayName)
           .append(" or say no, say it plainly and give the real reason — firm is fine,")
           .append(" hostile or insulting never;")

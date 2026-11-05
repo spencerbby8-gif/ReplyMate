@@ -578,6 +578,17 @@ public final class ContactEditActivity extends Activity {
         this.learningStats.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 4));
         this.learningContent.addView(this.learningStats);
 
+        /* P22 §2: user-provided writing samples — messages the owner actually
+         *  wrote, pasted deliberately as explicit gold evidence for the style
+         *  profile (works even before any draft has been approved). */
+        final LinearLayout samples = Ui.row(this, "Writing samples",
+            "messages you wrote yourself — tap to add one");
+        samples.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showAddSampleDialog(learning); }
+        });
+        this.learningContent.addView(samples);
+        this.learningContent.addView(Ui.divider(this));
+
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(0);
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-2, -2);
@@ -588,6 +599,9 @@ public final class ContactEditActivity extends Activity {
         buttons.addView(reset, blp);
         Button export = Ui.btn(this, "Export (copy)");
         buttons.addView(export, new LinearLayout.LayoutParams(blp));
+        final Button clearSamples = Ui.btn(this, "Clear samples");
+        clearSamples.setTextColor(Ui.RED);     // destructive — visually distinct
+        buttons.addView(clearSamples, new LinearLayout.LayoutParams(blp));
         this.learningContent.addView(buttons);
 
         reset.setOnClickListener(new View.OnClickListener() {
@@ -610,12 +624,53 @@ public final class ContactEditActivity extends Activity {
                     "Learning data copied to clipboard (stays on this phone)", 1).show();
             }
         });
+        clearSamples.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                learning.clearSamples(ContactEditActivity.this.contactId);
+                Toast.makeText(ContactEditActivity.this,
+                    "Writing samples cleared for this contact", 0).show();
+                refreshLearningStats();
+            }
+        });
         refreshLearningState();
     }
 
     /** Gate-driven learning panel state: contact-level privacy flags (private mode,
      *  memory off) close the gate no matter what the switches below say — say so
      *  honestly and hide the controls; otherwise show controls + live stats. */
+    /** P22 §2: paste/type a message the owner actually wrote — explicit style
+     *  evidence, local-only, capped + deduped by LearningService. */
+    private void showAddSampleDialog(
+            final com.replymate.core.learning.LearningService learning) {
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setMinLines(2);
+        input.setHint("e.g. omoo i don tire for today abeg");
+        int pad = Ui.dp(this, 16);
+        input.setPadding(pad, Ui.dp(this, 8), pad, Ui.dp(this, 8));
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Add a writing sample")
+            .setMessage("Paste or type a message YOU sent in a chat like this one."
+                + " ReplyMate learns your real style from these + the replies you"
+                + " approve. Max 500 characters; up to "
+                + com.replymate.core.learning.LearningService.MAX_SAMPLES
+                + " saved per contact. Never leaves this phone.")
+            .setView(input)
+            .setPositiveButton("Save", new android.content.DialogInterface.OnClickListener() {
+                @Override public void onClick(android.content.DialogInterface d, int w) {
+                    String err = learning.addSample(ContactEditActivity.this.existing,
+                        input.getText().toString());
+                    Toast.makeText(ContactEditActivity.this,
+                        err == null
+                            ? "Sample saved — it will shape future drafts"
+                            : err,
+                        err == null ? 0 : 1).show();
+                    refreshLearningStats();
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
     private void refreshLearningState() {
         if (this.learningGateNote == null || this.learningContent == null) return;
         if (this.existing.privateMode) {
@@ -660,8 +715,15 @@ public final class ContactEditActivity extends Activity {
         sb.append(" · edited ").append(k.edited)
             .append(" · regenerated ").append(k.regenerated)
             .append(" · rejected ").append(k.rejected);
+        // P22 §2: the review surface must show user-provided samples too.
+        int sampleCount = learning.samplesFor(this.contactId).size();
+        sb.append("\nWriting samples: ").append(sampleCount).append(" saved")
+            .append(sampleCount == 0
+                ? " — tap “Writing samples” above to teach your real style"
+                : " of " + com.replymate.core.learning.LearningService.MAX_SAMPLES
+                    + " max — explicit examples of your own messages");
         if (k.manualTotal() > 0) {
-            sb.append("\\nManual sends (typed in the app yourself): ")
+            sb.append("\nManual sends (typed in the app yourself): ")
               .append(k.manualMatched).append(" matched a draft word-for-word · ")
               .append(k.manualCorrected).append(" corrected one");
         }

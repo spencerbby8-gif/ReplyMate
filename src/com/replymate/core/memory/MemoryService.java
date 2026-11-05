@@ -210,7 +210,7 @@ public final class MemoryService {
         List<String> newLines = new ArrayList<String>(base.lines);
         for (String l : lines) newLines.add("- " + l);
         newWhy.add("learned style applied (" + lines.size()
-            + " rule(s) from your approved replies)");
+            + " rule(s) derived from your own messages — samples and approved replies)");
         return new Recall(newLines, newWhy, base.summaryText, base.summaryMeta,
             base.facts, lines, base.retrieved);
     }
@@ -219,17 +219,21 @@ public final class MemoryService {
      *  appears in natural text). */
     private static final String TAG_SEP = "";
 
-    /** Cached tagged derivation: [control, line] pairs per contact. */
+    /** Cached tagged derivation: [control, line] pairs per contact. P22: the
+     *  v3 head is "h3:<count>:<hash>" — content-hashed, so editing samples (or
+     *  approved evidence) WITHOUT changing the count still re-derives honestly. */
     private List<String[]> learnedStyleTagged(Contact c, List<String> approvedTexts) {
         if (!openFor(c)) return Collections.emptyList();
-        int approved = approvedTexts == null ? 0
-            : Math.min(approvedTexts.size(), StyleProfiler.MAX_TEXTS);
+        List<String> capped = approvedTexts == null
+            ? Collections.<String>emptyList()
+            : approvedTexts.subList(0, Math.min(approvedTexts.size(), StyleProfiler.MAX_TEXTS));
+        String headTag = "h3:" + capped.size() + ":" + capped.hashCode();
         String key = styleKey(c.id);
         String cached = kv.get(key, "");
         if (!cached.isEmpty()) {
             int nl = cached.indexOf('\n');
             String head = nl < 0 ? cached : cached.substring(0, nl);
-            if (String.valueOf(approved).equals(head)) {
+            if (headTag.equals(head)) {
                 List<String[]> out = new ArrayList<String[]>();
                 if (nl > 0) {
                     for (String l : cached.substring(nl + 1).split("\n")) {
@@ -246,7 +250,7 @@ public final class MemoryService {
         }
         List<StyleProfiler.Derived> derived = StyleProfiler.derive(approvedTexts);
         List<String[]> out = new ArrayList<String[]>();
-        StringBuilder cache = new StringBuilder(String.valueOf(approved));
+        StringBuilder cache = new StringBuilder(headTag);
         for (StyleProfiler.Derived d : derived) {
             out.add(new String[] {d.control, d.line});
             cache.append('\n').append(d.control).append(TAG_SEP)
@@ -257,8 +261,8 @@ public final class MemoryService {
     }
 
     /** Cached deterministic StyleProfiler derivation for one contact.
-     *  kv value (v2): 1st line = approved-count; rest = "control␟line" (control may
-     *  be empty). Public contract stays untagged lines. */
+     *  kv value (v3): 1st line = "h3:<count>:<content-hash>"; rest = "control␟line"
+     *  (control may be empty). Public contract stays untagged lines. */
     public List<String> learnedStyleLines(Contact c, List<String> approvedTexts) {
         List<String> out = new ArrayList<String>();
         for (String[] tl : learnedStyleTagged(c, approvedTexts)) out.add(tl[1]);
@@ -266,9 +270,12 @@ public final class MemoryService {
     }
 
     /** kv cache key for a contact's learned-style layer (isolation by key).
-     *  v2 adds control tags for the explicit-vs-learned precedence rule. */
+     *  v2 added control tags for the explicit-vs-learned precedence rule.
+     *  P22 v3: evidence = owner writing samples + approved replies, the head is
+     *  content-hashed, and the derived wording is provenance-neutral — the v2
+     *  cache must not resurrect the old "approved replies" bytes. */
     public static String styleKey(long contactId) {
-        return "style." + contactId + ".approved.v2";
+        return "style." + contactId + ".approved.v3";
     }
 
     /* ---------------------------------------------------------------- summaries */

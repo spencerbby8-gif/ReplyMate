@@ -33,6 +33,66 @@ public final class LearningService {
         this.clock = clock;
     }
 
+    /* ------------------------------------------- writing samples (P22 §2)
+     *  Owner directive: the personal-writing profile must also learn from
+     *  USER-PROVIDED SAMPLES — messages the owner wrote themselves, pasted in
+     *  deliberately. They are explicit gold evidence: stored locally in kv
+     *  (JSON array per contact, bounded + deduped), read by the style profiler
+     *  alongside approved-reply texts. The SAME gate as every other learning
+     *  write applies (private mode / memory off / learning off / paused ⇒
+     *  refused with a human-readable reason). clearSamples + reset both wipe. */
+
+    public static final int MAX_SAMPLES = 8;
+    public static final int MAX_SAMPLE_CHARS = 500;
+
+    private static String samplesKey(long contactId) {
+        return "learn." + contactId + ".samples";
+    }
+
+    /** The owner's saved writing samples for one contact (oldest-first). */
+    public java.util.List<String> samplesFor(long contactId) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        String raw = kv.get(samplesKey(contactId), "");
+        if (raw == null || raw.isEmpty()) return out;
+        try {
+            JsonArr arr = com.replymate.core.json.Json.parseArr(raw);
+            for (int i = 0; i < arr.size(); i++) {
+                String s = arr.str(i);
+                if (s != null && !s.trim().isEmpty()) out.add(s);
+            }
+        } catch (RuntimeException corrupted) {
+            kv.delete(samplesKey(contactId));      // never choke generation on bad kv
+        }
+        return out;
+    }
+
+    /** @return null on success, otherwise the human-readable refusal reason. */
+    public String addSample(com.replymate.core.model.Contact contact, String text) {
+        if (!openFor(contact)) {
+            return "Learning is off for this contact (private mode, memory off,"
+                + " or the learning switch) — samples would never be used.";
+        }
+        String t = text == null ? "" : text.trim();
+        if (t.isEmpty()) return "Type or paste a message you wrote first.";
+        if (t.length() > MAX_SAMPLE_CHARS) {
+            return "Keep each sample under " + MAX_SAMPLE_CHARS + " characters.";
+        }
+        java.util.List<String> cur = samplesFor(contact.id);
+        if (cur.contains(t)) return "That sample is already saved.";
+        if (cur.size() >= MAX_SAMPLES) {
+            return "Samples are full (" + MAX_SAMPLES + ") — clear samples to add new ones.";
+        }
+        JsonArr arr = JsonArr.create();
+        for (String s : cur) arr.add(s);
+        arr.add(t);
+        kv.put(samplesKey(contact.id), arr.toJson());
+        return null;
+    }
+
+    public void clearSamples(long contactId) {
+        kv.delete(samplesKey(contactId));
+    }
+
     /* --------------------------------------------------------------- gating */
 
     public boolean isOff(long contactId) {
@@ -90,9 +150,12 @@ public final class LearningService {
 
     /* ------------------------------------------------------------ controls */
 
-    /** Learning "reset": history gone; switches stay as the user left them. */
+    /** Learning "reset": history AND provided samples gone; switches stay as
+     *  the user left them. (P22: samples are learned data — reset clears them
+     *  too, exactly what "reset what has been learned" promises.) */
     public void reset(long contactId) {
         store.deleteForContact(contactId);
+        clearSamples(contactId);
     }
 
     /** LOCAL export (clipboard/share): signals + style settings. Never leaves device

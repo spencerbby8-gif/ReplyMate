@@ -231,6 +231,35 @@ public final class AssistantNotifier {
         if (nm != null) nm.cancel(AssistantPlanner.notifTag(contactId), NOTIF_ID);
     }
 
+    /** P22 device-fix (owner report: "clicked Regenerate on the banner, it didn't
+     *  work"): the tap must give IMMEDIATE visible proof it landed — the same card
+     *  (stable tag + id) turns into a silent, unswipeable "working" state while
+     *  the paid call runs. A slow network can never again look like a dead button.
+     *  Success replaces this card via the normal postWithLabels path; failure
+     *  replaces it via settled() with the honest reason. */
+    public static void working(Context ctx, long contactId, String name) {
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        String line = "Working on a fresh take"
+            + (name == null || name.isEmpty() ? "" : " for " + name)
+            + " — your current draft stays put until the new one lands.";
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26
+            ? new Notification.Builder(ctx, CHANNEL_ID)
+            : new Notification.Builder(ctx);
+        brand(ctx, b)
+            .setContentTitle("Regenerating…")
+            .setContentText(line)
+            .setStyle(new Notification.BigTextStyle().bigText(line))
+            .setContentIntent(openPi(ctx, contactId))
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setShowWhen(false);
+        b.addAction(new Notification.Action.Builder(null, "Open conversation",
+            openPi(ctx, contactId)).build());
+        nm.notify(AssistantPlanner.notifTag(contactId), NOTIF_ID, b.build());
+    }
+
     /** One identity for every assistant card: ReplyMate glyph + accent + msg class. */
     private static Notification.Builder brand(Context ctx, Notification.Builder b) {
         b.setSmallIcon(R.drawable.ic_stat_replymate)

@@ -257,9 +257,23 @@ public final class AssistantRunner {
      *  is marked handled so the catch-up sweep stays quiet for the same burst. */
     private static void handleEngagementSkip(final AppContainer c, final long contactId,
                                              final String who, final String incomingHash,
-                                             final String verdictReason) {
+                                             final String verdictReason, boolean force) {
         String tag = AssistantPlanner.notifTag(contactId);
         com.replymate.core.usecase.ConversationStateService svc = c.conversationStates();
+        // P22 device-fix: silence stays the AUTO-flow default — but a MANUAL
+        // Regenerate tap on a group card resolves the working card to an honest
+        // verdict instead of looking dead.
+        if (force) {
+            boolean wait = verdictReason.startsWith("WAIT");
+            AssistantNotifier.settled(c.app(), contactId,
+                wait ? "Regenerate queued" : "Nothing to answer",
+                wait
+                    ? "The group read says the chat is still mid-flow — one honest"
+                        + " re-check runs shortly; your last draft stays put."
+                    : "The group read says this message isn't directed at you —"
+                        + " staying quiet is the call. Tap again if the room moved on.",
+                true);
+        }
         if (verdictReason.startsWith("WAIT")) {
             if (svc != null && !incomingHash.equals(svc.waitedFor(contactId))) {
                 svc.markWaited(contactId, incomingHash);
@@ -381,7 +395,8 @@ public final class AssistantRunner {
             if (r != null && r.error != null
                     && r.error.startsWith(DraftService.ENGAGEMENT_SKIP_PREFIX)) {
                 handleEngagementSkip(c, contactId, who, incomingHash,
-                    r.error.substring(DraftService.ENGAGEMENT_SKIP_PREFIX.length()));
+                    r.error.substring(DraftService.ENGAGEMENT_SKIP_PREFIX.length()),
+                    force);
                 return;
             }
             if (r == null || !r.ok || r.value == null || r.value.drafts.isEmpty()) {
@@ -389,6 +404,15 @@ public final class AssistantRunner {
                 AssistantDiag.record(c, contactId, who, tag, "",
                     AssistantEvent.Stage.GENERATE, reason,
                     "nothing generated, no alert posted", fixFor(reason));
+                // P22 device-fix: a MANUAL Regenerate must never fail silently —
+                // the working card resolves to an honest verdict, draft preserved.
+                if (force) {
+                    AssistantNotifier.settled(c.app(), contactId,
+                        "Couldn't regenerate",
+                        reason
+                            + " — your previous draft is preserved in the conversation.",
+                        true);
+                }
                 return;
             }
             Draft d = r.value.drafts.get(0);

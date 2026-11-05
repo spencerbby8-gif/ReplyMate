@@ -125,7 +125,8 @@ public final class LearningPrecedenceTest {
     }
 
     @Test public void learnedStyleCacheIsVersionedV2WithControlTags() {
-        assertTrue(MemoryService.styleKey(7).endsWith(".v2"));
+        assertTrue("P22: v3 = samples-aware evidence + hashed head + neutral wording",
+            MemoryService.styleKey(7).endsWith(".v3"));
         Contact c = Fakes.contact(7, "Uche");
         MemoryService mem = new MemoryService(
             new Fakes.MemoryStoreFake(), new Fakes.MessageStoreFake(), kv,

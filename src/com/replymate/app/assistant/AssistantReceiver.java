@@ -79,6 +79,9 @@ public final class AssistantReceiver extends BroadcastReceiver {
             @Override public void run() {
                 try {
                     if (ACTION_REGEN.equals(action)) {
+                        // P22 device-fix: visible proof the tap landed, IMMEDIATELY —
+                        // owner report: on a slow network the silent card looked dead.
+                        AssistantNotifier.working(ctx, contactId, name);
                         // P-background-8 learning: the Regenerate button = "another take".
                         Contact contact = c.contacts().get(contactId);
                         AssistantLearning.onRegenerate(c.learningService(), contact);

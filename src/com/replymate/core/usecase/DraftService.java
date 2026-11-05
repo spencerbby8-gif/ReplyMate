@@ -270,7 +270,7 @@ public final class DraftService {
                 }
             }
             mem = memory.withLearnedStyle(memory.recall(c, thread), c,
-                approvedTextsFor(contactId), explicitControls);
+                styleEvidenceFor(contactId), explicitControls);
             why.addAll(mem.why);
             if (!c.memoryEnabled) {
                 why.add("memory disabled for this contact — no summary, facts"
@@ -384,6 +384,8 @@ public final class DraftService {
             profiles.extraFiltered(),
             mem == null ? null : mem.lines);
         bundle.understanding = understanding;
+        // P22: the hard Rules length clause follows the EFFECTIVE LENGTH dial.
+        bundle.lengthLevel = effectiveDialLevel(contactId, "length");
         // P-intelligence-16b: ride the (successful) group engagement evaluation —
         // topic/participants/target situation lines and the exact reply target.
         if (convEval != null) {
@@ -702,7 +704,7 @@ public final class DraftService {
                 }
             }
             mem = memory.withLearnedStyle(memory.recall(c, thread), c,
-                approvedTextsFor(contactId), explicitControls);
+                styleEvidenceFor(contactId), explicitControls);
             why.addAll(mem.why);
             if (!c.memoryEnabled) {
                 why.add("memory disabled for this contact — no summary, facts"
@@ -758,6 +760,8 @@ public final class DraftService {
             mem == null ? null : mem.lines);
         bundle.composeKind = kind;
         bundle.followUpAnchorOverride = followUpAnchorOverride;
+        // P22: hard Rules length clause follows the effective LENGTH dial here too.
+        bundle.lengthLevel = effectiveDialLevel(c.id, "length");
 
         com.replymate.core.live.LiveContext.Snapshot live = liveFor(thread);
         bundle.liveLine = live.promptLine;
@@ -1134,6 +1138,20 @@ public final class DraftService {
         return removed;
     }
 
+    /** P22: the effective numeric level of one voice dial for a contact —
+     *  contact override beats global, absent/invalid ⇒ -1 (control default).
+     *  Same precedence as planLengthLabel; used to keep the hard generation
+     *  Rules consistent with the dial (PromptBundle.lengthLevel). */
+    private int effectiveDialLevel(long contactId, String key) {
+        if (styleService == null) return -1;
+        Integer cl = com.replymate.core.style.StyleSettings.level(
+            styleService.contactRows(contactId), key);
+        if (cl != null) return cl.intValue();
+        Integer gl = com.replymate.core.style.StyleSettings.level(
+            styleService.globalRows(), key);
+        return gl == null ? -1 : gl.intValue();
+    }
+
     /** The most recent APPROVED reply texts for one contact (M4 evidence): drafts
      *  the owner copied as-is or edited-then-copied. Newest-first, capped. */
     /** P-intelligence-5: the effective Reply-length word for the planner —
@@ -1169,6 +1187,18 @@ public final class DraftService {
         }
         return com.replymate.core.live.LiveContext.build(
             clock.now(), java.util.TimeZone.getDefault(), enabled, incoming);
+    }
+
+    /** P22 §2: the style profiler's evidence for one contact = the owner's
+     *  PROVIDED writing samples first (explicit gold — the owner typed them as
+     *  "this is how I write"), then the most recent approved reply texts. */
+    private java.util.List<String> styleEvidenceFor(long contactId) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (learningService != null) {
+            out.addAll(learningService.samplesFor(contactId));
+        }
+        out.addAll(approvedTextsFor(contactId));
+        return out;
     }
 
     private java.util.List<String> approvedTextsFor(long contactId) {
@@ -1276,7 +1306,71 @@ public final class DraftService {
      *  effective voice: overrides, custom prompt, gated learned hints) over a fixed
      *  sample thread. Read-only: NO drafts are written and no messages are stored.
      *  The call is still metered in usage — previews are real AI calls. */
+    /** P22: the live-preview sample conversations — short, realistic texting
+     *  situations covering the everyday spread (banter, planning, a direct
+     *  question, a sensitive check-in). Every scenario is a genuine back-and-
+     *  forth (owner's own lines included) ending on an incoming message, so the
+     *  preview exercises the same thread-mapping/burst path as a real draft. */
+    private static final String[][] SCENARIOS = {
+        // 0 — the legacy sample (kept byte-identical as the first scenario)
+        { "hey, you still coming through on Saturday?" },
+        // 1 — banter / teasing
+        { "in:you really wore crocs to the mall?? 💀",
+          "out:they're comfortable, leave me alone",
+          "in:comfortable is crazy. your girl saw you btw" },
+        // 2 — quick question with context
+        { "out:just got home, today was long af",
+          "in:lol. did that document ever get sent to Mr Ademola?" },
+        // 3 — sensitive check-in
+        { "out:sorry i've been quiet, work has been a lot",
+          "in:everything ok though? you've not been yourself this week" },
+    };
+
+    private static Message scenarioLine(long contactId, String coded, long at) {
+        Message m = new Message();
+        m.contactId = contactId;
+        boolean out = coded.startsWith("out:");
+        m.direction = out ? Direction.OUTGOING : Direction.INCOMING;
+        m.body = out || coded.startsWith("in:") ? coded.substring(3) : coded;
+        m.sentAt = at;
+        return m;
+    }
+
+    private List<Message> sampleScenario(long contactId, int scenario) {
+        String[] lines = SCENARIOS[Math.abs(scenario) % SCENARIOS.length];
+        List<Message> sample = new ArrayList<Message>();
+        long t = clock.now() - lines.length * 60000L;
+        for (String coded : lines) {
+            sample.add(scenarioLine(contactId, coded, t));
+            t += 60000L;
+        }
+        return sample;
+    }
+
+    /** P22: how many sample conversations the live preview cycles through. */
+    public static int scenarioCount() { return SCENARIOS.length; }
+
+    /** P22: human-readable rendering of a preview scenario for the UI. */
+    public static String scenarioLabel(int scenario) {
+        String[] lines = SCENARIOS[Math.abs(scenario) % SCENARIOS.length];
+        StringBuilder sb = new StringBuilder();
+        for (String coded : lines) {
+            boolean out = coded.startsWith("out:");
+            String body = out || coded.startsWith("in:") ? coded.substring(3) : coded;
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(out ? "you: " : "them: ").append(body);
+        }
+        return sb.toString();
+    }
+
+    /** P22: live voice previews run over REALISTIC sample conversations, not a
+     *  single canned line. Index cycles through scenarioCount(); callers that
+     *  predate this (contact edit page) get scenario 0 — the legacy sample. */
     public Result<ChatReply> previewVoice(long contactId) {
+        return previewVoice(contactId, 0);
+    }
+
+    public Result<ChatReply> previewVoice(long contactId, int scenario) {
         Contact c;
         if (contactId <= 0) {
             c = new Contact();                    // synthetic partner for global previews
@@ -1293,13 +1387,7 @@ public final class DraftService {
             return Result.err("Set up an AI provider first (Settings → AI providers) — add your API key.");
         }
 
-        List<Message> sample = new ArrayList<Message>();
-        Message in = new Message();
-        in.contactId = c.id;
-        in.direction = Direction.INCOMING;
-        in.body = "hey, you still coming through on Saturday?";
-        in.sentAt = clock.now();
-        sample.add(in);
+        List<Message> sample = sampleScenario(c.id, scenario);
 
         String styleRules = "";
         StyleProfile global = styles.get(Scope.GLOBAL, null);
@@ -1312,7 +1400,7 @@ public final class DraftService {
         com.replymate.core.memory.MemoryService.Recall mem = null;
         if (memory != null && c.id > 0) {
             mem = memory.withLearnedStyle(memory.recall(c, sample), c,
-                approvedTextsFor(c.id));
+                styleEvidenceFor(c.id));
         }
         PromptBundle previewBundle = new PromptBundle(
             profiles.loadFiltered(), c, styleRules, sample,
@@ -1324,6 +1412,9 @@ public final class DraftService {
         // background default is one — see PromptBundle.candidates)
         previewBundle.candidates =
             com.replymate.core.prompt.PromptBuilder.PREVIEW_VARIANTS;
+        // P22: previews mirror the REAL generation contract — the hard Rules
+        // length clause follows the effective LENGTH dial here too.
+        previewBundle.lengthLevel = effectiveDialLevel(c.id, "length");
         // previews mirror the real prompt — the live-context line rides here too.
         previewBundle.liveLine = liveFor(sample).promptLine;
         // …and so does the planning layer (identical depth semantics).

@@ -54,7 +54,7 @@ public final class PromptBuilder {
         }
         String system = SystemComposer.compose(bundle.profile, bundle.contact, bundle.styleRules,
             bundle.voiceLine, bundle.voiceExtra, bundle.aboutExtra, bundle.memoryLines,
-            situationLines);
+            situationLines, bundle.lengthLevel);
         List<Turn> turns = ThreadMapper.map(bundle.thread, bundle.contact.displayName);
         // P-context-honesty: the task turn quotes the exact message being answered and
         // names the app, so the model can never reply from the contact name alone.

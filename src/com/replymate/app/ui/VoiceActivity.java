@@ -37,6 +37,7 @@ public final class VoiceActivity extends Activity {
     private Button previewBtn;
     private Button reset;
     private boolean previewBusy;
+    private int previewScenario;         // P22: cycles the sample conversations
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -125,7 +126,8 @@ public final class VoiceActivity extends Activity {
         com.replymate.app.platform.Tasks.call(
             new com.replymate.app.platform.Tasks.Job<com.replymate.core.util.Result<com.replymate.core.ai.ChatReply>>() {
                 @Override public com.replymate.core.util.Result<com.replymate.core.ai.ChatReply> run() {
-                    return c.draftService().previewVoice(-1);   // -1 = global voice only
+                    // -1 = global voice only; P22: realistic rotating sample chats
+                    return c.draftService().previewVoice(-1, previewScenario);
                 }
             },
             new com.replymate.app.platform.Tasks.Done<com.replymate.core.util.Result<com.replymate.core.ai.ChatReply>>() {
@@ -138,13 +140,22 @@ public final class VoiceActivity extends Activity {
                         previewOut.setTextColor(Ui.RED);
                         return;
                     }
-                    StringBuilder sb = new StringBuilder("Sample chat — “you still coming on Saturday?”\nYour voice says:\n");
+                    StringBuilder sb = new StringBuilder("Sample chat:\n")
+                        .append(com.replymate.core.usecase.DraftService
+                            .scenarioLabel(previewScenario))
+                        .append("\n\nYour voice says:\n");
                     int n = 1;
                     for (String v : r.value.variants) {
                         sb.append(n++).append(") ").append(v).append('\n');
                     }
                     previewOut.setText(sb.toString().trim());
                     previewOut.setTextColor(Ui.GREEN);
+                    // P22: next tap previews the NEXT realistic sample conversation.
+                    previewScenario = (previewScenario + 1)
+                        % com.replymate.core.usecase.DraftService.scenarioCount();
+                    previewBtn.setText("Preview replies — next sample chat ("
+                        + (previewScenario + 1) + " of "
+                        + com.replymate.core.usecase.DraftService.scenarioCount() + ")");
                 }
             });
     }
