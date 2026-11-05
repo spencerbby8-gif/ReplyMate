@@ -1,0 +1,278 @@
+name: emulator-listener
+
+# ReplyMate Android-emulator listener harness. HARNESS ONLY:
+#  * zero product-code changes (engine flag defaults off: the release path is
+#    untouched; RM_DEBUG_MODE is set ONLY here and only stamps aapt2's output
+#    binary so the harness can run-as/pull diagnostics from the test APK)
+#  * isolated TEST signing: a fresh ephemeral key generated per run; the
+#    production keystore/secrets are never referenced (asserted in logs)
+#  * runs automatically for ANY PR changing these harness paths, and manually
+#    via workflow_dispatch once present on the default branch
+#
+# Runs the real ReplyMate NotificationListenerService on a stock AOSP Android
+# emulator against REAL NotificationManager notifications posted by PingPoster
+# (installed as com.whatsapp / com.discord on a clean emulator with neither app
+# present). All notification SHAPES are synthetic and labelled as such: this
+# harness produces genuine-platform-delivery + real-ReplyMate-pipeline evidence.
+# It is NOT genuine app-integration evidence and proves NOTHING about
+# Oppo/ColorOS (which needs the owner's physical device).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/emulator-listener.yml"
+      - "tools/pingposter/**"
+      - "tools/emulator/**"
+      - "engine/build.sh"
+  # harness-branch pushes run the harness directly (owner directive P22-emu:
+  # "do not stop at 'no local emulator'"). The app-under-test on this route is
+  # tools/emulator/CANDIDATE_REF (currently arena/p22-intelligence).
+  push:
+    branches: [arena/emu-listener-harness]
+    paths:
+      - ".github/workflows/emulator-listener.yml"
+      - "tools/pingposter/**"
+      - "tools/emulator/**"
+      - "engine/build.sh"
+  workflow_dispatch:
+    inputs:
+      api_level:
+        description: "Android API level for the emulator"
+        default: "34"
+        required: false
+      app_ref:
+        description: "Optional git ref to build the ReplyMate APP from (candidate validation, e.g. a fix branch). Harness tools/workflows always come from the branch this workflow runs on; only the app-under-test swaps. Default '': build this branch's app."
+        default: ""
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emulator-listener-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  listener-scenarios:
+    runs-on: ubuntu-latest
+    # 45 was real-world insufficient (run 41345057505 hit it mid-S6 once the
+    # WAL snapshot + verified grant ladder joined the loop); 90 leaves double
+    # headroom even with every scenario red.
+    timeout-minutes: 90
+    # harness-only ephemeral signing key location. A plain runner-local path:
+    # the `runner` context is NOT available at any env scope per GitHub's
+    # context-availability rules (validated with actionlint) — nothing else
+    # on the runner uses this directory, so isolation is still total and
+    # production secrets stay unreferenced.
+    env:
+      REPLYMATE_SECRETS: /tmp/replymate-harness-keys
+      # ubuntu runners ship a READ-ONLY preinstalled Android SDK at $ANDROID_HOME;
+      # the engine would die trying to chmod/unzip the PINNED toolchain into it.
+      # (Same fix release.yml already uses.) Pin our own writable dir.
+      REPLYMATE_SDK: ${{ github.workspace }}/.engine-sdk
+    steps:
+      - name: "Checkout (harness branch — tools + workflow)"
+        uses: actions/checkout@v4
+
+      # P22-emu directive: a dispatch input can pin the candidate, but the
+      # push/cron route needs a default — tools/emulator/CANDIDATE_FILE selects
+      # the app-under-test ref. Normalized ONCE here; every later step reads
+      # env.APP_REF / env.APP_DIR so the route is never ambiguous.
+      - name: Normalize app-under-test ref
+        run: |
+          set -e
+          REF="${{ inputs.app_ref }}"
+          if [ -z "$REF" ] && [ -f tools/emulator/CANDIDATE_REF ]; then
+            REF="$(cat tools/emulator/CANDIDATE_REF)"
+            echo "app-under-test from tools/emulator/CANDIDATE_REF: $REF"
+          fi
+          echo "APP_REF=$REF" >> "$GITHUB_ENV"
+          if [ -n "$REF" ]; then
+            echo "APP_DIR=appsrc" >> "$GITHUB_ENV"
+          else
+            echo "APP_DIR=." >> "$GITHUB_ENV"
+          fi
+          echo "app-under-test: REF='${REF}' (dir '$([ -n "$REF" ] && echo appsrc || echo .)')"
+
+      - name: Checkout app source (only when validating a candidate ref)
+        if: ${{ env.APP_REF != '' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.APP_REF }}
+          path: appsrc
+
+      # Owner rule: the existing JVM gate runs UNCHANGED before any emulator
+      # scenario, against the app actually under test.
+      - name: Set up JDK 17 (gate)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: JVM gate (run_tests.sh) on the app under test
+        run: |
+          set -e
+          APP_DIR="${{ env.APP_DIR }}"
+          echo "gating app source: $APP_DIR"
+          chmod +x "$APP_DIR/scripts/run_tests.sh" || true
+          ( cd "$APP_DIR" && bash scripts/run_tests.sh )
+
+      - name: Verify KVM availability (explicit — never silently degrade)
+        run: |
+          set -e
+          uname -r
+          if [ ! -e /dev/kvm ]; then
+            echo "FATAL: /dev/kvm ABSENT — this runner cannot hardware-accelerate the"
+            echo "emulator; refusing to pretend otherwise (owner rule: verify KVM first)."
+            exit 1
+          fi
+          ls -la /dev/kvm
+          echo "KVM: PRESENT"
+
+      - name: Build ReplyMate harness APK (ephemeral key + debug-mode)
+        run: |
+          set -e
+          APP_DIR="${{ env.APP_DIR }}"
+          echo "building app source: $APP_DIR"
+          if [ -n "${{ env.APP_REF }}" ]; then
+            # fix 18: the candidate's OWN engine/build.sh may predate
+            # RM_DEBUG_MODE support. PROVEN: run 41491780011 built
+            # arena/fix-listener-startup-anr with appsrc/engine/build.sh,
+            # which silently IGNORED RM_DEBUG_MODE=1 → the installed APK had
+            # flags=[HAS_CODE ALLOW_CLEAR_USER_DATA] (no DEBUGGABLE) → every
+            # run-as kv evidence check was blind for the whole 25-min run
+            # ('no such table: app_kv' everywhere was a PULL failure, not an
+            # app failure). Overlay the harness-side build.sh: its ONLY delta
+            # is the aapt2 --debug-mode stamp gated on RM_DEBUG_MODE (diffed
+            # into this log for audit, every run). CI workspace only; the
+            # candidate branch's bytes stay untouched.
+            echo "=== audit diff: candidate engine/build.sh → harness engine/build.sh ==="
+            diff "$APP_DIR/engine/build.sh" engine/build.sh || true
+            echo "=== overlaying harness build.sh onto the candidate tree (workspace-only) ==="
+            cp engine/build.sh "$APP_DIR/engine/build.sh"
+          fi
+          mkdir -p "$REPLYMATE_SECRETS"
+          chmod +x "$APP_DIR/engine/build.sh" "$APP_DIR"/scripts/*.sh || true
+          ( cd "$APP_DIR" && RM_DEBUG_MODE=1 VERSION_CODE=919 VERSION_NAME=1.7.2-emu-harness \
+            bash engine/build.sh )
+          APK="$APP_DIR/ReplyMate-1.7.2-emu-harness.apk"
+          BT="$(dirname "$(find .engine-sdk/build-tools -name apksigner | head -1)")"
+          HARNESS_SHA="$("$BT/apksigner" verify --print-certs "$APK" \
+            | sed -n 's/.*SHA-256 digest: //p' | head -1)"
+          echo "harness signing cert SHA-256: $HARNESS_SHA"
+          PROD="b15f2f37fce19b564683fe6b85725a9d3192df93181ef2f36286b5e21c6a85ed"
+          if [ "$HARNESS_SHA" = "$PROD" ]; then
+            echo "FATAL: harness build was signed with the PRODUCTION key — aborting."
+            exit 1
+          fi
+          echo "SIGNING ISOLATION OK: harness cert != production cert"
+          "$BT/aapt2" dump badging "$APK" | grep -E "^package|debuggable" || true
+          # fix 18 (build-side fail-fast): without the debuggable stamp every
+          # run-as kv evidence check is blind. aapt2 badging does not print
+          # the attribute — read the manifest xmltree directly.
+          DBG_LINE="$("$BT/aapt2" dump xmltree "$APK" --file AndroidManifest.xml 2>/dev/null \
+            | grep -i debuggable || true)"
+          echo "manifest debuggable attribute: ${DBG_LINE:-<absent>}"
+          # aapt2 xmltree renders FLAG true as "=true" (aapt v1 prints 0xffffffff)
+          # — accept both encodings (run 41499948914: stamp present as '=true'
+          # while a 0xffffffff-only matcher wrongly aborted the build).
+          if ! echo "$DBG_LINE" | grep -qE "(=true\b|0xffffffff)"; then
+            echo "FATAL: harness APK is NOT stamped android:debuggable=true —"
+            echo "RM_DEBUG_MODE plumbing broken; refusing to validate blind."
+            exit 1
+          fi
+          echo "DEBUGGABLE STAMP OK: run-as kv evidence channel is available"
+          mkdir -p evidence
+          cp "$APK" evidence/
+
+      - name: Build PingPoster (com.whatsapp + com.discord packages)
+        run: |
+          set -e
+          chmod +x tools/pingposter/build.sh
+          PP_PKG=com.whatsapp bash tools/pingposter/build.sh build/pingposter-com.whatsapp.apk
+          PP_PKG=com.discord  bash tools/pingposter/build.sh build/pingposter-com.discord.apk
+          cp build/pingposter-com.whatsapp.apk build/pingposter-com.discord.apk evidence/
+
+      - name: Boot emulator + run scenarios (API ${{ inputs.api_level || '34' }})
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api_level || '34' }}
+          target: default
+          arch: x86_64
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
+          script: |
+            set -e
+            # android-emulator-runner runs EVERY SCRIPT LINE via its own sh -c —
+            # variables never persist between lines (proven twice: runs
+            # 41488017578 / 41490180194 both show APP_DIR empty after an explicit
+            # assignment). The app path therefore goes INLINE per command,
+            # resolved at Actions-expression time.
+            chmod +x tools/emulator/run_scenarios.sh
+            adb install -r "${{ env.APP_DIR }}/ReplyMate-1.7.2-emu-harness.apk"
+            adb install -r build/pingposter-com.whatsapp.apk
+            adb install -r build/pingposter-com.discord.apk
+            mkdir -p evidence
+            RM_APP_REF="${{ env.APP_REF }}" bash tools/emulator/run_scenarios.sh "$PWD/evidence" 2>&1 | tee evidence/runner.log
+
+      # ---------------------------------------------------------------- UI
+      # P22-emu (owner directive): a SECOND, fresh emulator — API 30, the
+      # owner's OPPO A16K / Android 11 class — drives the REAL ReplyMate UI of
+      # the SAME candidate APK: onboarding, Settings tabs, all tone dials, live
+      # preview, writing samples, persistence across force-stop/relaunch, and
+      # the banner-Regenerate feedback fix (owner's physical-device report).
+      # Provider traffic goes over REAL TLS to a mock OpenAI-compatible server
+      # on the runner (10.0.2.2), with the harness CA trusted into the system
+      # store (writable-system + root; honestly SKIP-logged if the image
+      # refuses) — the captured request bodies are the on-device proof that
+      # changed settings reach the real generation pipeline. It is a genuine
+      # platform/UI/pipeline run; it is NOT genuine provider-quality evidence
+      # (the mock answers deterministically) and says so in results.md.
+      - name: Boot clean emulator #2 + run UI scenarios (API 30)
+        if: always()
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -writable-system
+          script: |
+            set +e
+            chmod +x tools/emulator/run_ui_scenarios.sh tools/emulator/ui_driver.py
+            adb install -r "${{ env.APP_DIR }}/ReplyMate-1.7.2-emu-harness.apk"
+            adb install -r build/pingposter-com.whatsapp.apk
+            adb install -r build/pingposter-com.discord.apk
+            RM_APP_REF="${{ env.APP_REF }}" bash tools/emulator/run_ui_scenarios.sh "$PWD/evidence"
+            echo "(per-line shells: the UI verdict is enforced fail-closed by the 'UI verdict gate' step reading evidence/ui/results.md)"
+
+      - name: Upload diagnostic artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-listener-evidence
+          path: evidence/
+          if-no-files-found: warn
+
+      # P22-emu: the job is RED when any UI scenario FAILED; SKIP lines are
+      # tolerated ONLY because each carries its explicit reason into results.md
+      # + the step log (owner rule: no silent gaps, no pretending).
+      - name: UI verdict gate
+        if: always()
+        run: |
+          set -e
+          if [ ! -f evidence/ui/results.md ]; then
+            echo "FATAL: evidence/ui/results.md missing — the UI suite never ran"
+            echo "(infrastructure failure, NOT a green result)"; exit 1
+          fi
+          echo "================ ui/results.md ================"
+          cat evidence/ui/results.md
+          echo "==============================================="
+          if grep -q "^FAIL" evidence/ui/results.md; then
+            echo "UI scenarios FAILED — see evidence above (artifact: emulator-listener-evidence/ui/)"
+            exit 1
+          fi
+          echo "UI verdict gate: no FAIL lines (SKIPs, if any, are reasoned above)"

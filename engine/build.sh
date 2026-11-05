@@ -109,6 +109,11 @@ log "1/6 aapt2 compile  (vc=$VERSION_CODE name=$VERSION_NAME)"
 log "2/6 aapt2 link (+R.java)"
 ASSETS=()
 [ -d "$ROOT/assets" ] && ASSETS=(-A "$ROOT/assets")
+# RM_DEBUG_MODE=1 (harness/emulator builds ONLY): aapt2 --debug-mode stamps
+# android:debuggable="true" into the OUTPUT binary — the manifest source file is
+# untouched, the release/CI path is unchanged, and production builds never set
+# this env. Needed solely so the emulator harness can `run-as` pull the app's
+# diagnostics kv (app_kv) as evidence. Never use it for a shipped build.
 "$AAPT2" link -o "$BUILD/unsigned.apk" \
   -I "$ANDROID_JAR" \
   --manifest "$ROOT/AndroidManifest.xml" \
@@ -116,7 +121,8 @@ ASSETS=()
   --java "$BUILD/gen" \
   "$BUILD/res.zip" \
   --min-sdk-version "$MIN_SDK" --target-sdk-version "$TARGET_SDK" \
-  --version-code "$VERSION_CODE" --version-name "$VERSION_NAME"
+  --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
+  ${RM_DEBUG_MODE:+--debug-mode}
 
 log "3/6 javac"
 find "$ROOT/src" -name '*.java' > "$BUILD/sources.txt"
