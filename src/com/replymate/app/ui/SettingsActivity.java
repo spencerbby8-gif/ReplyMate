@@ -728,12 +728,29 @@ public final class SettingsActivity extends Activity {
     /** P21-review: contact picker for the read-only prompt audit (drafts only —
      *  a contact without drafts has nothing to show). */
     private void pickPromptAuditContact() {
-        java.util.List<com.replymate.core.model.Contact> all = c.contacts().all();
-        final java.util.List<com.replymate.core.model.Contact> withDrafts =
-            new java.util.ArrayList<com.replymate.core.model.Contact>();
-        for (com.replymate.core.model.Contact ct : all) {
-            if (!c.drafts().byContact(ct.id, 1).isEmpty()) withDrafts.add(ct);
-        }
+        // P21-audit R3-2: contact+draft lookups are SQLite — never on main.
+        com.replymate.app.platform.Tasks.call(
+            new com.replymate.app.platform.Tasks.Job<java.util.List<com.replymate.core.model.Contact>>() {
+                @Override public java.util.List<com.replymate.core.model.Contact> run() {
+                    java.util.List<com.replymate.core.model.Contact> all = c.contacts().all();
+                    java.util.List<com.replymate.core.model.Contact> withDrafts =
+                        new java.util.ArrayList<com.replymate.core.model.Contact>();
+                    for (com.replymate.core.model.Contact ct : all) {
+                        if (!c.drafts().byContact(ct.id, 1).isEmpty()) withDrafts.add(ct);
+                    }
+                    return withDrafts;
+                }
+            },
+            new com.replymate.app.platform.Tasks.Done<java.util.List<com.replymate.core.model.Contact>>() {
+                @Override public void accept(java.util.List<com.replymate.core.model.Contact> withDrafts) {
+                    if (isFinishing()) return;
+                    showPromptAuditPicker(withDrafts);
+                }
+            });
+    }
+
+    private void showPromptAuditPicker(
+            final java.util.List<com.replymate.core.model.Contact> withDrafts) {
         if (withDrafts.isEmpty()) {
             Toast.makeText(this, "No drafts yet — a prompt audit appears after the first draft",
                 Toast.LENGTH_LONG).show();

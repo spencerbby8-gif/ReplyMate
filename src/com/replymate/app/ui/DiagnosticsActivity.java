@@ -14,6 +14,7 @@ import com.replymate.app.R;
 import com.replymate.app.ReplyMateApp;
 import com.replymate.app.di.AppContainer;
 import com.replymate.app.listener.ListenerStatus;
+import com.replymate.app.platform.Tasks;
 import com.replymate.core.listener.IngestCoordinator;
 import com.replymate.core.util.TimeFmt;
 import com.replymate.data.db.DbHealth;
@@ -60,12 +61,28 @@ public final class DiagnosticsActivity extends Activity {
         clp.bottomMargin = Ui.dp(this, 12);
         root.addView(copy, clp);
 
-        final TextView body = Ui.sub(this, "");
+        final TextView body = Ui.sub(this,
+            "computing live state (one moment)…\nThe report is assembled off the"
+            + " main thread — database reads and its write probe never run on the UI lane.");
         body.setTextIsSelectable(true);
         root.addView(body);
 
-        report = buildReport();
-        body.setText(report);
+        // P21-audit R3-1: the report runs DbHealth.check (a real SQLite WRITE
+        // probe) plus ~30 kv reads and the contact-name scan — none of that on
+        // the UI thread (owner's ANR evidence class). Copy stays disabled until
+        // the full redacted report exists.
+        copy.setEnabled(false);
+        final Button copyBtn = copy;
+        Tasks.call(new Tasks.Job<String>() {
+            @Override public String run() { return buildReport(); }
+        }, new Tasks.Done<String>() {
+            @Override public void accept(String text) {
+                if (isFinishing()) return;
+                report = text;
+                body.setText(text);
+                copyBtn.setEnabled(true);
+            }
+        });
 
         copy.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {

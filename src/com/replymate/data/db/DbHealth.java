@@ -50,7 +50,9 @@ public final class DbHealth {
 
     private DbHealth() { }
 
-    /** Full health check. Safe to call from the UI thread (fast, no network). */
+    /** Full health check. CONTAINS A REAL WRITE PROBE — call it off the UI
+     *  thread (P21-audit R3-1: the P-anr-startup evidence proved WAL writes on
+     *  the main thread can park in fsync; the old "safe on UI" claim was wrong). */
     public static Report check(DbHelper helper) {
         Report r = new Report();
         try {
